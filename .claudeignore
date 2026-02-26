@@ -1,0 +1,33 @@
+# Large data directories
+data/
+chembl_*/
+*.tar.gz
+*.gz
+
+# Build artifacts
+node_modules/
+dist/
+__pycache__/
+*.pyc
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Molecular files (large)
+*.pdb
+*.sdf
+*.mol2
+*.pdbqt
+
+# Environment secrets
+.env
+.env.local
+.env.production
+
+# Git internals
+.git/
