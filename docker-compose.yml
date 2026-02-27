@@ -25,6 +25,10 @@ services:
       - DATABASE_URL=sqlite:////data/bindx.db
       - DATA_DIR=/data
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # V9 Supabase
+      - DATABASE_V9_URL=${DATABASE_V9_URL:-}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -55,6 +59,10 @@ services:
       - SMTP_PASS=${SMTP_PASS:-}
       - FROM_EMAIL=${FROM_EMAIL:-noreply@bindx.app}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # V9 Supabase
+      - DATABASE_V9_URL=${DATABASE_V9_URL:-}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
       - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
       - GNINA_ENDPOINT_ID=${GNINA_ENDPOINT_ID:-weeeiy6z4jdsv3}
     depends_on:
