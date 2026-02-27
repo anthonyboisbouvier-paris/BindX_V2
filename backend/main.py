@@ -47,6 +47,14 @@ from models import (
 )
 from pipeline.structure import query_rcsb_pdb, fetch_structure_from_sequence
 
+# V9 routers
+from routers.v9 import health as v9_health_router
+from routers.v9 import projects as v9_projects_router
+from routers.v9 import campaigns as v9_campaigns_router
+from routers.v9 import phases as v9_phases_router
+from routers.v9 import runs as v9_runs_router
+from routers.v9 import molecules as v9_molecules_router
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -356,6 +364,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# V9 routers
+app.include_router(v9_health_router.router, prefix="/api/v9", tags=["v9"])
+app.include_router(v9_projects_router.router, prefix="/api/v9", tags=["v9-projects"])
+app.include_router(v9_campaigns_router.router, prefix="/api/v9", tags=["v9-campaigns"])
+app.include_router(v9_phases_router.router, prefix="/api/v9", tags=["v9-phases"])
+app.include_router(v9_runs_router.router, prefix="/api/v9", tags=["v9-runs"])
+app.include_router(v9_molecules_router.router, prefix="/api/v9", tags=["v9-molecules"])
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,7 @@ celery_app = Celery(
     "dockit",
     broker=REDIS_BROKER,
     backend=REDIS_BACKEND,
-    include=["tasks"],
+    include=["tasks", "tasks_v9"],
 )
 
 celery_app.conf.update(

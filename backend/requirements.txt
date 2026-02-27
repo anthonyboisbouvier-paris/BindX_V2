@@ -3,7 +3,8 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 celery[redis]==5.3.6
 redis==5.0.1
-sqlalchemy==2.0.23
+sqlalchemy[asyncio]==2.0.23
+asyncpg==0.29.0
 pydantic==2.5.2
 requests==2.31.0
 biopython==1.82
