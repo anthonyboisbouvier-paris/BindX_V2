@@ -698,7 +698,7 @@ GET /api/legacy/jobs/:id/results
 - Edge Functions pour micro-calculs
 - Knowledge Layer (MegaPharmaDB)
 - Intégration experimental results dans les phases
-- PharmacoDBDashboard (interface standalone actuelle retirée, fonctionnalité future via Knowledge Layer)
+- PharmacoDB (extrait en projet standalone, fonctionnalité future via Knowledge Layer)
 
 ---
 
