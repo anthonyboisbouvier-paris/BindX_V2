@@ -70,14 +70,6 @@ function IconFlask() {
   )
 }
 
-function IconDatabase() {
-  return (
-    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-        d="M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3M4 7v5c0 1.657 3.582 3 8 3s8-1.343 8-3V7M4 7v5m16-5v5M4 12v5c0 1.657 3.582 3 8 3s8-1.343 8-3v-5" />
-    </svg>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Phase status indicator
@@ -298,7 +290,6 @@ export default function SidebarLayout() {
 
         {/* Bottom links */}
         <div className="px-3 py-3 border-t border-white/10 space-y-0.5">
-          <BottomNavLink to="/pharmacodb" icon={<IconDatabase />} label="PharmacoDB" />
           <BottomNavLink to="/references" icon={<IconBook />} label="References" />
           <BottomNavLink to="/methodology" icon={<IconFlask />} label="Methodology" />
           <p className="text-white/20 text-[10px] px-3 pt-1.5 font-mono">BindX v9.0</p>

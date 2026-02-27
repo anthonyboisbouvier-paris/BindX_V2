@@ -1,71 +1,77 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { supabase } from '../lib/supabase'
 import apiClient from '../api'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [token, setToken] = useState(() => localStorage.getItem('dockit_token'))
+  const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Set up axios interceptor for auth header
+  // Axios interceptor: inject Supabase access_token as Bearer header
   useEffect(() => {
     const interceptorId = apiClient.interceptors.request.use((config) => {
-      const currentToken = localStorage.getItem('dockit_token')
-      if (currentToken) {
-        config.headers.Authorization = `Bearer ${currentToken}`
+      const token = session?.access_token
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`
       }
       return config
     })
     return () => apiClient.interceptors.request.eject(interceptorId)
-  }, [])
+  }, [session])
 
-  // Load user on mount if token exists
+  // Initialize session and listen for auth changes
   useEffect(() => {
-    if (token) {
-      apiClient.get('/auth/me')
-        .then(res => {
-          setUser(res.data)
-          setLoading(false)
-        })
-        .catch(() => {
-          // Token invalid/expired
-          localStorage.removeItem('dockit_token')
-          setToken(null)
-          setUser(null)
-          setLoading(false)
-        })
-    } else {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      setSession(initialSession)
+      setUser(initialSession?.user ?? null)
       setLoading(false)
-    }
-  }, [token])
+    })
+
+    // Subscribe to auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, newSession) => {
+        setSession(newSession)
+        setUser(newSession?.user ?? null)
+      }
+    )
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   const login = useCallback(async (email, password) => {
-    const res = await apiClient.post('/auth/login', { email, password })
-    const { user: userData, token: newToken } = res.data
-    localStorage.setItem('dockit_token', newToken)
-    setToken(newToken)
-    setUser(userData)
-    return userData
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) throw error
+    return data.user
   }, [])
 
-  const register = useCallback(async (email, username, password) => {
-    const res = await apiClient.post('/auth/register', { email, username, password })
-    const { user: userData, token: newToken } = res.data
-    localStorage.setItem('dockit_token', newToken)
-    setToken(newToken)
-    setUser(userData)
-    return userData
+  const register = useCallback(async (email, password, username) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { username } },
+    })
+    if (error) throw error
+    return data.user
   }, [])
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('dockit_token')
-    setToken(null)
-    setUser(null)
+  const logout = useCallback(async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) throw error
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{
+      user,
+      session,
+      loading,
+      login,
+      register,
+      logout,
+      isAuthenticated: !!session,
+    }}>
       {children}
     </AuthContext.Provider>
   )

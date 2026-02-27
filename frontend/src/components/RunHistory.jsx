@@ -167,12 +167,37 @@ const STATUS_CONFIG = {
     labelColor: 'text-gray-400',
     connectorColor: 'bg-gray-100',
   },
+  created: {
+    ring: 'ring-2 ring-amber-300',
+    bg: 'bg-amber-400',
+    icon: (
+      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+    label: 'Created',
+    labelColor: 'text-amber-500',
+    connectorColor: 'bg-amber-100',
+  },
+  cancelled: {
+    ring: 'ring-2 ring-gray-300',
+    bg: 'bg-gray-400',
+    icon: (
+      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+      </svg>
+    ),
+    label: 'Cancelled',
+    labelColor: 'text-gray-400',
+    connectorColor: 'bg-gray-100',
+  },
 }
 
 // ---------------------------------------------------------------------------
 // RunHistory — horizontal stepper timeline
 // ---------------------------------------------------------------------------
-export default function RunHistory({ runs = [] }) {
+export default function RunHistory({ runs = [], onCancel, onArchive }) {
   const [activeRunId, setActiveRunId] = useState(null)
 
   if (!runs.length) {
@@ -247,7 +272,9 @@ export default function RunHistory({ runs = [] }) {
             const sc = STATUS_CONFIG[run.status] || STATUS_CONFIG.queued
             const duration = formatDuration(run.started_at, run.completed_at)
             const summary = configSummary(run.type, run.config)
-            const typeLabel = run.type.charAt(0).toUpperCase() + run.type.slice(1)
+            const typeLabel = run.type === 'calculation' && run.calculation_types?.length
+              ? run.calculation_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' + ')
+              : run.type.charAt(0).toUpperCase() + run.type.slice(1)
             const isActive = activeRunId === run.id
             const isLast = i === runs.length - 1
 
@@ -312,6 +339,25 @@ export default function RunHistory({ runs = [] }) {
                           {run.error_message}
                         </p>
                       )}
+                      {/* Action buttons */}
+                      <div className="flex items-center justify-center gap-1.5 pt-1">
+                        {(run.status === 'created' || run.status === 'running') && onCancel && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onCancel(run.id) }}
+                            className="text-[10px] font-medium text-red-500 hover:text-red-700 px-2 py-0.5 rounded hover:bg-red-50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        {run.status !== 'created' && run.status !== 'running' && !run.archived && onArchive && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onArchive(run.id) }}
+                            className="text-[10px] font-medium text-gray-400 hover:text-gray-600 px-2 py-0.5 rounded hover:bg-gray-100 transition-colors"
+                          >
+                            Archive
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
 

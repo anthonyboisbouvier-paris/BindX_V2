@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
+import { useToast } from '../contexts/ToastContext.jsx'
 import {
   PHASE_TYPES,
   MOCK_AGENT_INSIGHTS,
@@ -295,7 +296,7 @@ function CampaignSettings({ campaign }) {
             <div>
               <ScoringWeightsEditor
                 weights={scoring_weights}
-                onChange={(w) => console.log('[CampaignSettings] Weights updated:', w)}
+                onChange={() => {}}
               />
             </div>
           )}
@@ -403,21 +404,19 @@ function EditProjectPanel({ project, onSave, onCancel }) {
 export default function ProjectHome() {
   const { projectId } = useParams()
   const navigate = useNavigate()
-  const { projects, selectProject } = useWorkspace()
+  const { projects, selectProject, updateProject, deleteProject, createCampaign, createPhase } = useWorkspace()
+  const { addToast } = useToast()
 
   const [editing, setEditing] = useState(false)
-  const [projectOverride, setProjectOverride] = useState(null)
   const [showPhaseCreator, setShowPhaseCreator] = useState(false)
   const [creatingForPhase, setCreatingForPhase] = useState(null)
+  const [campaignCreating, setCampaignCreating] = useState(false)
 
   useEffect(() => {
     if (projectId) selectProject(projectId)
   }, [projectId, selectProject])
 
-  const baseProject = projects.find(p => p.id === projectId)
-  const project = projectOverride
-    ? { ...baseProject, ...projectOverride }
-    : baseProject
+  const project = projects.find(p => p.id === projectId)
 
   if (!project) {
     return (
@@ -518,7 +517,16 @@ export default function ProjectHome() {
             </button>
             <button
               className="px-3 py-1.5 text-xs text-gray-400 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              onClick={() => console.log('[ProjectHome] Archive project')}
+              onClick={async () => {
+                if (!confirm('Archive this project? It will be hidden from the project list.')) return
+                try {
+                  await updateProject(projectId, { status: 'archived' })
+                  addToast('Project archived', 'info')
+                  navigate('/')
+                } catch (err) {
+                  addToast(err.userMessage || 'Failed to archive project', 'error')
+                }
+              }}
             >
               Archive
             </button>
@@ -530,8 +538,12 @@ export default function ProjectHome() {
           <div className="mt-4">
             <EditProjectPanel
               project={project}
-              onSave={(data) => {
-                setProjectOverride(data)
+              onSave={async (data) => {
+                try {
+                  await updateProject(projectId, data)
+                } catch (err) {
+                  console.error('[ProjectHome] Update failed:', err)
+                }
                 setEditing(false)
               }}
               onCancel={() => setEditing(false)}
@@ -593,7 +605,7 @@ export default function ProjectHome() {
           {/* AI Agent Insights */}
           <CampaignAgentPanel
             insights={MOCK_AGENT_INSIGHTS}
-            onAskAgent={(q) => console.log('[ProjectHome] Agent question:', q)}
+            onAskAgent={(q) => addToast('AI Agent is not yet connected to the backend', 'info')}
           />
 
           {/* Campaign settings */}
@@ -611,13 +623,42 @@ export default function ProjectHome() {
             Create a campaign to define a binding pocket and start screening molecules.
           </p>
           <button
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#1e3a5f] text-white text-sm font-semibold rounded-xl hover:bg-[#1e4a7f] transition-colors"
-            onClick={() => console.log('[ProjectHome] Create campaign')}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors ${
+              campaignCreating
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-[#1e3a5f] text-white hover:bg-[#1e4a7f]'
+            }`}
+            disabled={campaignCreating}
+            onClick={async () => {
+              try {
+                setCampaignCreating(true)
+                await createCampaign(projectId, {
+                  name: `Campaign — ${project.target_name || project.name}`,
+                })
+                addToast('Campaign created', 'success')
+              } catch (err) {
+                addToast(err.userMessage || 'Failed to create campaign', 'error')
+              } finally {
+                setCampaignCreating(false)
+              }
+            }}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New Campaign
+            {campaignCreating ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Creating...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Campaign
+              </>
+            )}
           </button>
         </div>
       )}
@@ -641,8 +682,13 @@ export default function ProjectHome() {
         <PhaseCreator
           campaignId={campaign?.id}
           existingPhases={phases}
-          onCreatePhase={(newPhaseConfig) => {
-            console.log('[ProjectHome] Creating phase:', newPhaseConfig)
+          onCreatePhase={async (newPhaseConfig) => {
+            try {
+              await createPhase(newPhaseConfig.campaign_id, { type: newPhaseConfig.type })
+              addToast('Phase created', 'success')
+            } catch (err) {
+              addToast(err.userMessage || 'Failed to create phase', 'error')
+            }
             setShowPhaseCreator(false)
             setCreatingForPhase(null)
           }}

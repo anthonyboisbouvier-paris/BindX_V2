@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
+import { useToast } from '../contexts/ToastContext.jsx'
 import { ALL_COLUMNS, COLUMN_PRESETS, PHASE_TYPES, MOLECULE_DETAILS } from '../mock/data.js'
 
 import MoleculeTable from '../components/MoleculeTable.jsx'
@@ -10,6 +11,7 @@ import ColumnSelector from '../components/ColumnSelector.jsx'
 import FilterBar from '../components/FilterBar.jsx'
 import RunHistory from '../components/RunHistory.jsx'
 import RunCreator from '../components/RunCreator.jsx'
+import RunProgress from '../components/RunProgress.jsx'
 import FreezeDialog from '../components/FreezeDialog.jsx'
 import ParetoFront from '../components/ParetoFront.jsx'
 import Badge from '../components/Badge.jsx'
@@ -722,6 +724,9 @@ export default function PhaseDashboard() {
     currentCampaign,
     currentPhase,
     phaseMolecules,
+    currentPhaseRuns,
+    runsLoading,
+    moleculesLoading,
     selectProject,
     selectPhase,
     selectedMoleculeIds,
@@ -734,7 +739,13 @@ export default function PhaseDashboard() {
     freezePhase,
     unfreezePhase,
     getPhaseStatus,
+    createRun,
+    cancelRun,
+    archiveRun,
+    importFile,
   } = useWorkspace()
+
+  const { addToast } = useToast()
 
   // Sync URL params to workspace state
   useEffect(() => { if (projectId) selectProject(projectId) }, [projectId, selectProject])
@@ -749,6 +760,31 @@ export default function PhaseDashboard() {
 
   // Update filtered whenever phase molecules change
   useEffect(() => { setFilteredMolecules(phaseMolecules) }, [phaseMolecules])
+
+  // Active run (first created/running run)
+  const activeRun = useMemo(
+    () => currentPhaseRuns.find(r => r.status === 'created' || r.status === 'running') || null,
+    [currentPhaseRuns]
+  )
+
+  // Track run completions/failures for toast notifications
+  const prevRunsRef = useRef(currentPhaseRuns)
+  useEffect(() => {
+    const prev = prevRunsRef.current
+    prevRunsRef.current = currentPhaseRuns
+    if (!prev.length) return
+
+    for (const run of currentPhaseRuns) {
+      const prevRun = prev.find(r => r.id === run.id)
+      if (!prevRun) continue
+      if (prevRun.status !== 'completed' && run.status === 'completed') {
+        addToast('Run completed successfully', 'success')
+      }
+      if (prevRun.status !== 'failed' && run.status === 'failed') {
+        addToast(run.error_message || 'Run failed', 'error')
+      }
+    }
+  }, [currentPhaseRuns, addToast])
 
   // Column visibility — init from phase preset
   const [visibleKeys, setVisibleKeys] = useState(() => COLUMN_PRESETS.hit_discovery)
@@ -785,15 +821,15 @@ export default function PhaseDashboard() {
   // Live stats
   const liveStats = useMemo(() => {
     if (!currentPhase) return { total_molecules: 0, bookmarked: 0, runs_completed: 0, runs_running: 0 }
-    const completedRuns = (currentPhase.runs || []).filter(r => r.status === 'completed').length
-    const runningRuns = (currentPhase.runs || []).filter(r => r.status === 'running').length
+    const completedRuns = currentPhaseRuns.filter(r => r.status === 'completed').length
+    const runningRuns = currentPhaseRuns.filter(r => r.status === 'running' || r.status === 'created').length
     return {
       total_molecules: phaseMolecules.length,
       bookmarked: bookmarkedCount,
       runs_completed: completedRuns,
       runs_running: runningRuns,
     }
-  }, [currentPhase, phaseMolecules, bookmarkedCount])
+  }, [currentPhase, currentPhaseRuns, phaseMolecules, bookmarkedCount])
 
   // Number of active filters
   const [activeFilterCount, setActiveFilterCount] = useState(0)
@@ -809,17 +845,54 @@ export default function PhaseDashboard() {
 
   const handleCloseDetail = useCallback(() => setSelectedMolecule(null), [])
 
-  const handleNewRun = useCallback(() => setShowRunCreator(true), [])
-  const handleRunSubmit = useCallback((runConfig) => {
-    console.log('Run submitted:', runConfig)
-  }, [])
+  const [runSubmitting, setRunSubmitting] = useState(false)
+
+  const handleNewRun = useCallback(() => {
+    if (activeRun) {
+      addToast('A run is already in progress. Wait for it to finish before launching a new one.', 'warning')
+      return
+    }
+    setShowRunCreator(true)
+  }, [activeRun, addToast])
+
+  const handleRunSubmit = useCallback(async (runConfig) => {
+    if (!phaseId) return
+    try {
+      setRunSubmitting(true)
+      await createRun(phaseId, runConfig)
+      setShowRunCreator(false)
+      addToast('Run created and dispatched', 'success')
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to create run', 'error')
+    } finally {
+      setRunSubmitting(false)
+    }
+  }, [phaseId, createRun, addToast])
+
+  const handleCancelRun = useCallback(async (runId) => {
+    try {
+      await cancelRun(runId)
+      addToast('Run cancelled', 'info')
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to cancel run', 'error')
+    }
+  }, [cancelRun, addToast])
+
+  const handleArchiveRun = useCallback(async (runId) => {
+    try {
+      await archiveRun(runId)
+      addToast('Run archived', 'info')
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to archive run', 'error')
+    }
+  }, [archiveRun, addToast])
 
   const handleExport = useCallback((type) => {
     const allCols = ALL_COLUMNS
     if (type === 'csv_visible') exportCSV(filteredMolecules, visibleColumns, 'molecules_visible.csv')
     else if (type === 'csv_all') exportCSV(filteredMolecules, allCols, 'molecules_all.csv')
-    else if (type === 'sdf') console.log('SDF export — requires backend')
-    else if (type === 'pdf') console.log('PDF export — requires backend')
+    else if (type === 'sdf') addToast('SDF export requires backend connection', 'info')
+    else if (type === 'pdf') addToast('PDF export requires backend connection', 'info')
   }, [filteredMolecules, visibleColumns])
 
   const handleFreezeToggle = useCallback(() => setShowFreezeDialog(true), [])
@@ -881,7 +954,11 @@ export default function PhaseDashboard() {
           stats={liveStats}
           onFreezeToggle={handleFreezeToggle}
           onNewRun={handleNewRun}
+          hasActiveRun={!!activeRun}
         />
+
+        {/* Active run progress */}
+        <RunProgress run={activeRun} onCancel={handleCancelRun} />
 
         {/* Empty state */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center">
@@ -912,7 +989,7 @@ export default function PhaseDashboard() {
           </div>
         </div>
 
-        <RunHistory runs={currentPhase.runs || []} />
+        <RunHistory runs={currentPhaseRuns} onCancel={handleCancelRun} onArchive={handleArchiveRun} />
 
         <RunCreator
           phaseId={phaseId}
@@ -920,6 +997,8 @@ export default function PhaseDashboard() {
           isOpen={showRunCreator}
           onClose={() => setShowRunCreator(false)}
           onSubmit={handleRunSubmit}
+          selectedMoleculeIds={selectedMoleculeIds}
+          submitting={runSubmitting}
         />
         <FreezeDialog
           isOpen={showFreezeDialog}
@@ -948,7 +1027,11 @@ export default function PhaseDashboard() {
         stats={liveStats}
         onFreezeToggle={handleFreezeToggle}
         onNewRun={handleNewRun}
+        hasActiveRun={!!activeRun}
       />
+
+      {/* Active run progress */}
+      <RunProgress run={activeRun} onCancel={handleCancelRun} />
 
       {/* Selection Toolbar */}
       <SelectionToolbar
@@ -987,7 +1070,13 @@ export default function PhaseDashboard() {
                 visibleKeys={visibleKeys}
                 onChange={setVisibleKeys}
               />
-              <span className="text-xs text-gray-400 tabular-nums">
+              <span className="text-xs text-gray-400 tabular-nums flex items-center gap-1.5">
+                {moleculesLoading && (
+                  <svg className="w-3 h-3 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                )}
                 {filteredMolecules.length !== phaseMolecules.length
                   ? `${filteredMolecules.length} of ${phaseMolecules.length} molecules`
                   : `${phaseMolecules.length} molecules`}
@@ -1023,7 +1112,7 @@ export default function PhaseDashboard() {
       </div>
 
       {/* Run History timeline */}
-      <RunHistory runs={phase.runs || []} />
+      <RunHistory runs={currentPhaseRuns} onCancel={handleCancelRun} onArchive={handleArchiveRun} />
 
       {/* Pareto Analysis (collapsible) */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -1063,6 +1152,8 @@ export default function PhaseDashboard() {
         isOpen={showRunCreator}
         onClose={() => setShowRunCreator(false)}
         onSubmit={handleRunSubmit}
+        selectedMoleculeIds={selectedMoleculeIds}
+        submitting={runSubmitting}
       />
 
       <FreezeDialog
@@ -1124,7 +1215,7 @@ function Breadcrumb({ projectId, projectName, phase, phaseTypeMeta }) {
 // ---------------------------------------------------------------------------
 // Phase Header card
 // ---------------------------------------------------------------------------
-function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun }) {
+function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
       <div className={`h-1.5 ${isFrozen ? 'bg-blue-400' : 'bg-[#22c55e]'}`} />
@@ -1169,13 +1260,27 @@ function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, on
               className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 ${
                 isFrozen
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'bg-[#1e3a5f] hover:bg-[#2d5a8e] text-white shadow-sm hover:shadow-md'
+                  : hasActiveRun
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-[#1e3a5f] hover:bg-[#2d5a8e] text-white shadow-sm hover:shadow-md'
               }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              New Run
+              {hasActiveRun ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Run in progress
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  New Run
+                </>
+              )}
             </button>
           </div>
         </div>

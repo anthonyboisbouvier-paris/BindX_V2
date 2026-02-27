@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react'
-import { RUN_TYPES } from '../mock/data.js'
+import { RUN_TYPES, CALCULATION_SUBTYPES } from '../mock/data.js'
 import Badge from './Badge.jsx'
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,9 @@ function RunTypeIcon({ icon, className = 'w-5 h-5' }) {
     case 'grid':
       return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
         d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
+    case 'calculator':
+      return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+        d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V13.5zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.504-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm2.498-6.75h.008v.008H15.75v-.008zm0 2.25h.008v.008H15.75V13.5zM8.25 6h7.5v2.25h-7.5V6zM6 20.25h12A1.5 1.5 0 0019.5 18.75V5.25A1.5 1.5 0 0018 3.75H6A1.5 1.5 0 004.5 5.25v13.5A1.5 1.5 0 006 20.25z" /></svg>
     default:
       return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
         d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" /></svg>
@@ -40,12 +43,18 @@ function RunTypeIcon({ icon, className = 'w-5 h-5' }) {
 // ---------------------------------------------------------------------------
 const RUN_TYPE_COLORS = {
   import:      { text: 'text-gray-500',   bg: 'bg-gray-100',    ring: 'ring-gray-200',   fill: 'bg-gray-500'   },
+  calculation: { text: 'text-blue-700',   bg: 'bg-blue-100',    ring: 'ring-blue-200',   fill: 'bg-blue-600'   },
+  generation:  { text: 'text-pink-700',   bg: 'bg-pink-100',    ring: 'ring-pink-200',   fill: 'bg-pink-600'   },
+  // Subtypes (used in RunHistory display)
   docking:     { text: 'text-blue-700',   bg: 'bg-blue-100',    ring: 'ring-blue-200',   fill: 'bg-blue-600'   },
   admet:       { text: 'text-green-700',  bg: 'bg-green-100',   ring: 'ring-green-200',  fill: 'bg-green-600'  },
   scoring:     { text: 'text-amber-700',  bg: 'bg-amber-100',   ring: 'ring-amber-200',  fill: 'bg-amber-500'  },
   enrichment:  { text: 'text-purple-700', bg: 'bg-purple-100',  ring: 'ring-purple-200', fill: 'bg-purple-600' },
-  generation:  { text: 'text-pink-700',   bg: 'bg-pink-100',    ring: 'ring-pink-200',   fill: 'bg-pink-600'   },
   clustering:  { text: 'text-teal-700',   bg: 'bg-teal-100',    ring: 'ring-teal-200',   fill: 'bg-teal-600'   },
+  off_target:  { text: 'text-red-700',    bg: 'bg-red-100',     ring: 'ring-red-200',    fill: 'bg-red-600'    },
+  confidence:  { text: 'text-indigo-700', bg: 'bg-indigo-100',  ring: 'ring-indigo-200', fill: 'bg-indigo-600' },
+  retrosynthesis: { text: 'text-orange-700', bg: 'bg-orange-100', ring: 'ring-orange-200', fill: 'bg-orange-500' },
+  safety:      { text: 'text-rose-700',   bg: 'bg-rose-100',    ring: 'ring-rose-200',   fill: 'bg-rose-600'   },
 }
 
 function runColor(type) {
@@ -126,18 +135,37 @@ function Stepper({ value, min, max, onChange }) {
 // Default configs
 // ---------------------------------------------------------------------------
 const DEFAULT_CONFIGS = {
-  import:     { sourceMode: 'external', format: 'sdf', sourceName: '' },
+  import:      { sourceMode: 'external', format: 'sdf', sourceName: '' },
+  calculation: {
+    calculation_types: [],
+    // Per-subtype configs
+    docking: { engine: 'gnina_gpu', exhaustiveness: 32, num_modes: 9, seed: 0, boxSizeX: '', boxSizeY: '', boxSizeZ: '' },
+    admet: { properties: ['logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'CYP', 'oral_bioavailability', 'ames'] },
+    scoring: { weights: { docking_score: 0.30, cnn_score: 0.20, logP: 0.15, solubility: 0.10, selectivity: 0.15, novelty: 0.10 } },
+    enrichment: { analyses: ['prolif', 'clustering', 'scaffold', 'pharmacophore'] },
+    clustering: { method: 'butina', cutoff: 0.5 },
+    off_target: {},
+    confidence: {},
+    retrosynthesis: {},
+    safety: {},
+  },
+  generation:  { method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5, include_docking: true, include_admet: true, include_scoring: true },
+}
+
+// Keep legacy keys for ConfigForm compatibility
+const LEGACY_DEFAULT_CONFIGS = {
   docking:    { engine: 'gnina_gpu', exhaustiveness: 32, num_modes: 9, seed: 0, boxSizeX: '', boxSizeY: '', boxSizeZ: '' },
   admet:      { properties: ['logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'CYP', 'oral_bioavailability', 'ames'] },
   scoring:    { weights: { docking_score: 0.30, cnn_score: 0.20, logP: 0.15, solubility: 0.10, selectivity: 0.15, novelty: 0.10 } },
   enrichment: { analyses: ['prolif', 'clustering', 'scaffold', 'pharmacophore'] },
-  generation: { method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5, include_docking: true, include_admet: true, include_scoring: true },
   clustering: { method: 'butina', cutoff: 0.5 },
 }
 
 const ESTIMATED_TIMES = {
-  import: '~5 seconds', docking: '~3-5 minutes', admet: '~30 seconds',
-  scoring: '~15 seconds', enrichment: '~1-2 minutes', generation: '~5-10 minutes', clustering: '~30 seconds',
+  import: '~5 seconds', calculation: '~1-5 minutes', generation: '~5-10 minutes',
+  docking: '~3-5 min', admet: '~30 sec', scoring: '~15 sec',
+  enrichment: '~1-2 min', clustering: '~30 sec', off_target: '~1 min',
+  confidence: '~15 sec', retrosynthesis: '~1 min', safety: '~30 sec',
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +294,90 @@ function ConfigForm({ runType, config, onChange, phase }) {
           )}
         </div>
       )
+
+    case 'calculation': {
+      const calcTypes = config.calculation_types || []
+      const toggleCalcType = (key) => {
+        const updated = calcTypes.includes(key)
+          ? calcTypes.filter(k => k !== key)
+          : [...calcTypes, key]
+        onChange({ ...config, calculation_types: updated })
+      }
+      return (
+        <div className="space-y-4">
+          <FormSection title="Select calculations to run">
+            <div className="grid grid-cols-1 gap-2">
+              {CALCULATION_SUBTYPES.map(sub => {
+                const checked = calcTypes.includes(sub.key)
+                const subColor = RUN_TYPE_COLORS[sub.key] || RUN_TYPE_COLORS.calculation
+                return (
+                  <label key={sub.key}
+                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      checked ? `border-blue-400 ${subColor.bg}` : 'border-gray-100 hover:border-gray-200'
+                    }`}
+                  >
+                    <input type="checkbox" checked={checked} onChange={() => toggleCalcType(sub.key)}
+                      className="accent-[#1e3a5f] mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className={`text-sm font-semibold ${checked ? 'text-[#1e3a5f]' : 'text-gray-700'}`}>{sub.label}</p>
+                        <span className="text-[9px] text-gray-400">{ESTIMATED_TIMES[sub.key]}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{sub.description}</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {sub.columns.slice(0, 4).map(c => (
+                          <span key={c} className="text-[9px] px-1.5 py-0.5 rounded bg-white/70 text-gray-500 border border-gray-200">{c}</span>
+                        ))}
+                        {sub.columns.length > 4 && <span className="text-[9px] text-gray-400">+{sub.columns.length - 4}</span>}
+                      </div>
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+          </FormSection>
+
+          {/* Per-subtype config panels */}
+          {calcTypes.includes('docking') && (
+            <FormSection title="Docking configuration">
+              <div className="space-y-2 bg-blue-50/50 rounded-xl p-3">
+                <EngineCard id="gnina_gpu" label="GNINA (GPU)"
+                  badges={[{ text: 'Fastest', color: 'bg-green-100 text-green-700' }]}
+                  selected={(config.docking?.engine || 'gnina_gpu') === 'gnina_gpu'}
+                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
+                <EngineCard id="gnina_cpu" label="GNINA (CPU)"
+                  badges={[{ text: 'CNN rescoring', color: 'bg-blue-100 text-blue-700' }]}
+                  selected={(config.docking?.engine) === 'gnina_cpu'}
+                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
+                <EngineCard id="vina" label="AutoDock Vina"
+                  badges={[{ text: 'Classic', color: 'bg-gray-100 text-gray-600' }]}
+                  selected={(config.docking?.engine) === 'vina'}
+                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
+                <div className="flex items-center gap-4 mt-2">
+                  <div>
+                    <label className="text-[10px] font-medium text-gray-500">Exhaustiveness</label>
+                    <Stepper value={config.docking?.exhaustiveness ?? 32} min={8} max={64}
+                      onChange={v => onChange({ ...config, docking: { ...config.docking, exhaustiveness: v } })} />
+                  </div>
+                </div>
+              </div>
+            </FormSection>
+          )}
+
+          {calcTypes.includes('scoring') && (
+            <FormSection title="Scoring weights">
+              <p className="text-xs text-gray-400">Configure in the scoring weights editor when run starts.</p>
+            </FormSection>
+          )}
+
+          {calcTypes.length === 0 && (
+            <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-700">
+              Select at least one calculation type to proceed.
+            </div>
+          )}
+        </div>
+      )
+    }
 
     case 'docking':
       return (
@@ -649,7 +761,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
 // ---------------------------------------------------------------------------
 // Step 3: Confirmation
 // ---------------------------------------------------------------------------
-function ConfirmationView({ runType, config }) {
+function ConfirmationView({ runType, config, selectedCount }) {
   const rt = RUN_TYPES.find(t => t.type === runType)
   if (!rt) return null
   const c = runColor(runType)
@@ -658,6 +770,15 @@ function ConfirmationView({ runType, config }) {
   if (runType === 'import') {
     configLines.push(`Source: ${config.sourceMode === 'internal' ? 'Phase bookmarks' : 'External file'}`)
     if (config.sourceName) configLines.push(`Label: ${config.sourceName}`)
+  }
+  if (runType === 'calculation') {
+    const calcTypes = config.calculation_types || []
+    const labels = calcTypes.map(k => CALCULATION_SUBTYPES.find(s => s.key === k)?.label || k)
+    configLines.push(`Calculations: ${labels.join(', ')}`)
+    if (calcTypes.includes('docking')) {
+      const dk = config.docking || {}
+      configLines.push(`Docking engine: ${dk.engine === 'gnina_gpu' ? 'GNINA (GPU)' : dk.engine === 'gnina_cpu' ? 'GNINA (CPU)' : dk.engine || 'GNINA (GPU)'}`)
+    }
   }
   if (runType === 'docking') {
     configLines.push(`Engine: ${config.engine === 'gnina_gpu' ? 'GNINA (GPU)' : config.engine === 'gnina_cpu' ? 'GNINA (CPU)' : 'AutoDock Vina'}`)
@@ -708,6 +829,34 @@ function ConfirmationView({ runType, config }) {
         ))}
       </div>
 
+      {/* Validation warnings */}
+      {runType === 'calculation' && (!config.calculation_types || config.calculation_types.length === 0) && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-600">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          No calculation types selected. Go back and select at least one.
+        </div>
+      )}
+      {(runType === 'calculation' || runType === 'generation') && selectedCount === 0 && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-sm text-amber-700">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          No molecules selected in the dashboard. Select molecules before launching.
+        </div>
+      )}
+
+      {/* Molecule selection count */}
+      {(runType === 'calculation' || runType === 'generation') && selectedCount > 0 && (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-sm text-green-700">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+          </svg>
+          {selectedCount} molecule{selectedCount > 1 ? 's' : ''} selected as input
+        </div>
+      )}
+
       <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
         <svg className="w-4 h-4 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -728,7 +877,7 @@ function ConfirmationView({ runType, config }) {
 // ---------------------------------------------------------------------------
 // RunCreator — main component
 // ---------------------------------------------------------------------------
-export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubmit }) {
+export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubmit, selectedMoleculeIds, submitting }) {
   const [step, setStep] = useState(1)
   const [selectedType, setSelectedType] = useState(null)
   const [config, setConfig] = useState({})
@@ -744,8 +893,30 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
     setStep(2)
   }
 
+  const canSubmit = (() => {
+    if (submitting) return false
+    if (selectedType === 'calculation') {
+      if (!config.calculation_types?.length) return false
+      if (!selectedMoleculeIds?.size) return false
+    }
+    if (selectedType === 'generation' && !selectedMoleculeIds?.size) return false
+    return true
+  })()
+
   function handleSubmit() {
-    if (onSubmit) onSubmit({ type: selectedType, config, phase_id: phaseId })
+    if (!canSubmit) return
+    const payload = { type: selectedType, config, phase_id: phaseId }
+    // For calculation runs, include calculation_types and selected molecules
+    if (selectedType === 'calculation') {
+      payload.calculation_types = config.calculation_types || []
+      if (selectedMoleculeIds?.size > 0) {
+        payload.input_molecule_ids = [...selectedMoleculeIds]
+      }
+    }
+    if (selectedType === 'generation' && selectedMoleculeIds?.size > 0) {
+      payload.input_molecule_ids = [...selectedMoleculeIds]
+    }
+    if (onSubmit) onSubmit(payload)
     handleClose()
   }
 
@@ -848,7 +1019,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
 
           {/* Step 3: Confirm */}
           {step === 3 && selectedType && (
-            <ConfirmationView runType={selectedType} config={config} />
+            <ConfirmationView runType={selectedType} config={config} selectedCount={selectedMoleculeIds?.size || 0} />
           )}
         </div>
 
@@ -876,13 +1047,30 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
           {step === 3 && (
             <button
               onClick={handleSubmit}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-[#22c55e] hover:bg-green-600 text-white transition-colors shadow-sm shadow-green-200"
+              disabled={!canSubmit}
+              className={`flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold transition-colors shadow-sm shadow-green-200 ${
+                !canSubmit
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-[#22c55e] hover:bg-green-600 text-white'
+              }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
-              </svg>
-              Launch Run
+              {submitting ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Launching...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
+                  </svg>
+                  Launch Run
+                </>
+              )}
             </button>
           )}
         </div>

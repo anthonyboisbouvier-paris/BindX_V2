@@ -27,7 +27,13 @@ const PHASE_A_MOLECULES = [
     docking_score: -9.2, cnn_score: 0.87, cnn_affinity: 7.1, cnn_vs: 6.18,
     logP: 3.2, MW: 446.9, HBD: 1, HBA: 7, TPSA: 68.7, QED: 0.72,
     solubility: 0.65, BBB: 0.3, hERG: 0.12, metabolic_stability: 0.7, lipinski_pass: true,
+    oral_bioavailability: 0.60, plasma_protein_binding: 0.90,
     composite_score: 82.5, cluster_id: 1, scaffold: 'quinazoline', interactions_count: 6,
+    scaffold_smiles: 'c1ccc2ncncc2c1', tanimoto_to_centroid: 0.85,
+    selectivity_score: 0.78, off_target_hits: 2, selectivity_ratio: 12.5,
+    confidence_score: 0.85, pains_alert: false, applicability_domain: true,
+    n_synth_steps: 3, synth_confidence: 0.82, synth_cost_estimate: '$180', reagents_available: true,
+    herg_risk: 0.12, ames_mutagenicity: false, hepatotoxicity: 0.08, skin_sensitization: false, carcinogenicity: 0.03, safety_color_code: 'green',
     admet: { absorption: 0.82, distribution: 0.65, metabolism: 0.72, excretion: 0.55, toxicity: 0.88, pharmacodynamics: 0.7 },
     svg_2d: null,
   }),
@@ -36,7 +42,13 @@ const PHASE_A_MOLECULES = [
     docking_score: -8.8, cnn_score: 0.82, cnn_affinity: 6.9, cnn_vs: 5.66,
     logP: 2.9, MW: 393.4, HBD: 1, HBA: 7, TPSA: 74.7, QED: 0.68,
     solubility: 0.55, BBB: 0.25, hERG: 0.08, metabolic_stability: 0.65, lipinski_pass: true,
+    oral_bioavailability: 0.59, plasma_protein_binding: 0.93,
     composite_score: 79.1, cluster_id: 1, scaffold: 'quinazoline', interactions_count: 5,
+    scaffold_smiles: 'c1ccc2ncncc2c1', tanimoto_to_centroid: 0.82,
+    selectivity_score: 0.85, off_target_hits: 1, selectivity_ratio: 18.2,
+    confidence_score: 0.88, pains_alert: false, applicability_domain: true,
+    n_synth_steps: 2, synth_confidence: 0.91, synth_cost_estimate: '$120', reagents_available: true,
+    herg_risk: 0.08, ames_mutagenicity: false, hepatotoxicity: 0.05, skin_sensitization: false, carcinogenicity: 0.02, safety_color_code: 'green',
     admet: { absorption: 0.78, distribution: 0.6, metabolism: 0.68, excretion: 0.5, toxicity: 0.92, pharmacodynamics: 0.65 },
   }),
   mol(3, 'CS(=O)(=O)CCNCc1ccc(-c2ccc3ncnc(Nc4ccc(OCc5cccc(F)c5)c(Cl)c4)c3c2)o1', 'Lapatinib', {
@@ -60,7 +72,13 @@ const PHASE_A_MOLECULES = [
     docking_score: -9.8, cnn_score: 0.93, cnn_affinity: 7.8, cnn_vs: 7.25,
     logP: 3.4, MW: 499.6, HBD: 2, HBA: 6, TPSA: 87.6, QED: 0.52,
     solubility: 0.48, BBB: 0.42, hERG: 0.18, metabolic_stability: 0.72, lipinski_pass: true,
+    oral_bioavailability: 0.70, plasma_protein_binding: 0.95,
     composite_score: 88.2, cluster_id: 3, scaffold: 'pyrimidine-indole', interactions_count: 7,
+    scaffold_smiles: 'c1cnc(-c2c[nH]c3ccccc23)nc1', tanimoto_to_centroid: 0.91,
+    selectivity_score: 0.92, off_target_hits: 0, selectivity_ratio: 45.0,
+    confidence_score: 0.91, pains_alert: false, applicability_domain: true,
+    n_synth_steps: 5, synth_confidence: 0.68, synth_cost_estimate: '$450', reagents_available: true,
+    herg_risk: 0.18, ames_mutagenicity: false, hepatotoxicity: 0.12, skin_sensitization: false, carcinogenicity: 0.07, safety_color_code: 'yellow',
     admet: { absorption: 0.75, distribution: 0.7, metabolism: 0.74, excretion: 0.52, toxicity: 0.82, pharmacodynamics: 0.85 },
   }),
   mol(6, 'CCOc1cc2ncc(C#N)c(Nc3ccc(OCc4ccccn4)c(Cl)c3)c2cc1NC(=O)/C=C/CN(C)C', 'Neratinib', {
@@ -76,7 +94,13 @@ const PHASE_A_MOLECULES = [
     docking_score: -9.4, cnn_score: 0.89, cnn_affinity: 7.3, cnn_vs: 6.5,
     logP: 3.1, MW: 485.9, HBD: 2, HBA: 8, TPSA: 88.6, QED: 0.55,
     solubility: 0.52, BBB: 0.28, hERG: 0.14, metabolic_stability: 0.68, lipinski_pass: true,
+    oral_bioavailability: 0.92, plasma_protein_binding: 0.95,
     composite_score: 85.1, cluster_id: 1, scaffold: 'quinazoline', interactions_count: 7,
+    scaffold_smiles: 'c1ccc2ncncc2c1', tanimoto_to_centroid: 0.88,
+    selectivity_score: 0.65, off_target_hits: 2, selectivity_ratio: 8.5,
+    confidence_score: 0.87, pains_alert: false, applicability_domain: true,
+    n_synth_steps: 4, synth_confidence: 0.75, synth_cost_estimate: '$280', reagents_available: true,
+    herg_risk: 0.14, ames_mutagenicity: false, hepatotoxicity: 0.09, skin_sensitization: false, carcinogenicity: 0.06, safety_color_code: 'green',
     admet: { absorption: 0.8, distribution: 0.62, metabolism: 0.7, excretion: 0.53, toxicity: 0.86, pharmacodynamics: 0.78 },
   }),
   mol(8, 'Fc1ccc(Nc2ncnc3cc4c(cc23)OCO4)cc1Cl', 'CHEMBL_501234', {
@@ -210,31 +234,36 @@ const PHASE_B_MOLECULES = [
 const RUNS_PHASE_A = [
   {
     id: 'run-a1', phase_id: 'phase-a', type: 'import', status: 'completed',
+    calculation_types: null,
     config: { source: 'chembl', query: 'EGFR kinase inhibitors', max_molecules: 500 },
     started_at: '2026-02-20T10:15:00Z', completed_at: '2026-02-20T10:16:30Z',
     error_message: null, archived: false, created_at: '2026-02-20T10:15:00Z',
   },
   {
-    id: 'run-a2', phase_id: 'phase-a', type: 'docking', status: 'completed',
+    id: 'run-a2', phase_id: 'phase-a', type: 'calculation', status: 'completed',
+    calculation_types: ['docking'],
     config: { engine: 'gnina_gpu', exhaustiveness: 32, num_modes: 9, seed: 0 },
     started_at: '2026-02-20T10:20:00Z', completed_at: '2026-02-20T10:23:45Z',
     error_message: null, archived: false, created_at: '2026-02-20T10:19:00Z',
   },
   {
-    id: 'run-a3', phase_id: 'phase-a', type: 'admet', status: 'completed',
-    config: { properties: ['logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability'] },
+    id: 'run-a3', phase_id: 'phase-a', type: 'calculation', status: 'completed',
+    calculation_types: ['admet', 'safety'],
+    config: { properties: ['logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'oral_bioavailability', 'plasma_protein_binding'] },
     started_at: '2026-02-20T10:25:00Z', completed_at: '2026-02-20T10:25:30Z',
     error_message: null, archived: false, created_at: '2026-02-20T10:24:00Z',
   },
   {
-    id: 'run-a4', phase_id: 'phase-a', type: 'scoring', status: 'completed',
+    id: 'run-a4', phase_id: 'phase-a', type: 'calculation', status: 'completed',
+    calculation_types: ['scoring', 'confidence'],
     config: { weights: { docking_score: 0.3, CNNscore: 0.2, logP: 0.15, solubility: 0.1, selectivity: 0.15, novelty: 0.1 } },
     started_at: '2026-02-20T10:26:00Z', completed_at: '2026-02-20T10:26:15Z',
     error_message: null, archived: false, created_at: '2026-02-20T10:25:45Z',
   },
   {
-    id: 'run-a5', phase_id: 'phase-a', type: 'enrichment', status: 'running',
-    config: { analyses: ['prolif', 'clustering'] },
+    id: 'run-a5', phase_id: 'phase-a', type: 'calculation', status: 'running',
+    calculation_types: ['enrichment', 'clustering'],
+    config: { analyses: ['prolif', 'tanimoto', 'scaffold'] },
     started_at: '2026-02-20T10:30:00Z', completed_at: null,
     error_message: null, archived: false, created_at: '2026-02-20T10:29:00Z',
     progress: 65,
@@ -244,12 +273,14 @@ const RUNS_PHASE_A = [
 const RUNS_PHASE_B = [
   {
     id: 'run-b1', phase_id: 'phase-b', type: 'import', status: 'completed',
+    calculation_types: null,
     config: { source: 'phase_selection', source_phase_id: 'phase-a', selection: 'bookmarked' },
     started_at: '2026-02-21T09:00:00Z', completed_at: '2026-02-21T09:00:05Z',
     error_message: null, archived: false, created_at: '2026-02-21T09:00:00Z',
   },
   {
     id: 'run-b2', phase_id: 'phase-b', type: 'generation', status: 'completed',
+    calculation_types: null,
     config: { method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5 },
     started_at: '2026-02-21T09:05:00Z', completed_at: '2026-02-21T09:12:30Z',
     error_message: null, archived: false, created_at: '2026-02-21T09:04:00Z',
@@ -358,6 +389,7 @@ export const MOCK_PROJECTS = [
         created_at: '2026-02-18T14:10:00Z',
         runs: [
           { id: 'run-braf-1', phase_id: 'phase-braf-a', type: 'import', status: 'completed',
+            calculation_types: null,
             config: { source: 'chembl', max_molecules: 200 },
             started_at: '2026-02-18T14:15:00Z', completed_at: '2026-02-18T14:15:20Z',
             created_at: '2026-02-18T14:15:00Z' },
@@ -390,49 +422,91 @@ export const MOCK_PROJECTS = [
 // All possible columns a molecule can have, with metadata
 
 export const ALL_COLUMNS = [
-  { key: 'name', label: 'Name', type: 'text', width: 140, sortable: true },
-  { key: 'smiles', label: 'SMILES', type: 'smiles', width: 200, sortable: false },
-  { key: 'source_run_id', label: 'Source', type: 'text', width: 80, sortable: true },
-  { key: 'docking_score', label: 'Docking', type: 'number', unit: 'kcal/mol', width: 90, sortable: true, colorScale: 'lower-better' },
-  { key: 'cnn_score', label: 'CNN Score', type: 'number', width: 90, sortable: true, colorScale: 'higher-better' },
-  { key: 'cnn_affinity', label: 'CNN Aff.', type: 'number', width: 80, sortable: true, colorScale: 'higher-better' },
-  { key: 'cnn_vs', label: 'CNN VS', type: 'number', width: 80, sortable: true, colorScale: 'higher-better' },
-  { key: 'composite_score', label: 'Composite', type: 'number', width: 90, sortable: true, colorScale: 'higher-better' },
-  { key: 'logP', label: 'LogP', type: 'number', width: 70, sortable: true },
-  { key: 'MW', label: 'MW', type: 'number', unit: 'Da', width: 70, sortable: true },
-  { key: 'HBD', label: 'HBD', type: 'number', width: 55, sortable: true },
-  { key: 'HBA', label: 'HBA', type: 'number', width: 55, sortable: true },
-  { key: 'TPSA', label: 'TPSA', type: 'number', unit: 'A2', width: 70, sortable: true },
-  { key: 'QED', label: 'QED', type: 'number', width: 60, sortable: true, colorScale: 'higher-better' },
-  { key: 'lipinski_pass', label: 'Lipinski', type: 'boolean', width: 70, sortable: true },
-  { key: 'solubility', label: 'Solubility', type: 'number', width: 80, sortable: true, colorScale: 'higher-better' },
-  { key: 'BBB', label: 'BBB', type: 'number', width: 60, sortable: true },
-  { key: 'hERG', label: 'hERG', type: 'number', width: 60, sortable: true, colorScale: 'lower-better' },
-  { key: 'metabolic_stability', label: 'Met. Stab.', type: 'number', width: 80, sortable: true, colorScale: 'higher-better' },
-  { key: 'cluster_id', label: 'Cluster', type: 'number', width: 65, sortable: true },
-  { key: 'scaffold', label: 'Scaffold', type: 'text', width: 110, sortable: true },
-  { key: 'interactions_count', label: 'Contacts', type: 'number', width: 75, sortable: true, colorScale: 'higher-better' },
-  { key: 'generation_level', label: 'Gen. Level', type: 'number', width: 80, sortable: true },
-  { key: 'parent_molecule_id', label: 'Parent', type: 'text', width: 80, sortable: false },
+  // Identity
+  { key: 'name', label: 'Name', type: 'text', group: 'identity', width: 140, sortable: true },
+  { key: 'smiles', label: 'SMILES', type: 'smiles', group: 'identity', width: 200, sortable: false },
+  { key: 'source_run_id', label: 'Source', type: 'text', group: 'identity', width: 80, sortable: true },
+  // Docking
+  { key: 'docking_score', label: 'Docking', type: 'number', group: 'docking', unit: 'kcal/mol', width: 90, sortable: true, colorScale: 'lower-better' },
+  { key: 'cnn_score', label: 'CNN Score', type: 'number', group: 'docking', width: 90, sortable: true, colorScale: 'higher-better' },
+  { key: 'cnn_affinity', label: 'CNN Aff.', type: 'number', group: 'docking', width: 80, sortable: true, colorScale: 'higher-better' },
+  { key: 'cnn_vs', label: 'CNN VS', type: 'number', group: 'docking', width: 80, sortable: true, colorScale: 'higher-better' },
+  // ADMET
+  { key: 'logP', label: 'LogP', type: 'number', group: 'admet', width: 70, sortable: true },
+  { key: 'MW', label: 'MW', type: 'number', group: 'admet', unit: 'Da', width: 70, sortable: true },
+  { key: 'HBD', label: 'HBD', type: 'number', group: 'admet', width: 55, sortable: true },
+  { key: 'HBA', label: 'HBA', type: 'number', group: 'admet', width: 55, sortable: true },
+  { key: 'TPSA', label: 'TPSA', type: 'number', group: 'admet', unit: 'A2', width: 70, sortable: true },
+  { key: 'QED', label: 'QED', type: 'number', group: 'admet', width: 60, sortable: true, colorScale: 'higher-better' },
+  { key: 'lipinski_pass', label: 'Lipinski', type: 'boolean', group: 'admet', width: 70, sortable: true },
+  { key: 'solubility', label: 'Solubility', type: 'number', group: 'admet', width: 80, sortable: true, colorScale: 'higher-better' },
+  { key: 'BBB', label: 'BBB', type: 'number', group: 'admet', width: 60, sortable: true },
+  { key: 'hERG', label: 'hERG', type: 'number', group: 'admet', width: 60, sortable: true, colorScale: 'lower-better' },
+  { key: 'metabolic_stability', label: 'Met. Stab.', type: 'number', group: 'admet', width: 80, sortable: true, colorScale: 'higher-better' },
+  { key: 'oral_bioavailability', label: 'Oral Bioavail.', type: 'number', group: 'admet', width: 95, sortable: true, colorScale: 'higher-better' },
+  { key: 'plasma_protein_binding', label: 'PPB', type: 'number', group: 'admet', width: 60, sortable: true },
+  // Scoring
+  { key: 'composite_score', label: 'Composite', type: 'number', group: 'scoring', width: 90, sortable: true, colorScale: 'higher-better' },
+  // Enrichment
+  { key: 'interactions_count', label: 'Contacts', type: 'number', group: 'enrichment', width: 75, sortable: true, colorScale: 'higher-better' },
+  { key: 'scaffold', label: 'Scaffold', type: 'text', group: 'enrichment', width: 110, sortable: true },
+  // Clustering
+  { key: 'cluster_id', label: 'Cluster', type: 'number', group: 'clustering', width: 65, sortable: true },
+  { key: 'scaffold_smiles', label: 'Scaffold SMILES', type: 'smiles', group: 'clustering', width: 150, sortable: false },
+  { key: 'tanimoto_to_centroid', label: 'Tanimoto', type: 'number', group: 'clustering', width: 80, sortable: true, colorScale: 'higher-better' },
+  // Off-target
+  { key: 'selectivity_score', label: 'Selectivity', type: 'number', group: 'off_target', width: 85, sortable: true, colorScale: 'higher-better' },
+  { key: 'off_target_hits', label: 'Off-targets', type: 'number', group: 'off_target', width: 80, sortable: true, colorScale: 'lower-better' },
+  { key: 'selectivity_ratio', label: 'Select. Ratio', type: 'number', group: 'off_target', width: 90, sortable: true, colorScale: 'higher-better' },
+  // Confidence
+  { key: 'confidence_score', label: 'Confidence', type: 'number', group: 'confidence', width: 85, sortable: true, colorScale: 'higher-better', popup: 'confidence' },
+  { key: 'pains_alert', label: 'PAINS', type: 'boolean', group: 'confidence', width: 60, sortable: true },
+  { key: 'applicability_domain', label: 'Appl. Domain', type: 'boolean', group: 'confidence', width: 90, sortable: true },
+  // Retrosynthesis
+  { key: 'n_synth_steps', label: 'Synth Steps', type: 'number', group: 'retrosynthesis', width: 85, sortable: true, colorScale: 'lower-better' },
+  { key: 'synth_confidence', label: 'Synth Conf.', type: 'number', group: 'retrosynthesis', width: 85, sortable: true, colorScale: 'higher-better', popup: 'retrosynthesis' },
+  { key: 'synth_cost_estimate', label: 'Synth Cost', type: 'text', group: 'retrosynthesis', width: 80, sortable: true },
+  { key: 'reagents_available', label: 'Reagents', type: 'boolean', group: 'retrosynthesis', width: 70, sortable: true },
+  // Safety
+  { key: 'herg_risk', label: 'hERG Risk', type: 'number', group: 'safety', width: 75, sortable: true, colorScale: 'lower-better' },
+  { key: 'ames_mutagenicity', label: 'AMES', type: 'boolean', group: 'safety', width: 60, sortable: true },
+  { key: 'hepatotoxicity', label: 'Hepatotox', type: 'number', group: 'safety', width: 80, sortable: true, colorScale: 'lower-better' },
+  { key: 'skin_sensitization', label: 'Skin Sens.', type: 'boolean', group: 'safety', width: 80, sortable: true },
+  { key: 'carcinogenicity', label: 'Carcino.', type: 'number', group: 'safety', width: 70, sortable: true, colorScale: 'lower-better' },
+  { key: 'safety_color_code', label: 'Safety', type: 'text', group: 'safety', width: 65, sortable: true, popup: 'safety' },
+  // Generation
+  { key: 'generation_level', label: 'Gen. Level', type: 'number', group: 'generation', width: 80, sortable: true },
+  { key: 'parent_molecule_id', label: 'Parent', type: 'text', group: 'generation', width: 80, sortable: false },
 ]
 
-// Column presets per phase type (CDC section 4.4)
+// Column presets per phase type — CDC 4.1: "all columns with results are shown by default"
+// These are suggested starting columns; user can show/hide any column
 export const COLUMN_PRESETS = {
-  hit_discovery: ['name', 'docking_score', 'cnn_score', 'logP', 'MW', 'HBD', 'HBA', 'TPSA', 'lipinski_pass', 'composite_score'],
-  hit_to_lead: ['name', 'docking_score', 'cnn_score', 'composite_score', 'generation_level', 'cluster_id', 'scaffold'],
-  lead_optimization: ['name', 'composite_score', 'logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'interactions_count'],
+  hit_discovery: ['name', 'docking_score', 'cnn_score', 'logP', 'MW', 'HBD', 'HBA', 'TPSA', 'lipinski_pass', 'composite_score', 'confidence_score', 'safety_color_code'],
+  hit_to_lead: ['name', 'docking_score', 'cnn_score', 'composite_score', 'generation_level', 'cluster_id', 'scaffold', 'synth_confidence', 'safety_color_code'],
+  lead_optimization: ['name', 'composite_score', 'logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'interactions_count', 'selectivity_score', 'synth_confidence', 'safety_color_code'],
 }
 
 // ---- Run type definitions ----
 
+// 3 run types per CDC V9 section 3.4
 export const RUN_TYPES = [
   { type: 'import', label: 'Import Molecules', icon: 'upload', description: 'Import from SDF, SMILES file, or internal selection', phases: ['hit_discovery', 'hit_to_lead', 'lead_optimization'] },
-  { type: 'docking', label: 'Molecular Docking', icon: 'target', description: 'Dock molecules against the target protein', phases: ['hit_discovery', 'hit_to_lead', 'lead_optimization'] },
-  { type: 'admet', label: 'ADMET Properties', icon: 'shield', description: 'Predict absorption, distribution, metabolism, excretion, toxicity', phases: ['hit_discovery', 'hit_to_lead', 'lead_optimization'] },
-  { type: 'scoring', label: 'Composite Scoring', icon: 'star', description: 'Calculate weighted composite score', phases: ['hit_discovery', 'hit_to_lead', 'lead_optimization'] },
-  { type: 'enrichment', label: 'Enrichment Analysis', icon: 'layers', description: 'ProLIF interactions, clustering, scaffold analysis', phases: ['hit_discovery', 'hit_to_lead', 'lead_optimization'] },
+  { type: 'calculation', label: 'Run Calculations', icon: 'calculator', description: 'Select one or more calculation types to run on selected molecules', phases: ['hit_discovery', 'hit_to_lead', 'lead_optimization'] },
   { type: 'generation', label: 'De Novo Generation', icon: 'sparkles', description: 'Generate new molecules from selected hits', phases: ['hit_to_lead', 'lead_optimization'] },
-  { type: 'clustering', label: 'Diversity Clustering', icon: 'grid', description: 'Cluster by scaffold, compute Tanimoto similarity', phases: ['hit_discovery', 'hit_to_lead', 'lead_optimization'] },
+]
+
+// 9 calculation subtypes (checkboxes within a "calculation" run) per CDC V9 section 3.4
+export const CALCULATION_SUBTYPES = [
+  { key: 'docking', label: 'Molecular Docking', icon: 'target', description: 'Dock molecules against the target protein', columns: ['docking_score', 'cnn_score', 'cnn_affinity', 'poses'] },
+  { key: 'admet', label: 'ADMET Properties', icon: 'shield', description: 'Predict absorption, distribution, metabolism, excretion, toxicity', columns: ['logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'oral_bioavailability', 'plasma_protein_binding'] },
+  { key: 'scoring', label: 'Composite Scoring', icon: 'star', description: 'Calculate weighted composite score', columns: ['composite_score'] },
+  { key: 'enrichment', label: 'Enrichment Analysis', icon: 'layers', description: 'ProLIF interactions, scaffold analysis', columns: ['interactions_count', 'scaffold'] },
+  { key: 'clustering', label: 'Diversity Clustering', icon: 'grid', description: 'Cluster by scaffold, compute Tanimoto similarity', columns: ['cluster_id', 'scaffold_smiles', 'tanimoto_to_centroid'] },
+  { key: 'off_target', label: 'Off-target Selectivity', icon: 'crosshair', description: 'Assess selectivity against off-target proteins', columns: ['selectivity_score', 'off_target_hits', 'selectivity_ratio'] },
+  { key: 'confidence', label: 'Confidence Analysis', icon: 'check-circle', description: 'PAINS filters, applicability domain, convergence', columns: ['confidence_score', 'pains_alert', 'applicability_domain', 'confidence_flags'] },
+  { key: 'retrosynthesis', label: 'Retrosynthesis', icon: 'git-branch', description: 'Synthesis feasibility, cost estimation, reagent availability', columns: ['n_synth_steps', 'synth_confidence', 'synth_cost_estimate', 'reagents_available'] },
+  { key: 'safety', label: 'Safety Profile', icon: 'alert-triangle', description: 'Full safety: hERG, AMES, hepatotoxicity, carcinogenicity', columns: ['herg_risk', 'ames_mutagenicity', 'hepatotoxicity', 'skin_sensitization', 'carcinogenicity', 'safety_color_code'] },
 ]
 
 // ---- Phase type definitions ----

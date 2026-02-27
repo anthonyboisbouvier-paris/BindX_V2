@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
-import { MOCK_ACTIVITY, PHASE_TYPES, MOCK_PROJECTS } from '../mock/data.js'
+import { MOCK_ACTIVITY, PHASE_TYPES } from '../mock/data.js'
 import ActivityTimeline from '../components/ActivityTimeline.jsx'
 
 // ---------------------------------------------------------------------------
@@ -241,25 +241,24 @@ function NewProjectModal({ onClose, onCreated }) {
     return () => document.removeEventListener('keydown', handler)
   }, [onClose])
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!name.trim() || !targetName.trim()) return
     setSaving(true)
-    setTimeout(() => {
-      const newProject = {
-        id: `proj-${Date.now()}`,
+    try {
+      const project = await onCreated({
         name: name.trim(),
-        description: description.trim(),
+        description: description.trim() || undefined,
         target_name: targetName.trim(),
-        target_pdb_id: pdbId.trim() || null,
-        uniprot_id: uniprotId.trim() || null,
-        status: 'active',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        campaigns: [],
-      }
-      onCreated(newProject)
-    }, 400)
+        target_pdb_id: pdbId.trim() || undefined,
+        target_input_type: uniprotId.trim() ? 'uniprot_id' : 'pdb_id',
+        target_input_value: uniprotId.trim() || pdbId.trim() || targetName.trim(),
+      })
+      return project
+    } catch (err) {
+      console.error('[NewProjectModal] Create failed:', err)
+      setSaving(false)
+    }
   }
 
   return (
@@ -390,11 +389,9 @@ function NewProjectModal({ onClose, onCreated }) {
 // ---------------------------------------------------------------------------
 
 export default function ProjectListPage() {
-  const { projects: workspaceProjects } = useWorkspace()
+  const { projects, createProject, loading } = useWorkspace()
   const navigate = useNavigate()
 
-  // Local state: start from workspace projects + support adding new ones
-  const [localProjects, setLocalProjects] = useState(workspaceProjects || MOCK_PROJECTS)
   const [searchRaw, setSearchRaw] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [showNewProject, setShowNewProject] = useState(false)
@@ -407,31 +404,32 @@ export default function ProjectListPage() {
 
   // Filtered projects
   const filtered = useMemo(() => {
-    if (!searchQuery) return localProjects
+    if (!searchQuery) return projects
     const q = searchQuery.toLowerCase()
-    return localProjects.filter(p =>
+    return projects.filter(p =>
       p.name?.toLowerCase().includes(q) ||
       p.description?.toLowerCase().includes(q) ||
       p.target_name?.toLowerCase().includes(q) ||
-      p.uniprot_id?.toLowerCase().includes(q)
+      p.target_input_value?.toLowerCase().includes(q)
     )
-  }, [localProjects, searchQuery])
+  }, [projects, searchQuery])
 
   // Stats
-  const activeCount = localProjects.filter(p => {
+  const activeCount = projects.filter(p => {
     const allMols = (p.campaigns || []).flatMap(c => c.phases || []).reduce((s, ph) => s + (ph.stats?.total_molecules || 0), 0)
     return p.status === 'active' && allMols > 0
   }).length
-  const emptyCount = localProjects.filter(p => {
+  const emptyCount = projects.filter(p => {
     const allMols = (p.campaigns || []).flatMap(c => c.phases || []).reduce((s, ph) => s + (ph.stats?.total_molecules || 0), 0)
     return allMols === 0
   }).length
 
-  const handleCreated = useCallback((project) => {
-    setLocalProjects(prev => [project, ...prev])
+  const handleCreated = useCallback(async (data) => {
+    const project = await createProject(data)
     setShowNewProject(false)
     navigate(`/project/${project.id}`)
-  }, [navigate])
+    return project
+  }, [createProject, navigate])
 
   return (
     <div className="space-y-6">
@@ -440,7 +438,7 @@ export default function ProjectListPage() {
         <div>
           <h1 className="text-2xl font-bold text-[#1e3a5f]">My Projects</h1>
           <p className="text-sm text-gray-400 mt-0.5">
-            <span className="font-medium text-gray-600">{localProjects.length}</span> projects
+            <span className="font-medium text-gray-600">{projects.length}</span> projects
             {activeCount > 0 && <> &middot; <span className="text-[#22c55e] font-medium">{activeCount} active</span></>}
             {emptyCount > 0 && <> &middot; <span className="text-gray-400">{emptyCount} empty</span></>}
           </p>
@@ -480,7 +478,15 @@ export default function ProjectListPage() {
       </div>
 
       {/* Project grid */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <svg className="w-8 h-8 animate-spin text-[#1e3a5f]" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="ml-3 text-sm text-gray-500">Loading projects...</span>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-200">
           {searchQuery ? (
             <>

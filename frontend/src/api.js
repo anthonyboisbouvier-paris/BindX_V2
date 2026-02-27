@@ -294,4 +294,153 @@ export async function listDatabases() {
   return response.data
 }
 
+// ---------------------------------------------------------------------------
+// V9: Project/Campaign/Phase CRUD API
+// ---------------------------------------------------------------------------
+
+export async function v9ListProjects() {
+  const response = await apiClient.get('/v9/projects')
+  return response.data
+}
+
+export async function v9CreateProject(data) {
+  const response = await apiClient.post('/v9/projects', data)
+  return response.data
+}
+
+export async function v9GetProject(projectId) {
+  const response = await apiClient.get(`/v9/projects/${projectId}`)
+  return response.data
+}
+
+export async function v9UpdateProject(projectId, data) {
+  const response = await apiClient.put(`/v9/projects/${projectId}`, data)
+  return response.data
+}
+
+export async function v9DeleteProject(projectId) {
+  await apiClient.delete(`/v9/projects/${projectId}`)
+}
+
+export async function v9ListCampaigns(projectId) {
+  const response = await apiClient.get(`/v9/projects/${projectId}/campaigns`)
+  return response.data
+}
+
+export async function v9CreateCampaign(projectId, data) {
+  const response = await apiClient.post(`/v9/projects/${projectId}/campaigns`, data)
+  return response.data
+}
+
+export async function v9GetCampaign(campaignId) {
+  const response = await apiClient.get(`/v9/campaigns/${campaignId}`)
+  return response.data
+}
+
+export async function v9UpdateCampaign(campaignId, data) {
+  const response = await apiClient.put(`/v9/campaigns/${campaignId}`, data)
+  return response.data
+}
+
+export async function v9ListPhases(campaignId) {
+  const response = await apiClient.get(`/v9/campaigns/${campaignId}/phases`)
+  return response.data
+}
+
+export async function v9CreatePhase(campaignId, data) {
+  const response = await apiClient.post(`/v9/campaigns/${campaignId}/phases`, data)
+  return response.data
+}
+
+export async function v9GetPhase(phaseId) {
+  const response = await apiClient.get(`/v9/phases/${phaseId}`)
+  return response.data
+}
+
+export async function v9UpdatePhase(phaseId, data) {
+  const response = await apiClient.put(`/v9/phases/${phaseId}`, data)
+  return response.data
+}
+
+export async function v9FreezePhase(phaseId) {
+  const response = await apiClient.post(`/v9/phases/${phaseId}/freeze`)
+  return response.data
+}
+
+export async function v9UnfreezePhase(phaseId) {
+  const response = await apiClient.post(`/v9/phases/${phaseId}/unfreeze`)
+  return response.data
+}
+
+// ---------------------------------------------------------------------------
+// V9: Runs API
+// ---------------------------------------------------------------------------
+
+export async function v9CreateRun(phaseId, data) {
+  const response = await apiClient.post(`/v9/phases/${phaseId}/runs`, data)
+  return response.data
+}
+
+export async function v9ListRuns(phaseId) {
+  const response = await apiClient.get(`/v9/phases/${phaseId}/runs`)
+  return response.data
+}
+
+export async function v9GetRun(runId) {
+  const response = await apiClient.get(`/v9/runs/${runId}`)
+  return response.data
+}
+
+export async function v9CancelRun(runId) {
+  const response = await apiClient.post(`/v9/runs/${runId}/cancel`)
+  return response.data
+}
+
+export async function v9ArchiveRun(runId) {
+  const response = await apiClient.post(`/v9/runs/${runId}/archive`)
+  return response.data
+}
+
+export async function v9ImportFile(phaseId, file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await apiClient.post(
+    `/v9/phases/${phaseId}/runs/import-file`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 }
+  )
+  return response.data
+}
+
+// ---------------------------------------------------------------------------
+// V9: Molecules API
+// ---------------------------------------------------------------------------
+
+export async function v9ListMolecules(phaseId, params = {}) {
+  const response = await apiClient.get(`/v9/phases/${phaseId}/molecules`, { params })
+  return response.data
+}
+
+export async function v9GetMolecule(moleculeId) {
+  const response = await apiClient.get(`/v9/molecules/${moleculeId}`)
+  return response.data
+}
+
+export async function v9BookmarkMolecule(moleculeId, bookmarked) {
+  const response = await apiClient.put(
+    `/v9/molecules/${moleculeId}/bookmark`,
+    null,
+    { params: { bookmarked } }
+  )
+  return response.data
+}
+
+export async function v9BookmarkBatch(phaseId, moleculeIds, bookmarked) {
+  const response = await apiClient.post(`/v9/phases/${phaseId}/molecules/bookmark-batch`, {
+    molecule_ids: moleculeIds,
+    bookmarked,
+  })
+  return response.data
+}
+
 export default apiClient
