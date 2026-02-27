@@ -1,226 +1,73 @@
-# 🧬 BindX V2 - Drug Discovery Platform
+# BindX V2 — In Silico Drug Discovery Platform
 
-> **Version 9** - Architecture modulaire Project → Campaign → Phase → Run
+> Architecture V9 : Project > Campaign > Phase > Run
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Node.js 18+](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
-[![Docker](https://img.shields.io/badge/Docker-Required-blue.svg)](https://www.docker.com/)
+## Stack
 
-## 🚀 Quick Start (Ubuntu/WSL)
+- **Backend** : FastAPI + Celery + Redis + Supabase (PostgreSQL)
+- **Frontend** : React 18 + Vite + Tailwind + Recharts
+- **Auth** : Supabase Auth (JWT, RLS)
+- **Docking GPU** : GNINA via RunPod serverless
+
+## Quick Start
 
 ```bash
-git clone https://github.com/anthonyboisbouvier-paris/BindX_V2.git
-cd BindX_V2
-./scripts/dev.sh
+cp .env.example .env          # Edit with Supabase credentials
+docker-compose up --build
 ```
 
-**Prérequis :** Docker, Docker Compose, Node.js 18+, Python 3.10+
+- Frontend : http://localhost:3000
+- Backend API : http://localhost:8000/docs
 
-## 📚 Documentation
-
-- 📋 [CDC V9 Final](docs/CDC_V9_FINAL.md) - Cahier des charges complet  
-- 🏗️ [Architecture](docs/ARCHITECTURE.md) - Vue technique  
-- 🔄 [Migration V8→V9](docs/MIGRATION_V8_TO_V9.md) - Guide migration  
-- 👨‍💻 [Development](docs/DEVELOPMENT.md) - Setup développement  
-- 🤖 [Claude Code](tools/claude/) - Workflows IA  
-
-## 🎯 Différence avec DockIt V8
-
-| Aspect | DockIt V8 | BindX V9 |
-|--------|-----------|----------|
-| Architecture | Job monolithique | Project → Campaign → Phase → Run |
-| Base de données | SQLite | Supabase (PostgreSQL) |
-| Runs | 1 job = tout | Runs modulaires (import/calcul/génération) |
-| Interface | Job-centrique | Phase-dashboard centrique |
-| Cible | 1 par job | Target Preview + poches multiples |
-| Calculs | Bundle fixe | Multi-sélection (docking+ADMET+scoring...) |
-
-## 🧪 Features V9
-
-### Architecture modulaire
-- **Project** : cible thérapeutique + target preview automatique
-- **Campaign** : stratégie d'exploration (pocket sélectionnée)  
-- **Phase** : Hit Discovery → Hit-to-Lead → Lead Optimization
-- **Run** : unité atomique (import/calcul/génération)
-
-### Types de runs
-- **Import** : SDF/SMILES, bases connectées, pré-filtres Lipinski/PAINS
-- **Calcul** : multi-sélection modulaire
-  - 🎯 Docking (Vina, GNINA CPU/GPU, DiffDock)
-  - 💊 ADMET (logP, solubility, BBB, hERG, CYP, bioavailability)
-  - 📊 Scoring composite pondéré
-  - 🔗 Enrichment (ProLIF interactions, clustering)
-  - 🎨 Clustering (diversité, scaffolds, Tanimoto)
-  - ⚠️ Off-target sélectivité  
-  - ✅ Confidence (PAINS, applicability domain)
-  - ⚗️ Retrosynthesis (faisabilité, coût, réactifs)
-  - 🛡️ Safety (hERG, AMES, hepatotox, carcinogenicity)
-- **Génération** : de novo REINVENT4 (mode batch + molécule individuelle)
-
-### Dashboard cumulatif par phase
-- **1 molécule = 1 ligne** dédupliquée par SMILES canonique
-- **Runs ajoutent des colonnes** progressivement
-- **Popups détaillées** : safety, synthesis, confidence
-- **Viewer 3D intégré** : drawer 40% + plein écran, 3Dmol.js
-- **Bookmarks & freeze** pour pipeline phase → phase
-
-### Agent IA campagne
-- **Cross-phases analysis** : attrition, enrichment factor
-- **Recommandations intelligentes** : prochains runs, paramètres
-- **Safety alerts** : red flags ADMET, scaffold analysis
-- **Chat contextuel** avec accès toutes les données
-
-## 🛠️ Tech Stack
-
-- **Frontend** : React 18, Vite, TailwindCSS, 3Dmol.js, Recharts
-- **Backend** : FastAPI, SQLAlchemy, Pydantic V2, Celery, Redis  
-- **Database** : Supabase (PostgreSQL + Auth + Storage + RLS)
-- **Containers** : Docker, Docker Compose, multi-stage builds
-- **Pipeline** : AutoDock Vina, GNINA, GNINA GPU (RunPod), DiffDock
-- **Cheminformatics** : RDKit, OpenEye, fpocket, ProLIF, MDAnalysis
-- **ML** : REINVENT4, scikit-learn, PyTorch, Transformers
-- **Deployment** : Nginx, SSL auto-renewal, domain routing
-
-## 📦 Project Structure
+## Project Structure
 
 ```
 BindX_V2/
-├── docs/                    # 📚 Documentation complète
-├── backend/                 # 🐍 API FastAPI + pipeline
-├── frontend/                # ⚛️ Interface React
-├── infrastructure/          # 🏗️ Docker, Supabase, deploy
-├── tools/claude/           # 🤖 Claude Code workflows  
-├── scripts/                # 🚀 Automation
-└── data/                   # 📊 Structures, cache (gitignored)
+├── backend/
+│   ├── main.py                 # FastAPI app (V8 endpoints + V9 router mount)
+│   ├── models_v9.py            # 9 SQLAlchemy ORM models (V9)
+│   ├── database_v9.py          # Async Supabase connection
+│   ├── auth_v9.py              # Supabase JWT verification
+│   ├── schemas_v9.py           # Pydantic request/response schemas
+│   ├── tasks_v9.py             # Celery tasks (import/calculation/generation)
+│   ├── celery_app.py           # Celery + Redis config
+│   ├── routers/v9/             # 6 API routers (health, projects, campaigns, phases, runs, molecules)
+│   └── pipeline/               # 35 computation modules (docking, scoring, ADMET, agents...)
+├── frontend/src/
+│   ├── pages/                  # ProjectListPage, ProjectHome, PhaseDashboard, Login, Register
+│   ├── components/             # SidebarLayout, MoleculeTable, RunCreator, RunProgress, ErrorBoundary...
+│   ├── contexts/               # AuthContext (Supabase), WorkspaceContext, ToastContext
+│   ├── api.js                  # V9 API client (runs, molecules, bookmarks)
+│   ├── mock/data.js            # Mock data for dev
+│   └── lib/supabase.js         # Supabase client
+├── infrastructure/
+│   └── supabase/migrations/    # v9_schema.sql, v9_rls.sql
+├── docs/
+│   └── CDC_V9_FINAL.md         # Cahier des charges complet
+├── docker-compose.yml          # redis + backend + celery_worker + frontend
+└── CLAUDE.md                   # Context for Claude Code AI assistant
 ```
 
-## 🚀 Development Quickstart
+## Architecture V9
 
-### 1. Environment Setup
-```bash
-# Clone & setup
-git clone https://github.com/anthonyboisbouvier-paris/BindX_V2.git
-cd BindX_V2
+### Data Model
+- **Project** : 1 cible therapeutique (UniProt/PDB/FASTA)
+- **Campaign** : 1 pocket selectionnee + regles de scoring
+- **Phase** : Hit Discovery > Hit-to-Lead > Lead Optimization
+- **Run** : unite atomique de calcul
 
-# Configure environment  
-cp .env.example .env
-# Edit .env with your Supabase credentials
-```
+### Run Types
+| Type | Description |
+|------|-------------|
+| **import** | SDF/SMILES ingestion + pre-filtres |
+| **calculation** | Docking, ADMET, scoring, enrichment, clustering, off-target, confidence, retrosynthesis, safety |
+| **generation** | De novo (REINVENT4) |
 
-### 2. Docker Development
-```bash
-# Start all services
-./scripts/dev.sh
+### Phase Dashboard
+- 1 molecule = 1 row (deduplicated by canonical SMILES)
+- Runs add columns progressively
+- Bookmark + Freeze workflow between phases
 
-# Or manually
-docker-compose up -d
-```
+## Specs
 
-### 3. Access Points
-- 🌐 **Frontend** : http://localhost:3000
-- 🐍 **Backend** : http://localhost:8000  
-- 📚 **API Docs** : http://localhost:8000/docs
-- 🗄️ **Database** : Supabase Dashboard
-
-### 4. Claude Code Integration
-```bash
-# AI-powered development
-cd ~/BindX_V2
-claude
-
-# Available shortcuts (see tools/claude/shortcuts.sh)
-bx-dev      # Start development
-bx-logs     # View container logs  
-bx-test     # Run tests
-bx-reset    # Restart containers
-```
-
-## 🧬 Scientific Pipeline
-
-### Supported Calculations
-- **Structure Processing** : PDB cleanup, pocket detection (fpocket), validation
-- **Molecular Docking** : Vina (CPU), GNINA (CPU/GPU), DiffDock (ML-based)
-- **ADMET Prediction** : Solubility, permeability, metabolism, toxicity
-- **Drug-likeness** : Lipinski Ro5, QED, PAINS filtering
-- **De Novo Generation** : REINVENT4 goal-directed optimization
-- **Interaction Analysis** : ProLIF protein-ligand fingerprints
-- **Selectivity Screening** : Off-target binding prediction
-- **Synthetic Accessibility** : Retrosynthetic route planning
-
-### Validation & Quality
-- **Confidence Scoring** : Applicability domain, model uncertainty
-- **Safety Profiling** : hERG, AMES, hepatotoxicity, carcinogenicity  
-- **PAINS Detection** : Pan-assay interference compounds
-- **Structural Alerts** : Reactive/toxic substructures
-
-## 📊 Data Sources
-
-- **ChEMBL** : Bioactivity data, known targets
-- **PubChem** : Chemical structures, properties
-- **UniProt** : Protein sequences, annotations
-- **PDB** : 3D structures (experimental)
-- **AlphaFold** : 3D structures (predicted)
-- **DrugBank** : Approved drugs, targets
-
-## 🔗 Integration
-
-### Docking Engines
-- **AutoDock Vina** : Fast, reliable CPU docking
-- **GNINA** : CNN-enhanced scoring (CPU/GPU)
-- **DiffDock** : Diffusion model for complex poses
-
-### Cloud Computing  
-- **RunPod Serverless** : GPU acceleration (10x speedup)
-- **Auto-fallback** : CPU → GPU → Mock for development
-
-### Authentication
-- **Supabase Auth** : Email/password, magic links
-- **Row Level Security** : Multi-tenant data isolation
-- **SSO Ready** : SAML/OAuth2 (V10)
-
-## 🔄 Migration from DockIt V8
-
-BindX V9 is a complete rewrite with **no automatic migration**. See [MIGRATION.md](docs/MIGRATION_V8_TO_V9.md) for:
-
-- Data export strategies
-- Workflow mapping V8→V9  
-- Feature comparison matrix
-- Step-by-step migration guide
-
-**Legacy support** : V8 projects accessible in read-only mode at `/legacy`.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
-
-See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed contributor guide.
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **OpenEye Scientific** : OMEGA conformer generation
-- **Schrödinger** : Molecular modeling inspiration
-- **ChEMBL Team** : Bioactivity database
-- **RDKit Community** : Cheminformatics toolkit
-- **AutoDock Team** : Docking algorithms
-
-## 📞 Support
-
-- 🐛 **Issues** : GitHub Issues tracker
-- 💬 **Discussions** : GitHub Discussions  
-- 📖 **Documentation** : `/docs` folder
-- 🤖 **AI Assistant** : Claude Code integration
-
----
-
-**🔬 Built for computational chemists, by computational chemists.**
-
-**From molecular hypothesis to lead compound in record time.**
+Full specification : [docs/CDC_V9_FINAL.md](docs/CDC_V9_FINAL.md)
