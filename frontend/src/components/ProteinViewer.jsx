@@ -1042,11 +1042,11 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       }
     }
 
-    // Custom zones
+    // Custom zones — addStyle to overlay on top of base protein style
     customZones.forEach(zone => {
       if (!zone.visible || zone.residues.length === 0) return
       const zoneSel = { resi: zone.residues, model: protein }
-      viewer.setStyle(zoneSel, buildAnnotationStyle(zone.color))
+      viewer.addStyle(zoneSel, buildAnnotationStyle(zone.color))
       if (style === 'surface') {
         doAddSurface({ color: zone.color, opacity: 0.7 }, { resi: zone.residues, model: protein })
       }
@@ -1221,14 +1221,14 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
 
   return (
     <div ref={wrapperRef} className={`rounded-xl border border-gray-200 overflow-hidden ${isFullscreen ? 'flex flex-col' : ''}`} style={{ backgroundColor: bgColor }}>
-      {/* Toolbar — Row 1: Style pills + Color */}
+      {/* Toolbar — Row 1: Style pills */}
       <div className={`flex items-center gap-2 px-3 py-1.5 border-b ${isDarkBg ? 'bg-[#1a2d42] border-gray-700/50' : 'bg-gray-100 border-gray-200'}`}>
         <div className="flex items-center gap-0.5 bg-black/20 rounded-lg p-0.5">
           {STYLES.map(s => (
             <button
               key={s}
               onClick={() => setStyle(s)}
-              className={`px-2.5 py-1 text-[11px] rounded-md transition-all font-medium whitespace-nowrap ${
+              className={`px-2 py-1 text-[11px] rounded-md transition-all font-medium whitespace-nowrap ${
                 style === s
                   ? 'bg-blue-600 text-white shadow-sm'
                   : isDarkBg
@@ -1241,12 +1241,12 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
           ))}
         </div>
 
-        <div className="w-px h-5 bg-gray-600/40 mx-0.5" />
+        <div className="w-px h-5 bg-gray-600/40" />
 
         <select
           value={colorMode}
           onChange={e => setColorMode(e.target.value)}
-          className={`text-[11px] border rounded-md px-2 py-1 ${
+          className={`text-[11px] border rounded-md px-1.5 py-1 max-w-[130px] ${
             isDarkBg
               ? 'bg-[#0f1923] text-gray-300 border-gray-600'
               : 'bg-white text-gray-700 border-gray-300'
@@ -1270,9 +1270,10 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             title="Pick protein color"
           />
         )}
+      </div>
 
-        {/* Right-aligned icons */}
-        <div className="flex items-center gap-0.5 ml-auto">
+      {/* Toolbar — Row 2: Tool icons */}
+      <div className={`flex items-center gap-0.5 px-3 py-1 border-b ${isDarkBg ? 'bg-[#162233] border-gray-700/50' : 'bg-gray-50 border-gray-200'}`}>
           <button onClick={handleScreenshot} title="Screenshot"
             className={`p-1.5 rounded-md transition-colors ${isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
             <CameraIcon />
@@ -1310,7 +1311,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
               </svg>
             </button>
             {showZonesPanel && (
-              <div ref={zonesPanelRef} className={`absolute right-0 top-full mt-1 z-30 rounded-lg shadow-lg border p-3 min-w-[300px] max-w-[380px] space-y-2 ${
+              <div ref={zonesPanelRef} className={`absolute left-0 top-full mt-1 z-30 rounded-lg shadow-lg border p-3 min-w-[300px] max-w-[380px] space-y-2 ${
                 isDarkBg ? 'bg-[#1a2d42] border-gray-600' : 'bg-white border-gray-200'
               }`}>
                 <div className="flex items-center justify-between mb-1">
@@ -1445,7 +1446,6 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
               </svg>
             )}
           </button>
-        </div>
       </div>
 
       {/* Active tool indicator */}
