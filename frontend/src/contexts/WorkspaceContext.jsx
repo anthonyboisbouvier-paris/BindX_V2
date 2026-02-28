@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react'
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useAuth } from './AuthContext.jsx'
+import { useToast } from './ToastContext.jsx'
 import { MOCK_PROJECTS } from '../mock/data'
 import {
   v9ListProjects,
@@ -7,6 +8,7 @@ import {
   v9UpdateProject,
   v9DeleteProject,
   v9CreateCampaign,
+  v9UpdateCampaign,
   v9CreatePhase,
   v9FreezePhase,
   v9UnfreezePhase,
@@ -24,11 +26,16 @@ const WorkspaceContext = createContext(null)
 
 export function WorkspaceProvider({ children }) {
   const { isAuthenticated } = useAuth()
+  const { addToast } = useToast()
 
   // --- Core data state ---
   const [projects, setProjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  // --- Mock mode: tracks whether API is available ---
+  const [mockMode, setMockMode] = useState(false)
+  const nextMockId = useRef(100)
 
   // --- Core navigation state ---
   const [currentProjectId, setCurrentProjectId] = useState(null)
@@ -50,10 +57,10 @@ export function WorkspaceProvider({ children }) {
   const [runsLoading, setRunsLoading] = useState(false)
   const [moleculesLoading, setMoleculesLoading] = useState(false)
 
-  // --- Fetch projects from API or fallback to mock ---
+  // --- Fetch projects from API, fallback to mock ---
   const refreshProjects = useCallback(async () => {
     if (!isAuthenticated) {
-      setProjects(MOCK_PROJECTS)
+      setProjects([])
       setLoading(false)
       return
     }
@@ -62,9 +69,11 @@ export function WorkspaceProvider({ children }) {
       setError(null)
       const data = await v9ListProjects()
       setProjects(data)
+      setMockMode(false)
     } catch (err) {
       console.warn('[WorkspaceContext] API unavailable, using mock data:', err.message)
-      setError(err.message)
+      setMockMode(true)
+      setError(null)
       setProjects(MOCK_PROJECTS)
     } finally {
       setLoading(false)
@@ -75,82 +84,129 @@ export function WorkspaceProvider({ children }) {
     refreshProjects()
   }, [refreshProjects])
 
-  // --- CRUD actions ---
+  // --- CRUD actions (with mock fallback) ---
   const createProject = useCallback(async (data) => {
     if (!isAuthenticated) {
-      // Mock fallback
-      const fake = {
-        id: `proj-${Date.now()}`,
-        ...data,
+      addToast('Please sign in to create a project', 'error')
+      return null
+    }
+
+    if (mockMode) {
+      const id = `proj-mock-${nextMockId.current++}`
+      const created = {
+        id,
+        name: data.name || 'New Project',
+        description: data.description || '',
+        target_name: null,
+        target_pdb_id: null,
+        uniprot_id: null,
         status: 'active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         campaigns: [],
       }
-      setProjects(prev => [fake, ...prev])
-      return fake
+      setProjects(prev => [created, ...prev])
+      addToast('Project created (demo mode)', 'success')
+      return created
     }
-    const created = await v9CreateProject(data)
-    setProjects(prev => [created, ...prev])
-    return created
-  }, [isAuthenticated])
+
+    try {
+      const created = await v9CreateProject(data)
+      setProjects(prev => [created, ...prev])
+      return created
+    } catch (err) {
+      addToast(err.userMessage || err.message || 'Failed to create project', 'error')
+      return null
+    }
+  }, [isAuthenticated, addToast, mockMode])
 
   const updateProject = useCallback(async (projectId, data) => {
-    if (!isAuthenticated) {
-      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...data } : p))
-      return
+    if (!isAuthenticated) return null
+
+    if (mockMode) {
+      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...data, updated_at: new Date().toISOString() } : p))
+      return { id: projectId, ...data }
     }
-    const updated = await v9UpdateProject(projectId, data)
-    setProjects(prev => prev.map(p => p.id === projectId ? updated : p))
-    return updated
-  }, [isAuthenticated])
+
+    try {
+      const updated = await v9UpdateProject(projectId, data)
+      setProjects(prev => prev.map(p => p.id === projectId ? updated : p))
+      return updated
+    } catch (err) {
+      addToast(err.userMessage || err.message || 'Failed to update project', 'error')
+      throw err
+    }
+  }, [isAuthenticated, addToast, mockMode])
 
   const deleteProject = useCallback(async (projectId) => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated) return
+
+    if (mockMode) {
       setProjects(prev => prev.filter(p => p.id !== projectId))
       return
     }
+
     await v9DeleteProject(projectId)
     setProjects(prev => prev.filter(p => p.id !== projectId))
-  }, [isAuthenticated])
+  }, [isAuthenticated, mockMode])
 
   const createCampaign = useCallback(async (projectId, data) => {
     if (!isAuthenticated) return null
+    if (mockMode) {
+      addToast('Campaign created (demo mode)', 'success')
+      return { id: `camp-mock-${nextMockId.current++}`, ...data }
+    }
     const created = await v9CreateCampaign(projectId, data)
     await refreshProjects()
     return created
-  }, [isAuthenticated, refreshProjects])
+  }, [isAuthenticated, refreshProjects, mockMode, addToast])
+
+  const updateCampaign = useCallback(async (campaignId, data) => {
+    if (!isAuthenticated) return null
+    if (mockMode) return { id: campaignId, ...data }
+    const updated = await v9UpdateCampaign(campaignId, data)
+    await refreshProjects()
+    return updated
+  }, [isAuthenticated, refreshProjects, mockMode])
 
   const createPhase = useCallback(async (campaignId, data) => {
     if (!isAuthenticated) return null
+    if (mockMode) return { id: `phase-mock-${nextMockId.current++}`, ...data }
     const created = await v9CreatePhase(campaignId, data)
     await refreshProjects()
     return created
-  }, [isAuthenticated, refreshProjects])
+  }, [isAuthenticated, refreshProjects, mockMode])
 
   const freezePhase = useCallback(async (phaseId) => {
-    if (!isAuthenticated) {
-      setPhaseStatusOverrides(prev => ({ ...prev, [phaseId]: 'frozen' }))
-      return
-    }
+    if (!isAuthenticated) return
+    if (mockMode) return
     await v9FreezePhase(phaseId)
     await refreshProjects()
-  }, [isAuthenticated, refreshProjects])
+  }, [isAuthenticated, refreshProjects, mockMode])
 
   const unfreezePhase = useCallback(async (phaseId) => {
-    if (!isAuthenticated) {
-      setPhaseStatusOverrides(prev => ({ ...prev, [phaseId]: 'active' }))
-      return
-    }
+    if (!isAuthenticated) return
+    if (mockMode) return
     const result = await v9UnfreezePhase(phaseId)
     await refreshProjects()
     return result
-  }, [isAuthenticated, refreshProjects])
+  }, [isAuthenticated, refreshProjects, mockMode])
 
   // --- Runs & Molecules API actions ---
   const refreshRuns = useCallback(async (pId) => {
     const id = pId || currentPhaseId
     if (!id || !isAuthenticated) return
+    if (mockMode) {
+      // Find runs from mock project data
+      for (const proj of projects) {
+        for (const camp of (proj.campaigns || [])) {
+          const phase = (camp.phases || []).find(p => p.id === id)
+          if (phase) { setPhaseRuns(phase.runs || []); return }
+        }
+      }
+      setPhaseRuns([])
+      return
+    }
     try {
       setRunsLoading(true)
       const data = await v9ListRuns(id)
@@ -160,11 +216,22 @@ export function WorkspaceProvider({ children }) {
     } finally {
       setRunsLoading(false)
     }
-  }, [currentPhaseId, isAuthenticated])
+  }, [currentPhaseId, isAuthenticated, mockMode, projects])
 
   const refreshMolecules = useCallback(async (pId) => {
     const id = pId || currentPhaseId
     if (!id || !isAuthenticated) return
+    if (mockMode) {
+      // Find molecules from mock project data
+      for (const proj of projects) {
+        for (const camp of (proj.campaigns || [])) {
+          const phase = (camp.phases || []).find(p => p.id === id)
+          if (phase) { setApiMolecules(phase.molecules || []); return }
+        }
+      }
+      setApiMolecules([])
+      return
+    }
     try {
       setMoleculesLoading(true)
       const data = await v9ListMolecules(id)
@@ -174,36 +241,43 @@ export function WorkspaceProvider({ children }) {
     } finally {
       setMoleculesLoading(false)
     }
-  }, [currentPhaseId, isAuthenticated])
+  }, [currentPhaseId, isAuthenticated, mockMode, projects])
 
   const createRun = useCallback(async (phaseId, data) => {
-    if (!isAuthenticated) {
-      console.log('[mock] createRun:', data)
-      return null
+    if (!isAuthenticated) return null
+    if (mockMode) {
+      addToast('Run created (demo mode)', 'success')
+      return { id: `run-mock-${nextMockId.current++}`, ...data, status: 'completed' }
     }
     const created = await v9CreateRun(phaseId, data)
     await refreshRuns(phaseId)
     return created
-  }, [isAuthenticated, refreshRuns])
+  }, [isAuthenticated, refreshRuns, mockMode, addToast])
 
   const cancelRun = useCallback(async (runId) => {
     if (!isAuthenticated) return
+    if (mockMode) return
     await v9CancelRun(runId)
     await refreshRuns()
-  }, [isAuthenticated, refreshRuns])
+  }, [isAuthenticated, refreshRuns, mockMode])
 
   const archiveRun = useCallback(async (runId) => {
     if (!isAuthenticated) return
+    if (mockMode) return
     await v9ArchiveRun(runId)
     await refreshRuns()
-  }, [isAuthenticated, refreshRuns])
+  }, [isAuthenticated, refreshRuns, mockMode])
 
   const importFile = useCallback(async (phaseId, file) => {
     if (!isAuthenticated) return null
+    if (mockMode) {
+      addToast('File imported (demo mode)', 'success')
+      return { id: `run-mock-${nextMockId.current++}`, type: 'import', status: 'completed' }
+    }
     const created = await v9ImportFile(phaseId, file)
     await refreshRuns(phaseId)
     return created
-  }, [isAuthenticated, refreshRuns])
+  }, [isAuthenticated, refreshRuns, mockMode, addToast])
 
   // --- Run polling: auto-refresh while runs are active ---
   useEffect(() => {
@@ -246,23 +320,20 @@ export function WorkspaceProvider({ children }) {
     return currentCampaign.phases?.find(p => p.id === currentPhaseId) || null
   }, [currentCampaign, currentPhaseId])
 
-  // Molecules: API when authenticated, mock otherwise
+  // Molecules from API
   const phaseMolecules = useMemo(() => {
     if (!currentPhase) return []
-    const mols = isAuthenticated && apiMolecules.length > 0
-      ? apiMolecules
-      : currentPhase.molecules || []
-    return mols.map(m => ({
+    return apiMolecules.map(m => ({
       ...m,
       bookmarked: bookmarkOverrides[m.id] !== undefined ? bookmarkOverrides[m.id] : m.bookmarked,
     }))
-  }, [currentPhase, isAuthenticated, apiMolecules, bookmarkOverrides])
+  }, [currentPhase, apiMolecules, bookmarkOverrides])
 
-  // Runs: API when authenticated, mock otherwise
+  // Runs from API
   const currentPhaseRuns = useMemo(() => {
     if (!currentPhase) return []
-    return isAuthenticated ? phaseRuns : (currentPhase.runs || [])
-  }, [currentPhase, isAuthenticated, phaseRuns])
+    return phaseRuns
+  }, [currentPhase, phaseRuns])
 
   // --- Navigation actions ---
   const selectProject = useCallback((projectId) => {
@@ -319,7 +390,7 @@ export function WorkspaceProvider({ children }) {
     // Optimistic update
     setBookmarkOverrides(prev => ({ ...prev, [molId]: newVal }))
 
-    if (isAuthenticated) {
+    if (isAuthenticated && !mockMode) {
       try {
         await v9BookmarkMolecule(molId, newVal)
       } catch (err) {
@@ -338,7 +409,7 @@ export function WorkspaceProvider({ children }) {
       return next
     })
 
-    if (isAuthenticated && currentPhaseId && ids.length > 0) {
+    if (isAuthenticated && !mockMode && currentPhaseId && ids.length > 0) {
       try {
         await v9BookmarkBatch(currentPhaseId, ids, true)
       } catch (err) {
@@ -370,6 +441,7 @@ export function WorkspaceProvider({ children }) {
     updateProject,
     deleteProject,
     createCampaign,
+    updateCampaign,
     createPhase,
     refreshProjects,
 
@@ -404,7 +476,7 @@ export function WorkspaceProvider({ children }) {
   }), [
     projects, currentProject, currentCampaign, currentPhase, phaseMolecules, currentPhaseRuns,
     loading, error, runsLoading, moleculesLoading,
-    createProject, updateProject, deleteProject, createCampaign, createPhase, refreshProjects,
+    createProject, updateProject, deleteProject, createCampaign, updateCampaign, createPhase, refreshProjects,
     selectProject, selectCampaign, selectPhase,
     selectedMoleculeIds, toggleSelection, selectAll, selectNone, selectBookmarked,
     toggleBookmark, bookmarkSelected,

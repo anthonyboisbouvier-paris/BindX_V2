@@ -2,18 +2,11 @@ import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
-import {
-  PHASE_TYPES,
-  MOCK_AGENT_INSIGHTS,
-  MOCK_TARGET_ASSESSMENT,
-  MOCK_ACTIVITY,
-} from '../mock/data.js'
+import { PHASE_TYPES } from '../mock/data.js'
 
-import TargetInfoCard from '../components/TargetInfoCard.jsx'
-import CampaignAgentPanel from '../components/CampaignAgentPanel.jsx'
 import ScoringWeightsEditor from '../components/ScoringWeightsEditor.jsx'
 import PhaseCreator from '../components/PhaseCreator.jsx'
-import ActivityTimeline from '../components/ActivityTimeline.jsx'
+import ProteinViewer from '../components/ProteinViewer.jsx'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,12 +44,12 @@ const PHASE_COLORS = {
   },
   lead_optimization: {
     border: 'border-green-200',
-    leftBar: 'bg-[#22c55e]',
+    leftBar: 'bg-[#00e6a0]',
     header: 'bg-green-50',
     accent: 'text-green-700',
     badge: 'bg-green-100 text-green-700',
-    btn: 'bg-[#22c55e] hover:bg-[#16a34a] text-white',
-    dotFilled: 'bg-[#22c55e]',
+    btn: 'bg-[#00e6a0] hover:bg-[#00c98b] text-white',
+    dotFilled: 'bg-[#00e6a0]',
     frozenBg: 'bg-green-50/50',
   },
 }
@@ -90,7 +83,7 @@ function PhaseBadge({ status, notCreated }) {
   }
   return (
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-700 font-medium">
-      <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />
+      <span className="w-1.5 h-1.5 rounded-full bg-[#00e6a0]" />
       Active
     </span>
   )
@@ -191,7 +184,7 @@ function FunnelPhaseCard({ phase, phaseIndex, projectId, navigate, onCreatePhase
               {/* Main stats */}
               <div className="flex items-center gap-5">
                 <div className="text-center">
-                  <p className="text-xl font-bold text-[#1e3a5f]">{stats.total_molecules ?? 0}</p>
+                  <p className="text-xl font-bold text-[#0f131d]">{stats.total_molecules ?? 0}</p>
                   <p className="text-xs text-gray-400">molecules</p>
                 </div>
                 <div className="text-gray-200 text-lg font-light">|</div>
@@ -251,6 +244,142 @@ function FunnelConnector({ prevPhase }) {
         <svg className="w-3 h-3 text-gray-300" fill="currentColor" viewBox="0 0 12 12">
           <path d="M6 9L1 3h10z" />
         </svg>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Campaign Strategy Brief — context for AI agents
+// ---------------------------------------------------------------------------
+
+function CampaignStrategyBrief({ campaign, onSave }) {
+  const { addToast } = useToast()
+  const [editing, setEditing] = useState(false)
+  const [notes, setNotes] = useState(campaign?.strategy_notes || '')
+  const [saving, setSaving] = useState(false)
+
+  const hasContent = !!campaign?.strategy_notes?.trim()
+
+  const handleSave = async () => {
+    if (!campaign?.id) return
+    setSaving(true)
+    try {
+      await onSave(campaign.id, { strategy_notes: notes })
+      addToast('Strategy brief saved', 'success')
+      setEditing(false)
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to save', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!editing && !hasContent) {
+    // Empty state — invitation to write
+    return (
+      <div className="bg-gradient-to-br from-violet-50 to-indigo-50 rounded-xl border border-violet-200 px-5 py-5">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center shrink-0 mt-0.5">
+            <svg className="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-violet-900 mb-1">AI Strategy Brief</h3>
+            <p className="text-xs text-violet-700 leading-relaxed mb-3">
+              Guide the AI agents by sharing your expertise on this target. What do you know about the binding site?
+              What properties matter most? Any known SAR, selectivity concerns, or chemical series to explore?
+            </p>
+            <button
+              onClick={() => setEditing(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Write Strategy Brief
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (editing) {
+    return (
+      <div className="bg-white rounded-xl border border-violet-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-3 bg-violet-50 border-b border-violet-100">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
+            <h3 className="text-sm font-semibold text-violet-900">AI Strategy Brief</h3>
+            <span className="text-xs text-violet-500 ml-1">This context will be used by AI agents during runs</span>
+          </div>
+        </div>
+        <div className="px-5 py-4">
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            rows={6}
+            placeholder={"Share your knowledge and priorities for this campaign. For example:\n\n\u2022 Known SAR: Hinge-binding motif is critical, prefer aminopyrimidine scaffolds\n\u2022 Selectivity: Must avoid CDK2 off-target (structurally similar pocket)\n\u2022 ADMET priorities: Oral bioavailability important, avoid CYP3A4 inhibition\n\u2022 Chemical space: Explore fragments from FBDD screen (MW < 300)\n\u2022 Constraints: LogP < 5, no reactive warheads unless covalent strategy"}
+            className="w-full text-sm px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400 resize-none leading-relaxed"
+          />
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-xs text-gray-400">
+              The more context you provide, the better the AI agents can optimize compound selection and scoring.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setNotes(campaign?.strategy_notes || ''); setEditing(false) }}
+                className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                  saving ? 'bg-gray-200 text-gray-400' : 'bg-violet-600 text-white hover:bg-violet-700'
+                }`}
+              >
+                {saving ? 'Saving...' : 'Save Brief'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Display mode — has content
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-5 py-3 bg-violet-50/50 border-b border-violet-50 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+          </svg>
+          <h3 className="text-sm font-semibold text-gray-700">AI Strategy Brief</h3>
+          <span className="text-xs text-violet-400 bg-violet-50 px-2 py-0.5 rounded">Used by AI agents</span>
+        </div>
+        <button
+          onClick={() => { setNotes(campaign.strategy_notes || ''); setEditing(true) }}
+          className="text-xs text-violet-600 hover:text-violet-800 transition-colors flex items-center gap-1"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+          Edit
+        </button>
+      </div>
+      <div className="px-5 py-4">
+        <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{campaign.strategy_notes}</p>
       </div>
     </div>
   )
@@ -366,7 +495,7 @@ function EditProjectPanel({ project, onSave, onCancel }) {
           <input
             value={name}
             onChange={e => setName(e.target.value)}
-            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f]"
+            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#0f131d]/20 focus:border-[#0f131d]"
           />
         </div>
         <div>
@@ -375,14 +504,14 @@ function EditProjectPanel({ project, onSave, onCancel }) {
             value={description}
             onChange={e => setDescription(e.target.value)}
             rows={2}
-            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 resize-none focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f]"
+            className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 resize-none focus:outline-none focus:ring-2 focus:ring-[#0f131d]/20 focus:border-[#0f131d]"
           />
         </div>
       </div>
       <div className="flex gap-2">
         <button
           onClick={() => onSave({ name, description })}
-          className="px-4 py-1.5 bg-[#1e3a5f] text-white text-xs font-semibold rounded-lg hover:bg-[#1e4a7f] transition-colors"
+          className="px-4 py-1.5 bg-[#0f131d] text-white text-xs font-semibold rounded-lg hover:bg-[#141925] transition-colors"
         >
           Save
         </button>
@@ -398,13 +527,233 @@ function EditProjectPanel({ project, onSave, onCancel }) {
 }
 
 // ---------------------------------------------------------------------------
+// Target Summary — rich display of all target data
+// ---------------------------------------------------------------------------
+
+function TargetSummary({ project, onEdit }) {
+  const tp = project.target_preview || {}
+  const uniprot = tp.uniprot || {}
+  const chembl = tp.chembl || {}
+  const structure = tp.structure || {}
+  const pockets = project.pockets_detected || tp.pockets || []
+  const selectedPocketIdx = tp.selected_pocket_index ?? 0
+  const selectedPocket = pockets[selectedPocketIdx] || null
+  const pdbUrl = structure.download_url || null
+
+  const [funcExpanded, setFuncExpanded] = useState(false)
+
+  return (
+    <div className="space-y-4">
+      {/* Header bar */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-[#0f131d] to-[#141925] px-5 py-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-white font-bold text-base">{project.target_name}</h3>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                {uniprot.gene && (
+                  <span className="text-blue-200 text-sm font-mono font-semibold">{uniprot.gene}</span>
+                )}
+                {uniprot.organism && (
+                  <span className="text-blue-300 text-xs italic">{uniprot.organism}</span>
+                )}
+                {project.target_input_value && (
+                  <span className="text-xs font-mono bg-white/10 text-blue-100 px-2 py-0.5 rounded">
+                    {project.target_input_value}
+                  </span>
+                )}
+                {uniprot.seqLen > 0 && (
+                  <span className="text-xs text-blue-300">{uniprot.seqLen} aa</span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={onEdit}
+              className="flex items-center gap-1.5 text-xs text-blue-200 hover:text-white transition-colors bg-white/10 px-3 py-1.5 rounded-lg"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Edit target
+            </button>
+          </div>
+        </div>
+
+        {/* Quick stats row */}
+        <div className="px-5 py-3 flex items-center gap-6 flex-wrap text-sm">
+          {project.target_pdb_id && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">PDB</span>
+              <span className="font-mono font-semibold text-gray-700">{project.target_pdb_id}</span>
+            </span>
+          )}
+          {project.structure_method && (
+            <span className="text-gray-500">
+              <span className="font-medium text-gray-700">{project.structure_method}</span>
+              {project.structure_resolution && ` at ${project.structure_resolution.toFixed(2)} \u00C5`}
+            </span>
+          )}
+          {pockets.length > 0 && (
+            <span className="text-gray-500">
+              <span className="font-medium text-gray-700">{pockets.length}</span> pocket{pockets.length > 1 ? 's' : ''} detected
+            </span>
+          )}
+          {chembl.n_actives > 0 && (
+            <span className="text-gray-500">
+              <span className="font-medium text-gray-700">{chembl.n_actives.toLocaleString()}</span> ChEMBL actives
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Two-column: 3D viewer + info panels */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Left: 3D Viewer + Domains/Keywords underneath */}
+        <div className="space-y-4">
+          {pdbUrl ? (
+            <ProteinViewer
+              pdbUrl={pdbUrl}
+              selectedPocket={selectedPocket}
+              uniprotFeatures={uniprot.activeSites || uniprot.bindingSites || uniprot.domains ? {
+                activeSites: uniprot.activeSites,
+                bindingSites: uniprot.bindingSites,
+                domains: uniprot.domains,
+              } : null}
+              height={400}
+            />
+          ) : (
+            <div className="h-[400px] bg-[#0f1923] rounded-xl flex items-center justify-center border border-gray-200">
+              <p className="text-gray-500 text-sm">No 3D structure available</p>
+            </div>
+          )}
+
+          {/* Domains + Keywords — under the 3D viewer */}
+          {uniprot.domains?.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Protein Domains</p>
+              <div className="flex flex-wrap gap-1.5">
+                {uniprot.domains.map((d, i) => (
+                  <span key={i} className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
+                    {d.name} ({d.start}-{d.end})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {uniprot.keywords?.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Keywords</p>
+              <div className="flex flex-wrap gap-1.5">
+                {uniprot.keywords.slice(0, 15).map((k, i) => (
+                  <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{k}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Function + Pockets + ChEMBL + Diseases */}
+        <div className="space-y-4">
+          {/* Function — truncated with expand */}
+          {uniprot.function && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Function</p>
+              <div className="relative">
+                <p className={`text-sm text-gray-700 leading-relaxed ${!funcExpanded ? 'line-clamp-4' : ''}`}>
+                  {uniprot.function}
+                </p>
+                {uniprot.function.length > 300 && (
+                  <button
+                    onClick={() => setFuncExpanded(v => !v)}
+                    className="mt-1 text-xs text-[#0f131d] font-medium hover:underline"
+                  >
+                    {funcExpanded ? 'Show less' : 'Read more...'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Pockets */}
+          {pockets.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Binding Pockets</p>
+              <div className="space-y-2">
+                {pockets.map((p, i) => {
+                  const prob = Math.round((p.probability || 0) * 100)
+                  const residues = Array.isArray(p.residues)
+                    ? (typeof p.residues[0] === 'string' && p.residues[0].includes(' ') ? p.residues[0].split(' ') : p.residues)
+                    : []
+                  const isSelected = i === selectedPocketIdx
+                  return (
+                    <div key={i} className={`flex items-center justify-between p-2.5 rounded-lg ${isSelected ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center ${isSelected ? 'bg-amber-400 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                          {i + 1}
+                        </span>
+                        <div>
+                          <span className="text-sm font-medium text-gray-700">Pocket #{i + 1}</span>
+                          {p.method && <span className="text-xs text-gray-400 ml-1.5">{p.method}</span>}
+                          <span className="text-xs text-gray-400 ml-1.5">{residues.length} residues</span>
+                        </div>
+                      </div>
+                      <span className={`text-sm font-bold ${prob >= 80 ? 'text-green-600' : prob >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
+                        {prob}%
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ChEMBL info */}
+          {chembl.has_data && (
+            <div className="bg-green-50 border border-green-100 rounded-xl px-5 py-4">
+              <p className="text-xs font-semibold text-green-700 uppercase tracking-wider mb-2">ChEMBL Data</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="text-center">
+                  <p className="text-xl font-bold text-green-700">{chembl.n_actives?.toLocaleString()}</p>
+                  <p className="text-xs text-green-600">Active compounds</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xl font-bold text-green-700">{chembl.n_with_ic50?.toLocaleString() || '-'}</p>
+                  <p className="text-xs text-green-600">With IC50 data</p>
+                </div>
+              </div>
+              {chembl.target_chembl_id && (
+                <p className="text-xs text-green-600 mt-2">Target: {chembl.target_chembl_id}</p>
+              )}
+            </div>
+          )}
+
+          {/* Diseases */}
+          {uniprot.diseases?.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Associated Diseases</p>
+              <div className="flex flex-wrap gap-1.5">
+                {uniprot.diseases.slice(0, 8).map((d, i) => (
+                  <span key={i} className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-md">{d}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // ProjectHome
 // ---------------------------------------------------------------------------
 
 export default function ProjectHome() {
   const { projectId } = useParams()
   const navigate = useNavigate()
-  const { projects, selectProject, updateProject, deleteProject, createCampaign, createPhase } = useWorkspace()
+  const { projects, selectProject, updateProject, deleteProject, createCampaign, updateCampaign, createPhase } = useWorkspace()
   const { addToast } = useToast()
 
   const [editing, setEditing] = useState(false)
@@ -422,7 +771,7 @@ export default function ProjectHome() {
     return (
       <div className="text-center py-20">
         <p className="text-gray-400 text-sm">Project not found.</p>
-        <Link to="/" className="text-[#1e3a5f] text-sm hover:underline mt-2 inline-block">
+        <Link to="/" className="text-[#0f131d] text-sm hover:underline mt-2 inline-block">
           Back to projects
         </Link>
       </div>
@@ -431,10 +780,7 @@ export default function ProjectHome() {
 
   const campaign = project.campaigns?.[0] || null
   const phases = campaign?.phases || []
-  const assessment = MOCK_TARGET_ASSESSMENT[project.id] || null
-
-  // Filter activity to this project
-  const projectActivity = MOCK_ACTIVITY.filter(a => a.project_id === project.id)
+  const hasTarget = !!project.target_preview
 
   return (
     <div className="space-y-5">
@@ -442,7 +788,7 @@ export default function ProjectHome() {
       <div>
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#1e3a5f] transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#0f131d] transition-colors"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -456,13 +802,13 @@ export default function ProjectHome() {
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 flex-wrap mb-1.5">
-              <h1 className="text-2xl font-bold text-[#1e3a5f] leading-tight">{project.name}</h1>
+              <h1 className="text-2xl font-bold text-[#0f131d] leading-tight">{project.name}</h1>
               <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
                 project.status === 'active'
                   ? 'bg-green-50 text-green-700'
                   : 'bg-gray-100 text-gray-500'
               }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${project.status === 'active' ? 'bg-[#22c55e]' : 'bg-gray-400'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${project.status === 'active' ? 'bg-[#00e6a0]' : 'bg-gray-400'}`} />
                 {project.status === 'active' ? 'Active' : project.status || 'Active'}
               </span>
             </div>
@@ -485,9 +831,9 @@ export default function ProjectHome() {
                   {project.target_name}
                 </span>
               )}
-              {project.uniprot_id && (
+              {project.target_input_value && (
                 <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded font-mono text-xs font-semibold">
-                  {project.uniprot_id}
+                  {project.target_input_value}
                 </span>
               )}
               {project.target_pdb_id && (
@@ -552,10 +898,33 @@ export default function ProjectHome() {
         )}
       </div>
 
-      {/* ---- Target Info Card ---- */}
-      {assessment && (
-        <TargetInfoCard assessment={assessment} project={project} />
+      {/* ---- Target Setup Gate ---- */}
+      {!hasTarget && (
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 px-6 py-10 text-center">
+          <svg className="w-12 h-12 text-blue-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9" strokeWidth={1.8} />
+            <circle cx="12" cy="12" r="5" strokeWidth={1.8} />
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" strokeWidth={0} />
+          </svg>
+          <h3 className="text-lg font-bold text-[#0f131d] mb-1">Set Up Your Target</h3>
+          <p className="text-sm text-gray-500 mb-5 max-w-md mx-auto">
+            Before creating campaigns, you need to configure your protein target, select a 3D structure, and choose a binding pocket.
+          </p>
+          <button
+            onClick={() => navigate(`/project/${projectId}/target-setup`)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0f131d] text-white text-sm font-semibold rounded-xl hover:bg-[#141925] transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-1.47 4.9a2.25 2.25 0 01-2.156 1.6H8.626a2.25 2.25 0 01-2.156-1.6L5 14.5m14 0H5" />
+            </svg>
+            Configure Target
+          </button>
+        </div>
       )}
+
+      {/* ---- Target Summary (when configured) ---- */}
+      {hasTarget && <TargetSummary project={project} onEdit={() => navigate(`/project/${projectId}/target-setup`)} />}
 
       {/* ---- Campaign section ---- */}
       {campaign ? (
@@ -570,6 +939,9 @@ export default function ProjectHome() {
               {phases.filter(p => p.created_at).length}/{phases.length} phases created
             </span>
           </div>
+
+          {/* AI Strategy Brief */}
+          <CampaignStrategyBrief campaign={campaign} onSave={updateCampaign} />
 
           {/* Drug Discovery Funnel */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-6 py-6">
@@ -602,12 +974,6 @@ export default function ProjectHome() {
             </div>
           </div>
 
-          {/* AI Agent Insights */}
-          <CampaignAgentPanel
-            insights={MOCK_AGENT_INSIGHTS}
-            onAskAgent={(q) => addToast('AI Agent is not yet connected to the backend', 'info')}
-          />
-
           {/* Campaign settings */}
           <CampaignSettings campaign={campaign} />
         </>
@@ -626,7 +992,7 @@ export default function ProjectHome() {
             className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors ${
               campaignCreating
                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                : 'bg-[#1e3a5f] text-white hover:bg-[#1e4a7f]'
+                : 'bg-[#0f131d] text-white hover:bg-[#141925]'
             }`}
             disabled={campaignCreating}
             onClick={async () => {
@@ -660,20 +1026,6 @@ export default function ProjectHome() {
               </>
             )}
           </button>
-        </div>
-      )}
-
-      {/* Recent Activity */}
-      {projectActivity.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Recent Activity
-          </h3>
-          <ActivityTimeline activities={projectActivity} showProject={false} />
         </div>
       )}
 

@@ -66,7 +66,7 @@ function ExportDropdown({ onExport, onClose }) {
         <button
           key={opt.id}
           onClick={() => { onExport(opt.id); onClose() }}
-          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-[#1e3a5f] transition-colors text-left"
+          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-[#0f131d] transition-colors text-left"
         >
           <span className="text-gray-400">{opt.icon}</span>
           {opt.label}
@@ -123,7 +123,7 @@ export default function SelectionToolbar({
         <div
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
             selectedCount > 0
-              ? 'bg-[#1e3a5f] text-white border-[#1e3a5f]'
+              ? 'bg-[#0f131d] text-white border-[#0f131d]'
               : 'bg-gray-100 text-gray-500 border-gray-200'
           }`}
         >
@@ -144,7 +144,7 @@ export default function SelectionToolbar({
         {/* Quick select buttons */}
         <button
           onClick={onSelectAll}
-          className="text-xs text-gray-500 hover:text-[#1e3a5f] transition-colors hover:underline underline-offset-2"
+          className="text-xs text-gray-500 hover:text-[#0f131d] transition-colors hover:underline underline-offset-2"
         >
           All ({totalCount})
         </button>
@@ -164,7 +164,7 @@ export default function SelectionToolbar({
         {activeFilterCount > 0 && filteredCount != null && (
           <button
             onClick={onSelectFiltered}
-            className="text-xs text-blue-600 hover:text-[#1e3a5f] transition-colors hover:underline underline-offset-2 flex items-center gap-0.5"
+            className="text-xs text-blue-600 hover:text-[#0f131d] transition-colors hover:underline underline-offset-2 flex items-center gap-0.5"
           >
             Filtered ({filteredCount})
           </button>
@@ -216,7 +216,7 @@ export default function SelectionToolbar({
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
               isFrozen
                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-[#1e3a5f] hover:bg-[#2d5a8e] text-white shadow-sm hover:shadow-md'
+                : 'bg-[#0f131d] hover:bg-[#1a2332] text-white shadow-sm hover:shadow-md'
             }`}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

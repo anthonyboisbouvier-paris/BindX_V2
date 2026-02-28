@@ -105,8 +105,8 @@ export default function OptimizationChart({ iterations = [] }) {
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#22c55e" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#22c55e" stopOpacity="0.02" />
+            <stop offset="0%" stopColor="#00e6a0" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#00e6a0" stopOpacity="0.02" />
           </linearGradient>
         </defs>
 
@@ -161,7 +161,7 @@ export default function OptimizationChart({ iterations = [] }) {
           <path
             d={linePath}
             fill="none"
-            stroke="#1e3a5f"
+            stroke="#0f131d"
             strokeWidth={2}
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -174,7 +174,7 @@ export default function OptimizationChart({ iterations = [] }) {
               cx={p.x}
               cy={p.y}
               r={tooltip && tooltip.iteration === p.iteration ? 5 : 3}
-              fill={tooltip && tooltip.iteration === p.iteration ? '#22c55e' : '#1e3a5f'}
+              fill={tooltip && tooltip.iteration === p.iteration ? '#00e6a0' : '#0f131d'}
               stroke="white"
               strokeWidth={1.5}
               style={{ transition: 'r 0.1s, fill 0.1s' }}
@@ -205,7 +205,7 @@ export default function OptimizationChart({ iterations = [] }) {
             <line
               x1={tooltip.x} y1={0}
               x2={tooltip.x} y2={INNER_H}
-              stroke="#22c55e"
+              stroke="#00e6a0"
               strokeWidth={1}
               strokeDasharray="4,3"
               opacity={0.6}

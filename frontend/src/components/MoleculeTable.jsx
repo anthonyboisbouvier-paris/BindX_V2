@@ -67,8 +67,8 @@ function SortIcon({ direction, rank }) {
   }
   return (
     <div className="flex items-center gap-0.5 flex-shrink-0">
-      {rank && <span className="text-[8px] text-[#1e3a5f] font-bold">{rank}</span>}
-      <svg className="w-3 h-3 text-[#1e3a5f]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      {rank && <span className="text-[8px] text-[#0f131d] font-bold">{rank}</span>}
+      <svg className="w-3 h-3 text-[#0f131d]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         {direction === 'asc' ? (
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
         ) : (
@@ -265,7 +265,7 @@ export default function MoleculeTable({
                   checked={allVisible}
                   ref={el => { if (el) el.indeterminate = someVisible }}
                   onChange={onSelectAll}
-                  className="accent-[#1e3a5f] cursor-pointer w-3.5 h-3.5"
+                  className="accent-[#0f131d] cursor-pointer w-3.5 h-3.5"
                   aria-label="Select all"
                 />
               </th>
@@ -289,7 +289,7 @@ export default function MoleculeTable({
                     className={`px-3 py-2.5 border-b border-gray-200 font-semibold uppercase tracking-wide text-[10px] whitespace-nowrap select-none ${
                       col.type === 'number' ? 'text-right' : 'text-left'
                     } ${col.sortable ? 'cursor-pointer transition-colors' : ''} ${
-                      isActive ? 'text-[#1e3a5f] bg-blue-50/50' : 'text-gray-500 hover:text-[#1e3a5f] hover:bg-gray-100'
+                      isActive ? 'text-[#0f131d] bg-blue-50/50' : 'text-gray-500 hover:text-[#0f131d] hover:bg-gray-100'
                     }`}
                     style={{ minWidth: col.width || 80 }}
                     onClick={e => handleHeaderClick(col, e)}
@@ -322,7 +322,7 @@ export default function MoleculeTable({
                 <tr
                   key={mol.id}
                   className={`cursor-pointer transition-colors duration-100 group ${rowBg} hover:bg-blue-50/60 ${
-                    isSelected ? 'border-l-[3px] border-[#1e3a5f]' :
+                    isSelected ? 'border-l-[3px] border-[#0f131d]' :
                     isBookmarked ? 'border-l-2 border-yellow-300' :
                     'border-l-2 border-transparent'
                   }`}
@@ -337,7 +337,7 @@ export default function MoleculeTable({
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => onToggleSelect && onToggleSelect(mol.id)}
-                      className="accent-[#1e3a5f] cursor-pointer w-3.5 h-3.5"
+                      className="accent-[#0f131d] cursor-pointer w-3.5 h-3.5"
                       aria-label={`Select ${mol.name || mol.id}`}
                     />
                   </td>
@@ -407,7 +407,7 @@ export default function MoleculeTable({
               {sorts.map((s, i) => (
                 <span key={s.key} className="flex items-center gap-0.5">
                   {i > 0 && <span className="text-gray-300">·</span>}
-                  <span className="font-medium text-[#1e3a5f]">
+                  <span className="font-medium text-[#0f131d]">
                     {columns.find(c => c.key === s.key)?.label || s.key}
                   </span>
                   <span className="text-[10px] text-gray-400">{s.dir === 'asc' ? '↑' : '↓'}</span>
@@ -422,7 +422,7 @@ export default function MoleculeTable({
             </div>
           )}
           {selectedIds.size > 0 && (
-            <span className="text-xs text-[#1e3a5f] font-medium tabular-nums">
+            <span className="text-xs text-[#0f131d] font-medium tabular-nums">
               {selectedIds.size} selected
             </span>
           )}

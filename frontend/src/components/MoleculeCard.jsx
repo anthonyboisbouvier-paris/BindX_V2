@@ -305,7 +305,7 @@ export default function MoleculeCard({ molecule, rank }) {
             {/* V12: Pose Quality Panel */}
             {molecule.pose_quality && (
               <div className="mt-4 p-3 bg-blue-50/50 rounded-lg">
-                <h4 className="text-xs font-semibold text-[#1e3a5f] mb-2">Pose Quality</h4>
+                <h4 className="text-xs font-semibold text-[#0f131d] mb-2">Pose Quality</h4>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="flex justify-between">
                     <span className="text-gray-500">Contacts &lt;4A</span>
@@ -316,7 +316,7 @@ export default function MoleculeCard({ molecule, rank }) {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">H-bonds</span>
-                    <span className="font-medium text-[#1e3a5f]">{molecule.pose_quality.n_hbonds}</span>
+                    <span className="font-medium text-[#0f131d]">{molecule.pose_quality.n_hbonds}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Clashes</span>

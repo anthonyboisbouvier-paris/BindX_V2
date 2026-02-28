@@ -76,7 +76,7 @@ function TabButton({ active, onClick, children }) {
       onClick={onClick}
       className={`px-3 py-2 text-xs font-semibold whitespace-nowrap transition-colors border-b-2 ${
         active
-          ? 'border-[#1e3a5f] text-[#1e3a5f]'
+          ? 'border-[#0f131d] text-[#0f131d]'
           : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
       }`}
     >
@@ -133,7 +133,7 @@ function TabScores({ molecule, allMolecules }) {
       key: 'docking_score',
       label: 'Docking Score',
       unit: 'kcal/mol',
-      color: { bg: 'bg-blue-50', border: 'border-blue-100', value: 'text-[#1e3a5f]', accent: 'bg-blue-500' },
+      color: { bg: 'bg-blue-50', border: 'border-blue-100', value: 'text-[#0f131d]', accent: 'bg-blue-500' },
       lowerIsBetter: true,
       decimals: 1,
     },
@@ -458,7 +458,7 @@ function TabADMET({ molecule }) {
 
   const values = axes.map(a => typeof admet[a.key] === 'number' ? admet[a.key] : 0.5)
   const avg = values.reduce((a, b) => a + b, 0) / values.length
-  const overallColor = avg >= 0.72 ? '#22c55e' : avg >= 0.55 ? '#eab308' : '#ef4444'
+  const overallColor = avg >= 0.72 ? '#00e6a0' : avg >= 0.55 ? '#eab308' : '#ef4444'
   const overallLabel = avg >= 0.72 ? 'Good' : avg >= 0.55 ? 'Mixed' : 'Poor'
   const overallVariant = avg >= 0.72 ? 'green' : avg >= 0.55 ? 'yellow' : 'red'
 
@@ -645,10 +645,10 @@ function TabSafety({ molecule, details }) {
 
       {/* Confidence breakdown */}
       {safety.confidence && (
-        <div className="bg-[#1e3a5f]/5 rounded-xl p-3 space-y-2">
+        <div className="bg-[#0f131d]/5 rounded-xl p-3 space-y-2">
           <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-semibold text-[#1e3a5f]">Confidence</p>
-            <span className="text-sm font-bold text-[#1e3a5f]">{pct(safety.confidence.overall)}% overall</span>
+            <p className="text-xs font-semibold text-[#0f131d]">Confidence</p>
+            <span className="text-sm font-bold text-[#0f131d]">{pct(safety.confidence.overall)}% overall</span>
           </div>
           {[
             { key: 'binding',     label: 'Binding' },
@@ -660,11 +660,11 @@ function TabSafety({ molecule, details }) {
               <span className="w-20 text-gray-500 flex-shrink-0">{c.label}</span>
               <div className="flex-1 bg-white/60 rounded-full h-1.5 overflow-hidden">
                 <div
-                  className="bg-[#1e3a5f] h-full rounded-full"
+                  className="bg-[#0f131d] h-full rounded-full"
                   style={{ width: `${pct(safety.confidence[c.key]) || 0}%` }}
                 />
               </div>
-              <span className="w-8 text-right font-semibold text-[#1e3a5f]">
+              <span className="w-8 text-right font-semibold text-[#0f131d]">
                 {pct(safety.confidence[c.key]) || '—'}%
               </span>
             </div>
@@ -693,7 +693,7 @@ function TabSynthesis({ details }) {
               <div key={i}>
                 <div className="bg-white rounded-xl border border-gray-100 p-3 shadow-sm">
                   <div className="flex items-start gap-2 mb-2">
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#1e3a5f] text-white text-[10px] font-bold flex items-center justify-center">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#0f131d] text-white text-[10px] font-bold flex items-center justify-center">
                       {i + 1}
                     </span>
                     <p className="font-semibold text-sm text-gray-800">{step.product}</p>
@@ -775,10 +775,10 @@ function TabInteractions({ details }) {
   return (
     <div className="space-y-4">
       {/* Summary */}
-      <div className="bg-[#1e3a5f]/5 rounded-xl p-3">
+      <div className="bg-[#0f131d]/5 rounded-xl p-3">
         <div className="grid grid-cols-3 gap-2 text-center text-xs">
           {[
-            { label: 'Total',       value: total_contacts, color: 'text-[#1e3a5f]' },
+            { label: 'Total',       value: total_contacts, color: 'text-[#0f131d]' },
             { label: 'H-Bonds',     value: hbonds,          color: 'text-green-600' },
             { label: 'Hydrophobic', value: hydrophobic,     color: 'text-orange-500' },
             { label: 'Ionic',       value: ionic,           color: 'text-blue-600' },
@@ -907,7 +907,7 @@ export default function MoleculeDrawer({
         {/* ----------------------------------------------------------------- */}
         {/* Header                                                              */}
         {/* ----------------------------------------------------------------- */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-[#1e3a5f] flex-shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-[#0f131d] flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <h3 className="font-bold text-white text-sm truncate">
               {molecule.name || molecule.id}
@@ -964,9 +964,9 @@ export default function MoleculeDrawer({
         {/* ----------------------------------------------------------------- */}
         {/* 3D Viewer placeholder                                               */}
         {/* ----------------------------------------------------------------- */}
-        <div className="flex-shrink-0 bg-[#0d1b2a] border-b border-[#1e3a5f]/30">
+        <div className="flex-shrink-0 bg-[#0d1b2a] border-b border-[#0f131d]/30">
           <div className="h-36 flex flex-col items-center justify-center gap-2 relative">
-            <svg className="w-10 h-10 text-[#1e3a5f]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-10 h-10 text-[#0f131d]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.8}
                 d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
             </svg>

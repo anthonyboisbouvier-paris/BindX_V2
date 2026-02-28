@@ -102,7 +102,7 @@ function getSourceStatus(sourceKey, activeSource) {
 // Score color helper
 // --------------------------------------------------
 function scoreColor(val) {
-  if (val >= 0.7) return '#22c55e'   // green
+  if (val >= 0.7) return '#00e6a0'   // green
   if (val >= 0.5) return '#eab308'   // yellow
   return '#ef4444'                    // red
 }

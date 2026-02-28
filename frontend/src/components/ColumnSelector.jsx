@@ -102,7 +102,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
         onClick={() => { setOpen(v => !v); if (!open) setSearch('') }}
         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-all duration-150 ${
           open
-            ? 'border-[#1e3a5f] text-[#1e3a5f] bg-blue-50 shadow-sm'
+            ? 'border-[#0f131d] text-[#0f131d] bg-blue-50 shadow-sm'
             : 'border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300'
         }`}
       >
@@ -141,7 +141,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
               <span className="text-gray-200 text-xs">|</span>
               <button
                 onClick={showAll}
-                className="text-[10px] text-[#1e3a5f] hover:text-[#2d5a8e] transition-colors font-medium"
+                className="text-[10px] text-[#0f131d] hover:text-[#1a2332] transition-colors font-medium"
               >
                 Show all
               </button>
@@ -159,7 +159,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search columns..."
-                className="w-full text-xs border border-gray-200 rounded-lg pl-7 pr-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#1e3a5f] text-gray-700 placeholder-gray-300"
+                className="w-full text-xs border border-gray-200 rounded-lg pl-7 pr-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#0f131d] text-gray-700 placeholder-gray-300"
                 autoFocus
               />
               {search && (
@@ -210,7 +210,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => toggleGroup(keys, true)}
-                        className="text-[9px] text-gray-400 hover:text-[#1e3a5f] transition-colors px-1"
+                        className="text-[9px] text-gray-400 hover:text-[#0f131d] transition-colors px-1"
                         title="Show all in group"
                       >
                         All
@@ -244,7 +244,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
                               type="checkbox"
                               checked={checked}
                               onChange={() => toggle(k)}
-                              className="accent-[#1e3a5f] w-3.5 h-3.5 flex-shrink-0"
+                              className="accent-[#0f131d] w-3.5 h-3.5 flex-shrink-0"
                             />
                             <span className={`text-xs flex-1 ${checked ? 'text-gray-700 font-medium' : 'text-gray-500'}`}>
                               {col.label}
@@ -279,7 +279,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
             </span>
             <button
               onClick={() => { setOpen(false); setSearch('') }}
-              className="text-[10px] text-[#1e3a5f] hover:underline font-medium"
+              className="text-[10px] text-[#0f131d] hover:underline font-medium"
             >
               Done
             </button>

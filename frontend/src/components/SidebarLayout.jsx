@@ -1,23 +1,24 @@
 import React, { useEffect } from 'react'
 import { Outlet, NavLink, Link, useParams, useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
+import { useAuth } from '../contexts/AuthContext'
 
 // ---------------------------------------------------------------------------
 // Brand logo SVG
 // ---------------------------------------------------------------------------
 
 function BindXLogo({ size = 32 }) {
+  const s = size * 26 / 32 // scale viewBox
   return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect width="40" height="40" rx="8" fill="#1e3a5f" />
-      <circle cx="20" cy="15" r="6" fill="none" stroke="#22c55e" strokeWidth="2.5" />
-      <circle cx="10" cy="29" r="3.5" fill="none" stroke="#22c55e" strokeWidth="2" />
-      <circle cx="30" cy="29" r="3.5" fill="none" stroke="#22c55e" strokeWidth="2" />
-      <line x1="20" y1="21" x2="10" y2="29" stroke="#22c55e" strokeWidth="1.8" />
-      <line x1="20" y1="21" x2="30" y2="29" stroke="#22c55e" strokeWidth="1.8" />
-      <circle cx="20" cy="15" r="2.5" fill="#22c55e" />
-      <circle cx="10" cy="29" r="2" fill="#22c55e" />
-      <circle cx="30" cy="29" r="2" fill="#22c55e" />
+    <svg width={size} height={size} viewBox="0 0 26 26" fill="none">
+      <defs><linearGradient id="sidebar-lg" x1="0" y1="0" x2="26" y2="26"><stop stopColor="#00e6a0" /><stop offset="1" stopColor="#06b6d4" /></linearGradient></defs>
+      <path d="M8.5 5.5L13 3L17.5 5.5V10.5L13 13L8.5 10.5Z" stroke="url(#sidebar-lg)" strokeWidth="1.4" fill="none" />
+      <path d="M8.5 15.5L13 13L17.5 15.5V20.5L13 23L8.5 20.5Z" stroke="url(#sidebar-lg)" strokeWidth="1.4" fill="none" />
+      <circle cx="13" cy="13" r="2.2" fill="url(#sidebar-lg)" />
+      <circle cx="8.5" cy="5.5" r="1.1" fill="url(#sidebar-lg)" opacity=".5" />
+      <circle cx="17.5" cy="5.5" r="1.1" fill="url(#sidebar-lg)" opacity=".5" />
+      <circle cx="8.5" cy="20.5" r="1.1" fill="url(#sidebar-lg)" opacity=".5" />
+      <circle cx="17.5" cy="20.5" r="1.1" fill="url(#sidebar-lg)" opacity=".5" />
     </svg>
   )
 }
@@ -83,7 +84,7 @@ function PhaseStatusDot({ status, notCreated }) {
     return <IconLock />
   }
   if (status === 'active') {
-    return <span className="w-2 h-2 rounded-full bg-dockit-green shrink-0 shadow-sm" style={{ boxShadow: '0 0 0 2px rgba(34,197,94,0.3)' }} />
+    return <span className="w-2 h-2 rounded-full bg-bx-mint shrink-0 shadow-sm" style={{ boxShadow: '0 0 0 2px rgba(0,230,160,0.3)' }} />
   }
   // fallback
   return <span className="w-2 h-2 rounded-full bg-white/30 shrink-0" />
@@ -215,9 +216,25 @@ function BottomNavLink({ to, icon, label }) {
 // SidebarLayout — main export
 // ---------------------------------------------------------------------------
 
+function IconLogout() {
+  return (
+    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+        d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3-3l3-3m0 0l-3-3m3 3H9" />
+    </svg>
+  )
+}
+
 export default function SidebarLayout() {
   const { projectId, phaseId } = useParams()
   const { projects, currentProject, selectProject } = useWorkspace()
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/welcome')
+  }
 
   // Sync workspace state with URL param
   useEffect(() => {
@@ -232,38 +249,40 @@ export default function SidebarLayout() {
   return (
     <div className="flex min-h-screen">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:flex-col w-60 bg-[#1e3a5f] shrink-0 min-h-screen">
+      <aside className="hidden md:flex md:flex-col w-60 bg-bx-s1 shrink-0 min-h-screen">
 
         {/* Brand header */}
         <div className="px-4 py-4 border-b border-white/10">
           <Link to="/" className="flex items-center gap-2.5 group">
             <BindXLogo size={32} />
             <div>
-              <p className="text-white font-bold text-base leading-none tracking-tight group-hover:text-dockit-green transition-colors">
-                BindX
+              <p className="text-white font-bold text-base leading-none tracking-tight group-hover:text-bx-mint transition-colors">
+                Bind<span className="text-bx-mint">X</span>
               </p>
               <p className="text-white/30 text-[10px] leading-none mt-0.5 font-mono">v9.0</p>
             </div>
           </Link>
         </div>
 
-        {/* All Projects link */}
+        {/* Navigation link — context-dependent */}
         <div className="px-3 pt-3 pb-1">
-          <NavLink
-            to="/"
-            end
-            className={({ isActive }) =>
-              [
-                'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors duration-150',
-                isActive && !projectId
-                  ? 'bg-white/10 text-white font-medium'
-                  : 'text-white/55 hover:text-white hover:bg-white/5',
-              ].join(' ')
-            }
-          >
-            <IconArrowLeft />
-            <span>All Projects</span>
-          </NavLink>
+          {projectId ? (
+            <NavLink
+              to="/"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors duration-150 text-white/55 hover:text-white hover:bg-white/5"
+            >
+              <IconArrowLeft />
+              <span>All Projects</span>
+            </NavLink>
+          ) : (
+            <NavLink
+              to="/welcome"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors duration-150 text-white/55 hover:text-white hover:bg-white/5"
+            >
+              <IconArrowLeft />
+              <span>Home</span>
+            </NavLink>
+          )}
         </div>
 
         {/* Divider + project tree (when a project is selected) */}
@@ -292,12 +311,22 @@ export default function SidebarLayout() {
         <div className="px-3 py-3 border-t border-white/10 space-y-0.5">
           <BottomNavLink to="/references" icon={<IconBook />} label="References" />
           <BottomNavLink to="/methodology" icon={<IconFlask />} label="Methodology" />
-          <p className="text-white/20 text-[10px] px-3 pt-1.5 font-mono">BindX v9.0</p>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors duration-150 text-white/40 hover:text-white hover:bg-white/5 w-full"
+          >
+            <IconLogout />
+            <span>Sign out</span>
+          </button>
+          {user?.email && (
+            <p className="text-white/20 text-[10px] px-3 pt-0.5 truncate">{user.email}</p>
+          )}
+          <p className="text-white/20 text-[10px] px-3 pt-0.5 font-mono">BindX v9.0</p>
         </div>
       </aside>
 
       {/* Mobile horizontal nav */}
-      <div className="md:hidden fixed top-0 inset-x-0 z-50 bg-[#1e3a5f] border-b border-white/10">
+      <div className="md:hidden fixed top-0 inset-x-0 z-50 bg-bx-s1 border-b border-white/10">
         <div className="flex items-center justify-between px-4 h-12">
           <Link to="/" className="flex items-center gap-2">
             <BindXLogo size={24} />
@@ -328,12 +357,23 @@ export default function SidebarLayout() {
             </nav>
           )}
 
-          {/* Back to all projects link on mobile */}
-          {!projectId && (
+          {/* Context-dependent back link on mobile */}
+          {projectId ? (
             <NavLink to="/" className="text-white/60 hover:text-white text-xs">
               All Projects
             </NavLink>
+          ) : (
+            <NavLink to="/welcome" className="text-white/60 hover:text-white text-xs">
+              Home
+            </NavLink>
           )}
+
+          <button
+            onClick={handleLogout}
+            className="text-white/40 hover:text-white text-xs ml-2"
+          >
+            Sign out
+          </button>
         </div>
       </div>
 

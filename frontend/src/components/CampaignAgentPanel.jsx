@@ -103,7 +103,7 @@ function InsightCard({ insight, onAction }) {
           <p className="text-xs text-gray-500 leading-relaxed">{insight.body}</p>
           {insight.action && (
             <button
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1e3a5f] text-white text-xs font-medium rounded-lg hover:bg-[#1e4a7f] transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0f131d] text-white text-xs font-medium rounded-lg hover:bg-[#141925] transition-colors"
               onClick={(e) => {
                 e.stopPropagation()
                 if (onAction) onAction(insight.action)
@@ -172,7 +172,7 @@ export default function CampaignAgentPanel({ insights: initialInsights = [], onA
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
       {/* Header */}
       <div className="px-5 py-3.5 border-b border-gray-50 flex items-center gap-2">
-        <div className="w-6 h-6 rounded-full bg-[#1e3a5f] flex items-center justify-center shrink-0">
+        <div className="w-6 h-6 rounded-full bg-[#0f131d] flex items-center justify-center shrink-0">
           <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
@@ -204,13 +204,13 @@ export default function CampaignAgentPanel({ insights: initialInsights = [], onA
             onChange={e => setQuestion(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleAsk()}
             placeholder="Ask the AI agent about this campaign..."
-            className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f] transition-colors placeholder-gray-400"
+            className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#0f131d]/20 focus:border-[#0f131d] transition-colors placeholder-gray-400"
             disabled={loading}
           />
           <button
             onClick={handleAsk}
             disabled={loading || !question.trim()}
-            className="px-3 py-2 bg-[#1e3a5f] text-white text-xs font-semibold rounded-lg hover:bg-[#1e4a7f] disabled:opacity-40 transition-colors flex items-center gap-1.5 shrink-0"
+            className="px-3 py-2 bg-[#0f131d] text-white text-xs font-semibold rounded-lg hover:bg-[#141925] disabled:opacity-40 transition-colors flex items-center gap-1.5 shrink-0"
           >
             {loading ? (
               <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">

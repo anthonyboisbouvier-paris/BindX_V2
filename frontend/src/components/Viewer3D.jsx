@@ -408,8 +408,8 @@ export default function Viewer3D({
       const models2 = viewer.getModelList()
       const ligandModel = models2[models2.length - 1]
       viewer.setStyle({ model: ligandModel }, {
-        stick: { color: '#22c55e', radius: 0.2 },
-        sphere: { color: '#22c55e', radius: 0.35, opacity: 0.8 },
+        stick: { color: '#00e6a0', radius: 0.2 },
+        sphere: { color: '#00e6a0', radius: 0.35, opacity: 0.8 },
       })
 
       // Semi-transparent surface on protein when ligand is loaded (simplified mode default)

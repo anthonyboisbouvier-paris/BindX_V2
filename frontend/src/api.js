@@ -152,6 +152,22 @@ export async function previewSequence(sequence) {
 }
 
 /**
+ * Detect pockets on any PDB structure URL using P2Rank.
+ * @param {string} downloadUrl - URL to a PDB file
+ * @param {string} [label] - Label for logging
+ * @param {string} [ligandId] - Co-crystal ligand ID (optional)
+ * @returns {Promise<Object>} { pockets: [...] }
+ */
+export async function detectPockets(downloadUrl, label, ligandId) {
+  const response = await apiClient.post('/detect-pockets', {
+    download_url: downloadUrl,
+    label: label || 'structure',
+    ligand_id: ligandId || null,
+  }, { timeout: 120000 })
+  return response.data
+}
+
+/**
  * Get retrosynthesis route for a specific molecule in a job
  * @param {string} jobId
  * @param {number} molIndex - 0-based molecule index in results

@@ -234,7 +234,7 @@ export default function InteractionDiagram({ interactions }) {
                     cx={pos.x} cy={pos.y}
                     r={RES_R + 5}
                     fill="none"
-                    stroke="#22c55e"
+                    stroke="#00e6a0"
                     strokeWidth={2}
                     strokeDasharray="3,2"
                     opacity={0.8}
@@ -275,7 +275,7 @@ export default function InteractionDiagram({ interactions }) {
           <circle
             cx={CX} cy={CY}
             r={LIGAND_R}
-            fill="#1e3a5f"
+            fill="#0f131d"
             stroke="#fff"
             strokeWidth={2}
           />
@@ -300,8 +300,8 @@ export default function InteractionDiagram({ interactions }) {
           {/* Functional legend note at bottom */}
           {contacts.some((c) => c.functional) && (
             <g>
-              <circle cx={12} cy={VIEWBOX_SIZE - 12} r={6} fill="none" stroke="#22c55e" strokeWidth={1.5} strokeDasharray="2,1.5" />
-              <text x={22} y={VIEWBOX_SIZE - 8} fontSize={8} fill="#16a34a">
+              <circle cx={12} cy={VIEWBOX_SIZE - 12} r={6} fill="none" stroke="#00e6a0" strokeWidth={1.5} strokeDasharray="2,1.5" />
+              <text x={22} y={VIEWBOX_SIZE - 8} fontSize={8} fill="#00c98b">
                 = functional residue
               </text>
             </g>
@@ -318,7 +318,7 @@ export default function InteractionDiagram({ interactions }) {
           {contacts.some((c) => c.functional) && (
             <div className="flex items-center gap-1.5">
               <svg width={14} height={14}>
-                <circle cx={7} cy={7} r={6} fill="none" stroke="#22c55e" strokeWidth={1.5} strokeDasharray="2,1.5" />
+                <circle cx={7} cy={7} r={6} fill="none" stroke="#00e6a0" strokeWidth={1.5} strokeDasharray="2,1.5" />
               </svg>
               <span className="text-[10px] text-gray-600">Functional residue</span>
             </div>

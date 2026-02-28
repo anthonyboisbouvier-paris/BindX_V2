@@ -34,17 +34,17 @@ export default function AnalysisToggles({ values = DEFAULT_VALUES, onChange }) {
   return (
     <div className="space-y-2">
       <label className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
-        allChecked ? 'border-[#22c55e] bg-green-50/40' : 'border-gray-200 bg-white'
+        allChecked ? 'border-[#00e6a0] bg-green-50/40' : 'border-gray-200 bg-white'
       }`}>
         <input
           ref={masterRef}
           type="checkbox"
           checked={allChecked}
           onChange={handleMaster}
-          className="w-4 h-4 rounded accent-[#22c55e]"
+          className="w-4 h-4 rounded accent-[#00e6a0]"
         />
         <div>
-          <span className="font-medium text-[#1e3a5f] text-sm">All analyses</span>
+          <span className="font-medium text-[#0f131d] text-sm">All analyses</span>
           <span className="text-xs text-gray-400 ml-2">(recommended)</span>
         </div>
       </label>
@@ -58,10 +58,10 @@ export default function AnalysisToggles({ values = DEFAULT_VALUES, onChange }) {
               type="checkbox"
               checked={!!values[t.key]}
               onChange={() => handleToggle(t.key)}
-              className="w-3.5 h-3.5 mt-0.5 rounded accent-[#22c55e]"
+              className="w-3.5 h-3.5 mt-0.5 rounded accent-[#00e6a0]"
             />
             <div className="leading-tight">
-              <span className="text-sm font-medium text-[#1e3a5f]">{t.label}</span>
+              <span className="text-sm font-medium text-[#0f131d]">{t.label}</span>
               <span className="text-xs text-gray-400 ml-1.5">{t.desc}</span>
             </div>
           </label>

@@ -63,8 +63,8 @@ function StatsBar({ stats }) {
     {
       value: stats.total_molecules ?? 0,
       label: 'Molecules',
-      topColor: 'bg-[#1e3a5f]',
-      valueColor: 'text-[#1e3a5f]',
+      topColor: 'bg-[#0f131d]',
+      valueColor: 'text-[#0f131d]',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -86,7 +86,7 @@ function StatsBar({ stats }) {
     {
       value: stats.runs_completed ?? 0,
       label: 'Runs done',
-      topColor: 'bg-[#22c55e]',
+      topColor: 'bg-[#00e6a0]',
       valueColor: 'text-green-600',
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -166,11 +166,11 @@ function AdmetRadar({ admet }) {
             stroke="#d1d5db" strokeWidth={0.75} />
         })}
         {/* Data polygon */}
-        <polygon points={polygon} fill="#22c55e" fillOpacity={0.15} stroke="#22c55e" strokeWidth={1.5} />
+        <polygon points={polygon} fill="#00e6a0" fillOpacity={0.15} stroke="#00e6a0" strokeWidth={1.5} />
         {/* Data points */}
         {dataPoints.map((p, i) => (
           <circle key={i} cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r={3}
-            fill="#22c55e" stroke="white" strokeWidth={1.5} />
+            fill="#00e6a0" stroke="white" strokeWidth={1.5} />
         ))}
         {/* Labels */}
         {values.map((_, i) => {
@@ -211,7 +211,7 @@ function AdmetRadar({ admet }) {
 // ---------------------------------------------------------------------------
 function ScoresTab({ mol }) {
   const scores = [
-    { label: 'Docking', value: mol.docking_score, unit: 'kcal/mol', color: 'bg-[#1e3a5f]', textColor: 'text-[#1e3a5f]', format: v => v.toFixed(1) },
+    { label: 'Docking', value: mol.docking_score, unit: 'kcal/mol', color: 'bg-[#0f131d]', textColor: 'text-[#0f131d]', format: v => v.toFixed(1) },
     { label: 'CNN Score', value: mol.cnn_score, unit: '', color: 'bg-green-500', textColor: 'text-green-600', format: v => v.toFixed(2) },
     { label: 'CNN Aff.', value: mol.cnn_affinity, unit: 'pKi', color: 'bg-teal-500', textColor: 'text-teal-600', format: v => v.toFixed(1) },
     { label: 'Composite', value: mol.composite_score, unit: '/100', color: 'bg-amber-500', textColor: 'text-amber-700', format: v => v.toFixed(1) },
@@ -433,7 +433,7 @@ function SynthesisTab({ details }) {
         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Retrosynthesis route</p>
         {synth.steps.map((step, i) => (
           <div key={i} className="flex items-start gap-2.5">
-            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-[#1e3a5f] text-white text-[9px] font-bold flex items-center justify-center mt-0.5">
+            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-[#0f131d] text-white text-[9px] font-bold flex items-center justify-center mt-0.5">
               {i + 1}
             </div>
             <div className="flex-1 bg-gray-50 rounded-lg p-2.5 border border-gray-100">
@@ -444,12 +444,12 @@ function SynthesisTab({ details }) {
                   <p className="text-[9px] text-gray-400 italic mt-0.5">{step.conditions}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-xs font-bold text-[#22c55e] tabular-nums">{(step.yield * 100).toFixed(0)}%</p>
+                  <p className="text-xs font-bold text-[#00e6a0] tabular-nums">{(step.yield * 100).toFixed(0)}%</p>
                   <p className="text-[9px] text-gray-400">yield</p>
                 </div>
               </div>
               <div className="mt-2 w-full bg-gray-200 rounded-full h-1">
-                <div className="h-1 bg-[#22c55e] rounded-full" style={{ width: `${step.yield * 100}%` }} />
+                <div className="h-1 bg-[#00e6a0] rounded-full" style={{ width: `${step.yield * 100}%` }} />
               </div>
             </div>
           </div>
@@ -507,7 +507,7 @@ function InteractionsTab({ details }) {
             <div className="flex-1 flex items-center gap-1.5">
               <div className="flex-1 bg-gray-100 rounded-full h-1">
                 <div
-                  className="h-1 bg-[#1e3a5f] rounded-full"
+                  className="h-1 bg-[#0f131d] rounded-full"
                   style={{ width: `${((maxDist - r.distance) / maxDist) * 100}%`, opacity: 0.6 }}
                 />
               </div>
@@ -558,7 +558,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
       {/* Panel header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <h3 className="font-bold text-[#1e3a5f] text-sm truncate">
+          <h3 className="font-bold text-[#0f131d] text-sm truncate">
             {molecule.name || molecule.id}
           </h3>
           {!isFrozen && (
@@ -599,7 +599,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
         style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
 
         {/* 3D Viewer placeholder */}
-        <div className="rounded-xl bg-[#0c1929] border border-[#1e3a5f]/30 overflow-hidden">
+        <div className="rounded-xl bg-[#0a0d15] border border-[#0f131d]/30 overflow-hidden">
           <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-red-500" />
@@ -610,7 +610,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
             <span className="text-[9px] text-white/25 font-mono">backend not connected</span>
           </div>
           <div className="h-28 flex flex-col items-center justify-center gap-2">
-            <svg className="w-10 h-10 text-[#1e3a5f]/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-10 h-10 text-[#0f131d]/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
                 d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
             </svg>
@@ -628,7 +628,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex-shrink-0 px-2.5 py-2 text-xs font-semibold border-b-2 transition-all duration-150 whitespace-nowrap ${
                   activeTab === tab.id
-                    ? 'border-[#1e3a5f] text-[#1e3a5f]'
+                    ? 'border-[#0f131d] text-[#0f131d]'
                     : 'border-transparent text-gray-400 hover:text-gray-600 hover:border-gray-200'
                 }`}
               >
@@ -654,7 +654,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
               <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">SMILES</p>
               <button
                 onClick={copySmiles}
-                className="flex items-center gap-1 text-[9px] text-gray-400 hover:text-[#1e3a5f] transition-colors"
+                className="flex items-center gap-1 text-[9px] text-gray-400 hover:text-[#0f131d] transition-colors"
               >
                 {copied ? (
                   <>
@@ -685,7 +685,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
           onClick={() => prevMol && onRowClick && onRowClick(prevMol)}
           disabled={!prevMol}
           className={`flex items-center gap-1 text-xs font-medium transition-colors ${
-            prevMol ? 'text-[#1e3a5f] hover:text-[#2d5a8e]' : 'text-gray-300 cursor-not-allowed'
+            prevMol ? 'text-[#0f131d] hover:text-[#1a2332]' : 'text-gray-300 cursor-not-allowed'
           }`}
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -700,7 +700,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
           onClick={() => nextMol && onRowClick && onRowClick(nextMol)}
           disabled={!nextMol}
           className={`flex items-center gap-1 text-xs font-medium transition-colors ${
-            nextMol ? 'text-[#1e3a5f] hover:text-[#2d5a8e]' : 'text-gray-300 cursor-not-allowed'
+            nextMol ? 'text-[#0f131d] hover:text-[#1a2332]' : 'text-gray-300 cursor-not-allowed'
           }`}
         >
           {nextMol ? nextMol.name || 'Next' : 'Next'}
@@ -978,7 +978,7 @@ export default function PhaseDashboard() {
             {!isFrozen && (
               <button
                 onClick={handleNewRun}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[#1e3a5f] text-white rounded-xl text-sm font-semibold hover:bg-[#2d5a8e] transition-colors shadow-sm"
+                className="flex items-center gap-2 px-5 py-2.5 bg-[#0f131d] text-white rounded-xl text-sm font-semibold hover:bg-[#1a2332] transition-colors shadow-sm"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1121,7 +1121,7 @@ export default function PhaseDashboard() {
           className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors text-left"
         >
           <div className="flex items-center gap-2.5">
-            <svg className="w-4 h-4 text-[#1e3a5f]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-[#0f131d]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
@@ -1195,11 +1195,11 @@ function FilterBarWithCount({ molecules, columns, onFilteredChange, onFilterCoun
 function Breadcrumb({ projectId, projectName, phase, phaseTypeMeta }) {
   return (
     <nav className="flex items-center gap-1.5 text-xs text-gray-400" aria-label="Breadcrumb">
-      <Link to="/" className="hover:text-[#1e3a5f] transition-colors">Projects</Link>
+      <Link to="/" className="hover:text-[#0f131d] transition-colors">Projects</Link>
       <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
       </svg>
-      <Link to={`/project/${projectId}`} className="hover:text-[#1e3a5f] transition-colors truncate max-w-[120px]">
+      <Link to={`/project/${projectId}`} className="hover:text-[#0f131d] transition-colors truncate max-w-[120px]">
         {projectName || 'Project'}
       </Link>
       <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1218,13 +1218,13 @@ function Breadcrumb({ projectId, projectName, phase, phaseTypeMeta }) {
 function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className={`h-1.5 ${isFrozen ? 'bg-blue-400' : 'bg-[#22c55e]'}`} />
+      <div className={`h-1.5 ${isFrozen ? 'bg-blue-400' : 'bg-[#00e6a0]'}`} />
       <div className="px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           {/* Title + stats */}
           <div className="space-y-3">
             <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-[#1e3a5f]">
+              <h1 className="text-xl font-bold text-[#0f131d]">
                 {phase.label}
                 <span className="ml-2 text-base font-normal text-gray-400">
                   — {phaseTypeMeta.label || phase.type}
@@ -1262,7 +1262,7 @@ function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, on
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   : hasActiveRun
                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    : 'bg-[#1e3a5f] hover:bg-[#2d5a8e] text-white shadow-sm hover:shadow-md'
+                    : 'bg-[#0f131d] hover:bg-[#1a2332] text-white shadow-sm hover:shadow-md'
               }`}
             >
               {hasActiveRun ? (

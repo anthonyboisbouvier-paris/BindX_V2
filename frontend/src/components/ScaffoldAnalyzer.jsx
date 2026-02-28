@@ -101,7 +101,7 @@ function PositionCard({ position, state, onToggleFreeze, onStrategyChange, onTog
                       onClick={() => onToggleGroup(position.position_idx, group)}
                       className={`px-2 py-0.5 rounded text-[11px] font-mono font-semibold transition-colors ${
                         isActive
-                          ? 'bg-[#1e3a5f] text-white'
+                          ? 'bg-[#0f131d] text-white'
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                       }`}
                     >
@@ -131,7 +131,7 @@ function GlobalControls({ preserveScaffold, setPreserveScaffold, similarity, set
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" checked={preserveScaffold} onChange={(e) => setPreserveScaffold(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300 text-[#22c55e] focus:ring-[#22c55e]" />
+            className="w-4 h-4 rounded border-gray-300 text-[#00e6a0] focus:ring-[#00e6a0]" />
           <span className="text-xs font-semibold text-gray-600">Preserve scaffold</span>
         </label>
       </div>
@@ -140,20 +140,20 @@ function GlobalControls({ preserveScaffold, setPreserveScaffold, similarity, set
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="text-[10px] font-semibold text-gray-400 uppercase">Min similarity</label>
-            <span className="text-xs font-bold text-[#1e3a5f] tabular-nums">{similarity.toFixed(2)}</span>
+            <span className="text-xs font-bold text-[#0f131d] tabular-nums">{similarity.toFixed(2)}</span>
           </div>
           <input type="range" min={0.1} max={0.9} step={0.05} value={similarity}
             onChange={(e) => setSimilarity(parseFloat(e.target.value))}
-            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#22c55e]" />
+            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#00e6a0]" />
         </div>
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="text-[10px] font-semibold text-gray-400 uppercase">Max MW change</label>
-            <span className="text-xs font-bold text-[#1e3a5f] tabular-nums">{maxMwChange} Da</span>
+            <span className="text-xs font-bold text-[#0f131d] tabular-nums">{maxMwChange} Da</span>
           </div>
           <input type="range" min={10} max={500} step={10} value={maxMwChange}
             onChange={(e) => setMaxMwChange(parseInt(e.target.value))}
-            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#22c55e]" />
+            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#00e6a0]" />
         </div>
       </div>
 
@@ -186,7 +186,7 @@ function GlobalControls({ preserveScaffold, setPreserveScaffold, similarity, set
                       }
                     }
                   }}
-                  className="w-3.5 h-3.5 rounded border-gray-300 text-[#22c55e] focus:ring-[#22c55e]"
+                  className="w-3.5 h-3.5 rounded border-gray-300 text-[#00e6a0] focus:ring-[#00e6a0]"
                 />
                 <span className="text-xs text-gray-600">{label}</span>
               </label>
@@ -342,7 +342,7 @@ export default function ScaffoldAnalyzer({ smiles, onRulesChange }) {
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
         <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Structural Analysis</h2>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[#1e3a5f]">{nPositions} position{nPositions !== 1 ? 's' : ''}</span>
+          <span className="text-xs font-semibold text-[#0f131d]">{nPositions} position{nPositions !== 1 ? 's' : ''}</span>
           <span className="text-xs text-gray-300">|</span>
           <span className="text-xs font-semibold text-red-500">{nBrics} BRICS</span>
         </div>

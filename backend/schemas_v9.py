@@ -35,6 +35,7 @@ class CampaignSummary(BaseModel):
     project_id: uuid.UUID
     name: str
     pocket_config: Optional[dict] = None
+    strategy_notes: Optional[str] = None
     created_at: datetime
     phases: List[PhaseSummary] = []
 
@@ -45,8 +46,8 @@ class CampaignSummary(BaseModel):
 
 class ProjectCreate(BaseModel):
     name: str
-    target_input_type: Optional[str] = "uniprot_id"
-    target_input_value: str
+    target_input_type: Optional[str] = "uniprot"
+    target_input_value: Optional[str] = ""
     description: Optional[str] = None
     target_name: Optional[str] = None
     target_pdb_id: Optional[str] = None
@@ -56,6 +57,17 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     target_name: Optional[str] = None
+    target_input_type: Optional[str] = None
+    target_input_value: Optional[str] = None
+    target_pdb_id: Optional[str] = None
+    target_preview: Optional[dict] = None
+    structure_source: Optional[str] = None
+    structure_resolution: Optional[float] = None
+    structure_method: Optional[str] = None
+    cocrystal_ligand: Optional[str] = None
+    pockets_detected: Optional[list] = None
+    chembl_actives_count: Optional[int] = None
+    chembl_median_ic50: Optional[float] = None
     status: Optional[str] = None
     notification_email: Optional[str] = None
 
@@ -68,7 +80,7 @@ class ProjectResponse(BaseModel):
     name: str
     description: Optional[str] = None
     target_input_type: Optional[str] = None
-    target_input_value: str
+    target_input_value: Optional[str] = None
     target_name: Optional[str] = None
     target_pdb_id: Optional[str] = None
     target_preview: Optional[dict] = None
@@ -93,9 +105,15 @@ class ProjectListItem(BaseModel):
     name: str
     description: Optional[str] = None
     target_input_type: Optional[str] = None
-    target_input_value: str
+    target_input_value: Optional[str] = None
     target_name: Optional[str] = None
     target_pdb_id: Optional[str] = None
+    target_preview: Optional[dict] = None
+    structure_source: Optional[str] = None
+    structure_resolution: Optional[float] = None
+    structure_method: Optional[str] = None
+    pockets_detected: Optional[list] = None
+    chembl_actives_count: Optional[int] = None
     status: str
     created_at: datetime
     updated_at: datetime
@@ -109,11 +127,13 @@ class ProjectListItem(BaseModel):
 class CampaignCreate(BaseModel):
     name: str
     pocket_config: Optional[dict] = None
+    strategy_notes: Optional[str] = None
 
 
 class CampaignUpdate(BaseModel):
     name: Optional[str] = None
     pocket_config: Optional[dict] = None
+    strategy_notes: Optional[str] = None
 
 
 class CampaignResponse(BaseModel):
@@ -123,6 +143,7 @@ class CampaignResponse(BaseModel):
     project_id: uuid.UUID
     name: str
     pocket_config: Optional[dict] = None
+    strategy_notes: Optional[str] = None
     created_at: datetime
     phases: List[PhaseSummary] = []
 

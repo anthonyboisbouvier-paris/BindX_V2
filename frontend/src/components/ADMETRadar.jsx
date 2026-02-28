@@ -33,7 +33,7 @@ function buildPoints(values, cx, cy, radius, totalAxes) {
 // Color helpers
 // --------------------------------------------------
 const FILL_COLORS = {
-  green:  '#22c55e',
+  green:  '#00e6a0',
   yellow: '#eab308',
   red:    '#ef4444',
 }
@@ -283,7 +283,7 @@ export default function ADMETRadar({ admet }) {
                 <text
                   x={lp.x} y={lp.y - 5}
                   fontSize="9" fontWeight="600"
-                  fill="#1e3a5f"
+                  fill="#0f131d"
                   textAnchor={anchor}
                   dominantBaseline="central"
                 >

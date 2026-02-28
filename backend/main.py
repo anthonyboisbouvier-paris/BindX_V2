@@ -875,27 +875,29 @@ def _fetch_protein_name(uniprot_id: str) -> Optional[str]:
         return None
 
 
-def _check_alphafold_availability(uniprot_id: str) -> bool:
-    """Check whether AlphaFold DB has a prediction for this UniProt ID.
+def _fetch_alphafold_info(uniprot_id: str) -> Optional[dict]:
+    """Fetch AlphaFold DB prediction info for a UniProt ID.
 
-    Parameters
-    ----------
-    uniprot_id : str
-        UniProt accession.
-
-    Returns
-    -------
-    bool
-        True if AlphaFold has a prediction available.
+    Returns a dict with ``pdb_url`` and ``confidence`` if available, else None.
     """
     try:
-        resp = http_requests.head(
+        resp = http_requests.get(
             f"https://alphafold.ebi.ac.uk/api/prediction/{uniprot_id}",
             timeout=(5, 10),
         )
-        return resp.status_code == 200
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        entry = data[0] if isinstance(data, list) else data
+        pdb_url = entry.get("pdbUrl")
+        if not pdb_url:
+            return None
+        return {
+            "pdb_url": pdb_url,
+            "confidence": entry.get("globalMetricValue"),
+        }
     except Exception:
-        return False
+        return None
 
 
 def _fetch_chembl_info(uniprot_id: str) -> dict:
@@ -1035,8 +1037,8 @@ def _build_structures_list(pdb_info: Optional[dict], uniprot_id: str) -> list[di
             "download_url": pdb_info.get("download_url"),
         })
 
-    has_alphafold = _check_alphafold_availability(uniprot_id)
-    if has_alphafold:
+    af_info = _fetch_alphafold_info(uniprot_id)
+    if af_info:
         structures.append({
             "source": "alphafold",
             "label": "AlphaFold",
@@ -1045,10 +1047,10 @@ def _build_structures_list(pdb_info: Optional[dict], uniprot_id: str) -> list[di
             "method": "AI prediction",
             "ligand_id": None,
             "ligand_name": None,
-            "confidence": 0.85,
+            "confidence": af_info.get("confidence") or 0.85,
             "recommended": len(structures) == 0,
-            "explanation": f"AlphaFold DB predicted structure for {uniprot_id}. Good for targets without experimental structure.",
-            "download_url": f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v4.pdb",
+            "explanation": f"AlphaFold DB predicted structure for {uniprot_id}. Full-length protein — may differ from PDB which only covers crystallized domains.",
+            "download_url": af_info["pdb_url"],
         })
 
     # ESMFold always available as on-demand option
@@ -1119,8 +1121,8 @@ def _build_structure_info(pdb_info: Optional[dict], uniprot_id: str) -> dict:
         }
 
     # No PDB -- check AlphaFold
-    has_alphafold = _check_alphafold_availability(uniprot_id)
-    if has_alphafold:
+    af_info = _fetch_alphafold_info(uniprot_id)
+    if af_info:
         return {
             "source": "alphafold",
             "pdb_id": None,
@@ -1128,6 +1130,7 @@ def _build_structure_info(pdb_info: Optional[dict], uniprot_id: str) -> dict:
             "method": "AI prediction",
             "ligand_id": None,
             "ligand_name": None,
+            "download_url": af_info["pdb_url"],
             "explanation": (
                 f"No experimental structure found in PDB for {uniprot_id}. "
                 "AlphaFold DB has a predicted structure available. "
@@ -1176,17 +1179,42 @@ def _build_pockets_info(
     if pdb_info is None:
         return []
 
+    download_url = pdb_info.get("download_url", "")
+    ligand_id = pdb_info.get("ligand_id")
+    return _detect_pockets_from_url(download_url, uniprot_id, ligand_id)
+
+
+def _detect_pockets_from_url(
+    download_url: str,
+    label: str,
+    ligand_id: Optional[str] = None,
+) -> list[dict]:
+    """Download a PDB file from *download_url* and run pocket detection.
+
+    Parameters
+    ----------
+    download_url : str
+        URL to a PDB file (RCSB, AlphaFold, etc.).
+    label : str
+        Human-readable label for log messages (e.g. UniProt ID).
+    ligand_id : str or None
+        Co-crystallized ligand ID (only relevant for experimental structures).
+
+    Returns
+    -------
+    list[dict]
+        Formatted pocket list (top 5).
+    """
+    if not download_url:
+        return []
+
     from pipeline.pockets import detect_pockets
 
     try:
-        # Download PDB to a temporary directory
-        download_url = pdb_info.get("download_url", "")
-        if not download_url:
-            return []
 
         with tempfile.TemporaryDirectory(prefix="dockit_preview_") as tmp_dir:
             tmp_path = Path(tmp_dir)
-            pdb_path = tmp_path / f"{uniprot_id}.pdb"
+            pdb_path = tmp_path / f"{label}.pdb"
 
             resp = http_requests.get(download_url, timeout=(5, 30))
             resp.raise_for_status()
@@ -1198,7 +1226,6 @@ def _build_pockets_info(
             pdb_path.write_text(content)
 
             # Run pocket detection
-            ligand_id = pdb_info.get("ligand_id")
             raw_pockets = detect_pockets(
                 pdb_path=pdb_path,
                 work_dir=tmp_path,
@@ -1258,9 +1285,47 @@ def _build_pockets_info(
     except Exception as exc:
         logger.warning(
             "Pocket detection failed during preview for %s: %s",
-            uniprot_id, exc,
+            label, exc,
         )
         return []
+
+
+# ---------------------------------------------------------------------------
+# Detect pockets endpoint (on any structure URL)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/detect-pockets")
+async def detect_pockets_endpoint(body: dict) -> dict:
+    """Run P2Rank pocket detection on any PDB structure URL.
+
+    Parameters
+    ----------
+    body : dict
+        Must contain ``"download_url"`` (str).
+        Optional ``"label"`` (str) for logging, ``"ligand_id"`` (str).
+
+    Returns
+    -------
+    dict
+        ``{"pockets": [...]}`` with detected pocket list.
+    """
+    download_url = body.get("download_url", "").strip()
+    if not download_url:
+        raise HTTPException(400, "download_url is required")
+
+    label = body.get("label", "structure")
+    ligand_id = body.get("ligand_id")
+
+    loop = asyncio.get_event_loop()
+    try:
+        pockets = await loop.run_in_executor(
+            _preview_pool, _detect_pockets_from_url, download_url, label, ligand_id,
+        )
+    except Exception as exc:
+        logger.warning("Pocket detection endpoint failed: %s", exc)
+        pockets = []
+
+    return {"pockets": pockets}
 
 
 # ---------------------------------------------------------------------------

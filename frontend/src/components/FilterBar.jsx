@@ -110,7 +110,7 @@ function AddFilterDropdown({ columns, molecules, onAdd, onClose }) {
               <button
                 key={col.key}
                 onClick={() => { setSelectedCol(col); setStep('configure') }}
-                className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-[#1e3a5f] transition-colors text-left"
+                className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-[#0f131d] transition-colors text-left"
               >
                 <span>{col.label}</span>
                 <span className="text-[10px] text-gray-400 uppercase">{col.type}</span>
@@ -124,7 +124,7 @@ function AddFilterDropdown({ columns, molecules, onAdd, onClose }) {
       ) : (
         <>
           <div className="px-3 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2">
-            <button onClick={() => setStep('pick_column')} className="text-[#1e3a5f] hover:text-[#2d5a8e]">
+            <button onClick={() => setStep('pick_column')} className="text-[#0f131d] hover:text-[#1a2332]">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
@@ -147,7 +147,7 @@ function AddFilterDropdown({ columns, molecules, onAdd, onClose }) {
                       value={numMin}
                       onChange={e => setNumMin(e.target.value)}
                       placeholder={colRange ? colRange.min.toFixed(1) : ''}
-                      className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                      className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#0f131d]"
                       step="0.1"
                     />
                   </div>
@@ -158,7 +158,7 @@ function AddFilterDropdown({ columns, molecules, onAdd, onClose }) {
                       value={numMax}
                       onChange={e => setNumMax(e.target.value)}
                       placeholder={colRange ? colRange.max.toFixed(1) : ''}
-                      className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                      className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#0f131d]"
                       step="0.1"
                     />
                   </div>
@@ -173,7 +173,7 @@ function AddFilterDropdown({ columns, molecules, onAdd, onClose }) {
                     onClick={() => setBoolVal(v)}
                     className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                       boolVal === v
-                        ? 'bg-[#1e3a5f] text-white border-[#1e3a5f]'
+                        ? 'bg-[#0f131d] text-white border-[#0f131d]'
                         : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                     }`}
                   >
@@ -188,7 +188,7 @@ function AddFilterDropdown({ columns, molecules, onAdd, onClose }) {
                 value={textVal}
                 onChange={e => setTextVal(e.target.value)}
                 placeholder={`Search ${selectedCol.label}...`}
-                className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#0f131d]"
                 autoFocus
               />
             )}
@@ -197,7 +197,7 @@ function AddFilterDropdown({ columns, molecules, onAdd, onClose }) {
             <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
             <button
               onClick={handleApply}
-              className="px-3 py-1.5 bg-[#1e3a5f] text-white text-xs rounded-lg hover:bg-[#2d5a8e] transition-colors font-medium"
+              className="px-3 py-1.5 bg-[#0f131d] text-white text-xs rounded-lg hover:bg-[#1a2332] transition-colors font-medium"
             >
               Apply filter
             </button>
@@ -266,7 +266,7 @@ export default function FilterBar({ molecules = [], columns = [], onFilteredChan
       <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-100">
         <button
           onClick={() => setIsExpanded(v => !v)}
-          className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:text-[#1e3a5f] transition-colors"
+          className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:text-[#0f131d] transition-colors"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -274,14 +274,14 @@ export default function FilterBar({ molecules = [], columns = [], onFilteredChan
           </svg>
           Filters
           {filterCount > 0 && (
-            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#1e3a5f] text-white text-[9px] font-bold">
+            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#0f131d] text-white text-[9px] font-bold">
               {filterCount}
             </span>
           )}
           <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
         </button>
         <div className="flex items-center gap-3 text-xs">
-          <span className={hasAnyFilter ? 'text-[#1e3a5f] font-medium' : 'text-gray-400'}>
+          <span className={hasAnyFilter ? 'text-[#0f131d] font-medium' : 'text-gray-400'}>
             Showing <strong className="tabular-nums">{filteredMolecules.length}</strong> of{' '}
             <strong className="tabular-nums">{molecules.length}</strong>
           </span>
@@ -311,8 +311,8 @@ export default function FilterBar({ molecules = [], columns = [], onFilteredChan
                   onClick={() => toggleQuickFilter(qf.id)}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all duration-150 ${
                     isActive
-                      ? 'bg-[#1e3a5f] text-white border-[#1e3a5f] shadow-sm'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-[#1e3a5f] hover:text-[#1e3a5f]'
+                      ? 'bg-[#0f131d] text-white border-[#0f131d] shadow-sm'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-[#0f131d] hover:text-[#0f131d]'
                   }`}
                 >
                   {qf.label}
@@ -352,8 +352,8 @@ export default function FilterBar({ molecules = [], columns = [], onFilteredChan
               onClick={() => setShowAddFilter(v => !v)}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border transition-all duration-150 ${
                 showAddFilter
-                  ? 'bg-[#1e3a5f] text-white border-[#1e3a5f]'
-                  : 'text-[#1e3a5f] border-[#1e3a5f]/40 hover:bg-blue-50'
+                  ? 'bg-[#0f131d] text-white border-[#0f131d]'
+                  : 'text-[#0f131d] border-[#0f131d]/40 hover:bg-blue-50'
               }`}
             >
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

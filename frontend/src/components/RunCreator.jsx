@@ -77,7 +77,7 @@ function StepIndicator({ current, labels }) {
             <div className="flex flex-col items-center gap-1">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                 done   ? 'bg-green-500 text-white ring-2 ring-green-200'
-                : active ? 'bg-[#1e3a5f] text-white ring-2 ring-[#1e3a5f]/30'
+                : active ? 'bg-[#0f131d] text-white ring-2 ring-[#0f131d]/30'
                 : 'bg-gray-100 text-gray-400'
               }`}>
                 {done ? (
@@ -86,7 +86,7 @@ function StepIndicator({ current, labels }) {
                   </svg>
                 ) : step}
               </div>
-              <span className={`text-[10px] font-semibold ${active ? 'text-[#1e3a5f]' : done ? 'text-green-600' : 'text-gray-400'}`}>
+              <span className={`text-[10px] font-semibold ${active ? 'text-[#0f131d]' : done ? 'text-green-600' : 'text-gray-400'}`}>
                 {label}
               </span>
             </div>
@@ -116,7 +116,7 @@ function Stepper({ value, min, max, onChange }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M20 12H4" />
         </svg>
       </button>
-      <span className="w-8 text-center font-bold text-[#1e3a5f] text-sm tabular-nums">{value}</span>
+      <span className="w-8 text-center font-bold text-[#0f131d] text-sm tabular-nums">{value}</span>
       <button
         onClick={() => onChange(Math.min(max, value + 1))}
         disabled={value >= max}
@@ -186,15 +186,15 @@ function EngineCard({ id, label, badges = [], selected, onClick }) {
       onClick={() => onClick(id)}
       className={`w-full flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
         selected
-          ? 'border-[#1e3a5f] bg-blue-50 ring-2 ring-[#1e3a5f]/20'
+          ? 'border-[#0f131d] bg-blue-50 ring-2 ring-[#0f131d]/20'
           : 'border-gray-100 hover:border-blue-200 hover:shadow-sm'
       }`}
     >
       <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 border-2 transition-colors ${
-        selected ? 'border-[#1e3a5f] bg-[#1e3a5f]' : 'border-gray-300'
+        selected ? 'border-[#0f131d] bg-[#0f131d]' : 'border-gray-300'
       }`} />
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-semibold ${selected ? 'text-[#1e3a5f]' : 'text-gray-800'}`}>{label}</p>
+        <p className={`text-sm font-semibold ${selected ? 'text-[#0f131d]' : 'text-gray-800'}`}>{label}</p>
         <div className="flex flex-wrap gap-1 mt-1">
           {badges.map(b => (
             <span key={b.text} className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${b.color}`}>
@@ -230,7 +230,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
                 <label key={opt.value}
                   className={`flex-1 flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all ${
                     config.sourceMode === opt.value
-                      ? 'border-[#1e3a5f] bg-blue-50'
+                      ? 'border-[#0f131d] bg-blue-50'
                       : 'border-gray-100 hover:border-gray-200'
                   }`}
                 >
@@ -238,7 +238,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
                     type="radio"
                     checked={config.sourceMode === opt.value}
                     onChange={() => set('sourceMode', opt.value)}
-                    className="accent-[#1e3a5f]"
+                    className="accent-[#0f131d]"
                   />
                   <span className="text-sm font-medium text-gray-700">{opt.label}</span>
                 </label>
@@ -251,9 +251,9 @@ function ConfigForm({ runType, config, onChange, phase }) {
               <div
                 onClick={() => fileInputRef.current?.click()}
                 className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer
-                           hover:border-[#1e3a5f]/40 hover:bg-blue-50/30 transition-all group"
+                           hover:border-[#0f131d]/40 hover:bg-blue-50/30 transition-all group"
               >
-                <svg className="w-9 h-9 text-gray-300 mx-auto mb-2 group-hover:text-[#1e3a5f]/40 transition-colors"
+                <svg className="w-9 h-9 text-gray-300 mx-auto mb-2 group-hover:text-[#0f131d]/40 transition-colors"
                   fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                     d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -274,7 +274,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
                   onChange={e => set('sourceName', e.target.value)}
                   placeholder="e.g. ChEMBL EGFR batch 1"
                   className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white
-                             focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/30 focus:border-[#1e3a5f]"
+                             focus:outline-none focus:ring-2 focus:ring-[#0f131d]/30 focus:border-[#0f131d]"
                 />
               </div>
             </>
@@ -317,10 +317,10 @@ function ConfigForm({ runType, config, onChange, phase }) {
                     }`}
                   >
                     <input type="checkbox" checked={checked} onChange={() => toggleCalcType(sub.key)}
-                      className="accent-[#1e3a5f] mt-0.5" />
+                      className="accent-[#0f131d] mt-0.5" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className={`text-sm font-semibold ${checked ? 'text-[#1e3a5f]' : 'text-gray-700'}`}>{sub.label}</p>
+                        <p className={`text-sm font-semibold ${checked ? 'text-[#0f131d]' : 'text-gray-700'}`}>{sub.label}</p>
                         <span className="text-[9px] text-gray-400">{ESTIMATED_TIMES[sub.key]}</span>
                       </div>
                       <p className="text-xs text-gray-500 mt-0.5">{sub.description}</p>
@@ -401,13 +401,13 @@ function ConfigForm({ runType, config, onChange, phase }) {
               <div>
                 <div className="flex items-center justify-between text-xs mb-1">
                   <label className="font-medium text-gray-600">Exhaustiveness</label>
-                  <span className="font-bold text-[#1e3a5f] tabular-nums">{config.exhaustiveness ?? 32}</span>
+                  <span className="font-bold text-[#0f131d] tabular-nums">{config.exhaustiveness ?? 32}</span>
                 </div>
                 <input
                   type="range" min={8} max={64} step={8}
                   value={config.exhaustiveness ?? 32}
                   onChange={e => set('exhaustiveness', Number(e.target.value))}
-                  className="w-full accent-[#1e3a5f]"
+                  className="w-full accent-[#0f131d]"
                 />
                 <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
                   {[8, 16, 32, 64].map(v => <span key={v}>{v}</span>)}
@@ -436,7 +436,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
                   value={config.seed ?? 0}
                   onChange={e => set('seed', Number(e.target.value))}
                   className="w-20 text-sm text-right border border-gray-200 rounded-lg px-2 py-1.5
-                             focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/30 focus:border-[#1e3a5f] tabular-nums"
+                             focus:outline-none focus:ring-2 focus:ring-[#0f131d]/30 focus:border-[#0f131d] tabular-nums"
                 />
               </div>
             </div>
@@ -453,7 +453,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
                     onChange={e => set(`boxSize${axis}`, e.target.value)}
                     placeholder="Auto"
                     className="w-full text-sm text-center border border-gray-200 rounded-lg px-2 py-1.5
-                               focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/30 focus:border-[#1e3a5f]"
+                               focus:outline-none focus:ring-2 focus:ring-[#0f131d]/30 focus:border-[#0f131d]"
                   />
                 </div>
               ))}
@@ -484,7 +484,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
               <button
                 onClick={() => onChange({ ...config, properties: allProps.map(p => p.key) })}
                 className={`text-xs px-2 py-1 rounded font-medium transition-colors ${
-                  allSelected ? 'bg-[#1e3a5f] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  allSelected ? 'bg-[#0f131d] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
               >
                 All
@@ -537,7 +537,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
               <div key={key}>
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="font-medium text-gray-600 capitalize">{key.replace(/_/g, ' ')}</span>
-                  <span className="font-bold text-[#1e3a5f] tabular-nums">{Number(val).toFixed(2)}</span>
+                  <span className="font-bold text-[#0f131d] tabular-nums">{Number(val).toFixed(2)}</span>
                 </div>
                 <input
                   type="range" min={0} max={1} step={0.05}
@@ -546,7 +546,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
                     ...config,
                     weights: { ...weights, [key]: parseFloat(e.target.value) }
                   })}
-                  className="w-full accent-[#1e3a5f]"
+                  className="w-full accent-[#0f131d]"
                 />
               </div>
             ))}
@@ -732,13 +732,13 @@ function ConfigForm({ runType, config, onChange, phase }) {
             <div>
               <div className="flex items-center justify-between text-xs mb-1">
                 <span className="font-medium text-gray-600">Cutoff</span>
-                <span className="font-bold text-[#1e3a5f] tabular-nums">{Number(cutoff).toFixed(2)}</span>
+                <span className="font-bold text-[#0f131d] tabular-nums">{Number(cutoff).toFixed(2)}</span>
               </div>
               <input
                 type="range" min={0.3} max={0.8} step={0.05}
                 value={cutoff}
                 onChange={e => set('cutoff', parseFloat(e.target.value))}
-                className="w-full accent-[#1e3a5f]"
+                className="w-full accent-[#0f131d]"
               />
               <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
                 <span>0.30 (loose)</span>
@@ -944,7 +944,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
               </div>
             )}
             <div>
-              <h2 className="font-bold text-[#1e3a5f] text-lg">
+              <h2 className="font-bold text-[#0f131d] text-lg">
                 {step === 1 ? 'New Run' : step === 2 ? `Configure: ${selectedRt?.label}` : 'Review & Launch'}
               </h2>
               {phaseType && (
@@ -1035,7 +1035,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
           {step === 2 && (
             <button
               onClick={() => setStep(3)}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-[#1e3a5f] hover:bg-[#2d5a8e] text-white transition-colors"
+              className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-[#0f131d] hover:bg-[#1a2332] text-white transition-colors"
             >
               Review
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1051,7 +1051,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
               className={`flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold transition-colors shadow-sm shadow-green-200 ${
                 !canSubmit
                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-[#22c55e] hover:bg-green-600 text-white'
+                  : 'bg-[#00e6a0] hover:bg-green-600 text-white'
               }`}
             >
               {submitting ? (

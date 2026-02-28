@@ -18,21 +18,21 @@ const ALL_OBJECTIVES = [
 ]
 
 const COLOR_SCHEMES = {
-  pareto_rank: { label: 'Pareto Rank', fn: m => m.pareto_front ? '#22c55e' : '#9ca3af' },
+  pareto_rank: { label: 'Pareto Rank', fn: m => m.pareto_front ? '#00e6a0' : '#9ca3af' },
   source:      { label: 'Source',      fn: m => {
     const s = (m.source || '').toLowerCase()
     if (s.includes('zinc')) return '#3b82f6'
-    if (s.includes('chembl')) return '#22c55e'
+    if (s.includes('chembl')) return '#00e6a0'
     if (s.includes('ai') || s.includes('generated')) return '#a855f7'
     return '#9ca3af'
   }},
   cluster:     { label: 'Cluster',     fn: m => {
-    const colors = ['#ef4444','#3b82f6','#22c55e','#f59e0b','#a855f7','#06b6d4','#ec4899','#84cc16']
+    const colors = ['#ef4444','#3b82f6','#00e6a0','#f59e0b','#a855f7','#06b6d4','#ec4899','#84cc16']
     return colors[(m.cluster_id || 0) % colors.length]
   }},
   admet:       { label: 'ADMET',       fn: m => {
     const c = m.admet?.color_code
-    return c === 'green' ? '#22c55e' : c === 'red' ? '#ef4444' : '#eab308'
+    return c === 'green' ? '#00e6a0' : c === 'red' ? '#ef4444' : '#eab308'
   }},
 }
 
@@ -104,9 +104,9 @@ function MiniRadar({ mol, size = 60 }) {
         }).join(' ')} fill="none" stroke="#e5e7eb" strokeWidth={0.5} />
       ))}
       {/* Data polygon */}
-      <path d={path} fill="#22c55e" fillOpacity={0.25} stroke="#22c55e" strokeWidth={1.5} />
+      <path d={path} fill="#00e6a0" fillOpacity={0.25} stroke="#00e6a0" strokeWidth={1.5} />
       {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={2} fill="#22c55e" />
+        <circle key={i} cx={p.x} cy={p.y} r={2} fill="#00e6a0" />
       ))}
     </svg>
   )
@@ -147,7 +147,7 @@ function Histogram({ values, width, height, color = '#3b82f6' }) {
 function RadarOverlay({ molecules, width, height }) {
   const axes = ALL_OBJECTIVES.slice(0, 8)
   const cx = width / 2, cy = height / 2, r = Math.min(width, height) / 2 - 30
-  const colors = ['#22c55e', '#3b82f6', '#a855f7']
+  const colors = ['#00e6a0', '#3b82f6', '#a855f7']
 
   return (
     <svg width={width} height={height} className="mx-auto">
@@ -437,7 +437,7 @@ export default function ParetoFront({ molecules, onSelect }) {
             <div>
               <p className="text-xs font-semibold text-gray-500 mb-2">{yLabel} Distribution</p>
               <svg width="100%" viewBox={`0 0 ${PW} 80`}>
-                <Histogram values={yValues} width={PW} height={70} color="#22c55e" />
+                <Histogram values={yValues} width={PW} height={70} color="#00e6a0" />
               </svg>
             </div>
           </div>
@@ -504,8 +504,8 @@ export default function ParetoFront({ molecules, onSelect }) {
                 + ` L ${pts[pts.length-1].x} ${MT + PH} L ${pts[0].x} ${MT + PH} Z`
               return (
                 <>
-                  <path d={areaPath} fill="#22c55e" fillOpacity={0.06} />
-                  <polyline points={linePoints} fill="none" stroke="#22c55e" strokeWidth={1.5}
+                  <path d={areaPath} fill="#00e6a0" fillOpacity={0.06} />
+                  <polyline points={linePoints} fill="none" stroke="#00e6a0" strokeWidth={1.5}
                     strokeDasharray="5,4" strokeLinecap="round" opacity={0.7} />
                 </>
               )
@@ -523,7 +523,7 @@ export default function ParetoFront({ molecules, onSelect }) {
               return (
                 <circle key={`np-${idx}`} cx={cx} cy={cy} r={isHov ? r + 2 : isSel ? r + 1 : r}
                   fill={fill} fillOpacity={isHov ? 0.9 : isSel ? 0.8 : 0.5}
-                  stroke={isSel ? '#1e3a5f' : isHov ? '#4b5563' : 'none'} strokeWidth={isSel ? 2 : 1.5}
+                  stroke={isSel ? '#0f131d' : isHov ? '#4b5563' : 'none'} strokeWidth={isSel ? 2 : 1.5}
                   style={{ cursor: 'pointer', transition: 'r 0.1s' }}
                   onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
                   onMouseLeave={() => setHovered(null)}
@@ -541,9 +541,9 @@ export default function ParetoFront({ molecules, onSelect }) {
               const isSel = selected.includes(mol)
               return (
                 <g key={`p-${idx}`}>
-                  <circle cx={cx} cy={cy} r={isHov ? r + 6 : r + 3} fill="#22c55e" fillOpacity={0.15} />
+                  <circle cx={cx} cy={cy} r={isHov ? r + 6 : r + 3} fill="#00e6a0" fillOpacity={0.15} />
                   <circle cx={cx} cy={cy} r={isHov ? r + 3 : isSel ? r + 1 : r + 1}
-                    fill="#22c55e" stroke={isSel ? '#1e3a5f' : '#fff'} strokeWidth={isSel ? 2 : 1.5}
+                    fill="#00e6a0" stroke={isSel ? '#0f131d' : '#fff'} strokeWidth={isSel ? 2 : 1.5}
                     style={{ cursor: 'pointer', transition: 'r 0.1s' }}
                     onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
                     onMouseLeave={() => setHovered(null)}
@@ -580,10 +580,10 @@ export default function ParetoFront({ molecules, onSelect }) {
             return (
               <foreignObject x={tx} y={ty} width={W} height={H} style={{ overflow: 'visible', pointerEvents: 'none' }}>
                 <div xmlns="http://www.w3.org/1999/xhtml" style={{
-                  background: '#1e3a5f', color: '#fff', borderRadius: '8px', padding: '8px 10px',
+                  background: '#0f131d', color: '#fff', borderRadius: '8px', padding: '8px 10px',
                   fontSize: '11px', lineHeight: '1.5', boxShadow: '0 4px 16px rgba(0,0,0,0.25)', width: `${W}px`,
                 }}>
-                  <div style={{ fontWeight: 700, marginBottom: '4px', color: '#22c55e', fontSize: '12px' }}>
+                  <div style={{ fontWeight: 700, marginBottom: '4px', color: '#00e6a0', fontSize: '12px' }}>
                     {hovered.name || 'Molecule'}
                   </div>
                   {hovered.pareto_front && (
@@ -620,8 +620,8 @@ export default function ParetoFront({ molecules, onSelect }) {
       <div className="flex flex-wrap items-center gap-5 text-xs text-gray-500 px-1">
         <div className="flex items-center gap-2">
           <svg width={24} height={12}>
-            <circle cx={6} cy={6} r={5} fill="#22c55e" stroke="#fff" strokeWidth={1.5} />
-            <line x1={10} y1={6} x2={22} y2={6} stroke="#22c55e" strokeWidth={1.5} strokeDasharray="3,2" />
+            <circle cx={6} cy={6} r={5} fill="#00e6a0" stroke="#fff" strokeWidth={1.5} />
+            <line x1={10} y1={6} x2={22} y2={6} stroke="#00e6a0" strokeWidth={1.5} strokeDasharray="3,2" />
           </svg>
           <span>Pareto front</span>
         </div>
@@ -648,21 +648,21 @@ function Toolbar({ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy,
       <div className="flex items-center gap-1.5">
         <label className="text-xs font-medium text-gray-500">X:</label>
         <select value={xKey} onChange={e => setXKey(e.target.value)}
-          className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]">
+          className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#0f131d]">
           {ALL_OBJECTIVES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
       </div>
       <div className="flex items-center gap-1.5">
         <label className="text-xs font-medium text-gray-500">Y:</label>
         <select value={yKey} onChange={e => setYKey(e.target.value)}
-          className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]">
+          className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#0f131d]">
           {ALL_OBJECTIVES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
       </div>
       <div className="flex gap-0.5 p-0.5 bg-gray-100 rounded-lg">
         {[{ v: 'scatter', l: 'Scatter' }, { v: 'radar', l: 'Radar' }, { v: 'distribution', l: 'Dist.' }].map(({ v, l }) => (
           <button key={v} onClick={() => setViewMode(v)}
-            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${viewMode === v ? 'bg-white text-[#1e3a5f] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${viewMode === v ? 'bg-white text-[#0f131d] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {l}
           </button>
         ))}
@@ -678,7 +678,7 @@ function Toolbar({ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy,
       </select>
       <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
         <input type="checkbox" checked={showDominated} onChange={e => setShowDominated(e.target.checked)}
-          className="accent-[#1e3a5f]" />
+          className="accent-[#0f131d]" />
         Dominated
       </label>
       <div className="ml-auto flex items-center gap-2">
@@ -693,12 +693,12 @@ function Toolbar({ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy,
           CSV
         </button>
         <button onClick={() => setShowStats(v => !v)}
-          className={`px-2 py-1 text-xs font-medium rounded-lg transition-colors ${showStats ? 'bg-[#1e3a5f] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          className={`px-2 py-1 text-xs font-medium rounded-lg transition-colors ${showStats ? 'bg-[#0f131d] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
           Stats
         </button>
         {paretoCount > 0 && (
           <span className="text-xs text-gray-400">
-            <span className="font-semibold text-[#22c55e]">{paretoCount}</span> on front
+            <span className="font-semibold text-[#00e6a0]">{paretoCount}</span> on front
           </span>
         )}
         {selected.length > 0 && (
@@ -719,15 +719,15 @@ function StatsPanel({ stats, xLabel, yLabel }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
         <div>
           <p className="text-gray-400 mb-1">Points</p>
-          <p className="font-bold text-[#1e3a5f]">{stats.n}</p>
+          <p className="font-bold text-[#0f131d]">{stats.n}</p>
         </div>
         <div>
           <p className="text-gray-400 mb-1">Correlation (r)</p>
-          <p className="font-bold text-[#1e3a5f]">{stats.correlation}</p>
+          <p className="font-bold text-[#0f131d]">{stats.correlation}</p>
         </div>
         <div>
           <p className="text-gray-400 mb-1">Pareto front</p>
-          <p className="font-bold text-[#22c55e]">{stats.paretoCount} ({stats.paretoPercent}%)</p>
+          <p className="font-bold text-[#00e6a0]">{stats.paretoCount} ({stats.paretoPercent}%)</p>
         </div>
         <div>
           <p className="text-gray-400 mb-1">{xLabel} mean</p>

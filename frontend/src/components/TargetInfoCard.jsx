@@ -7,7 +7,7 @@ import React from 'react'
 function GradientBar({ value, label }) {
   const pct = Math.round((value || 0) * 100)
   // Color stops: 0% red, 50% yellow, 100% green
-  const barColor = pct >= 80 ? '#22c55e' : pct >= 55 ? '#f59e0b' : '#ef4444'
+  const barColor = pct >= 80 ? '#00e6a0' : pct >= 55 ? '#f59e0b' : '#ef4444'
 
   return (
     <div className="flex items-center gap-3">
@@ -17,7 +17,7 @@ function GradientBar({ value, label }) {
           className="h-full rounded-full transition-all duration-500"
           style={{
             width: `${pct}%`,
-            background: `linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #22c55e 100%)`,
+            background: `linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #00e6a0 100%)`,
             clipPath: `inset(0 ${100 - pct}% 0 0)`,
           }}
         />
@@ -58,7 +58,7 @@ export default function TargetInfoCard({ assessment, project }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#1e3a5f] to-[#1e4a7f] px-5 py-4">
+      <div className="bg-gradient-to-r from-[#0f131d] to-[#141925] px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -85,8 +85,8 @@ export default function TargetInfoCard({ assessment, project }) {
 
           {/* Druggability score circle */}
           <div className="shrink-0 text-center">
-            <div className="w-14 h-14 rounded-full bg-white/10 border-2 border-[#22c55e] flex items-center justify-center">
-              <span className="text-[#22c55e] font-bold text-base">
+            <div className="w-14 h-14 rounded-full bg-white/10 border-2 border-[#00e6a0] flex items-center justify-center">
+              <span className="text-[#00e6a0] font-bold text-base">
                 {Math.round((druggability_score || 0) * 100)}
               </span>
             </div>
@@ -109,15 +109,15 @@ export default function TargetInfoCard({ assessment, project }) {
         {/* Quick stats */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-            <p className="text-base font-bold text-[#1e3a5f]">{sequence_length?.toLocaleString()}</p>
+            <p className="text-base font-bold text-[#0f131d]">{sequence_length?.toLocaleString()}</p>
             <p className="text-xs text-gray-400 mt-0.5">Amino acids</p>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-            <p className="text-base font-bold text-[#1e3a5f]">{pdb_structures}</p>
+            <p className="text-base font-bold text-[#0f131d]">{pdb_structures}</p>
             <p className="text-xs text-gray-400 mt-0.5">PDB structures</p>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-            <p className="text-base font-bold text-[#1e3a5f]">{chembl_compounds?.toLocaleString()}</p>
+            <p className="text-base font-bold text-[#0f131d]">{chembl_compounds?.toLocaleString()}</p>
             <p className="text-xs text-gray-400 mt-0.5">ChEMBL cpds</p>
           </div>
         </div>
@@ -170,7 +170,7 @@ export default function TargetInfoCard({ assessment, project }) {
                 )}
                 {binding_site.druggability_probability && (
                   <span className="text-xs text-gray-500">
-                    Pocket drug.: <span className="font-semibold text-[#22c55e]">
+                    Pocket drug.: <span className="font-semibold text-[#00e6a0]">
                       {Math.round(binding_site.druggability_probability * 100)}%
                     </span>
                   </span>

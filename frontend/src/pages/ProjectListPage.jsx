@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
-import { MOCK_ACTIVITY, PHASE_TYPES } from '../mock/data.js'
-import ActivityTimeline from '../components/ActivityTimeline.jsx'
+import { PHASE_TYPES } from '../mock/data.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,14 +60,14 @@ function PhaseProgress({ campaigns }) {
         const meta = PHASE_TYPES[type]
 
         const circleClass = {
-          done: 'bg-[#22c55e] border-[#22c55e] text-white',
-          active: 'bg-[#22c55e]/20 border-[#22c55e] text-[#22c55e]',
+          done: 'bg-[#00e6a0] border-[#00e6a0] text-white',
+          active: 'bg-[#00e6a0]/20 border-[#00e6a0] text-[#00e6a0]',
           partial: 'bg-blue-100 border-blue-400 text-blue-600',
           empty: 'bg-white border-gray-200 text-gray-300',
         }[status]
 
         const lineClass = status === 'done' || status === 'active'
-          ? 'bg-[#22c55e]/40'
+          ? 'bg-[#00e6a0]/40'
           : 'bg-gray-100'
 
         return (
@@ -112,7 +111,7 @@ function StatusBadge({ project }) {
   if (project.status === 'active') {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-700 font-medium">
-        <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e] animate-pulse" />
+        <span className="w-1.5 h-1.5 rounded-full bg-[#00e6a0] animate-pulse" />
         Active
       </span>
     )
@@ -129,7 +128,7 @@ function StatusBadge({ project }) {
 // Project card
 // ---------------------------------------------------------------------------
 
-function ProjectCard({ project, onClick, searchQuery }) {
+function ProjectCard({ project, onClick, onDelete, searchQuery }) {
   const allPhases = (project.campaigns || []).flatMap(c => c.phases || [])
   const totalMolecules = allPhases.reduce((s, p) => s + (p.stats?.total_molecules || 0), 0)
   const totalRuns = allPhases.reduce((s, p) => s + (p.stats?.runs_completed || 0) + (p.stats?.runs_running || 0), 0)
@@ -137,19 +136,19 @@ function ProjectCard({ project, onClick, searchQuery }) {
   return (
     <button
       onClick={() => onClick(project.id)}
-      className="group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 text-left w-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/30 focus:ring-offset-2"
+      className="group bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 text-left w-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#0f131d]/30 focus:ring-offset-2"
     >
       {/* Top accent bar: blue=active, gray=empty */}
       <div className={`h-1 w-full ${
         totalMolecules > 0 && project.status === 'active'
-          ? 'bg-gradient-to-r from-[#1e3a5f] to-[#22c55e]'
+          ? 'bg-gradient-to-r from-[#0f131d] to-[#00e6a0]'
           : 'bg-gray-100'
       }`} />
 
       <div className="p-5">
         {/* Header */}
         <div className="flex items-start justify-between gap-2 mb-3">
-          <h3 className="font-bold text-[#1e3a5f] text-base leading-tight group-hover:text-[#22c55e] transition-colors">
+          <h3 className="font-bold text-[#0f131d] text-base leading-tight group-hover:text-[#00e6a0] transition-colors">
             {highlight(project.name, searchQuery)}
           </h3>
           <StatusBadge project={project} />
@@ -158,7 +157,7 @@ function ProjectCard({ project, onClick, searchQuery }) {
         {/* Target row */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           {project.target_name && (
-            <span className="inline-flex items-center gap-1 text-xs text-[#1e3a5f] font-semibold">
+            <span className="inline-flex items-center gap-1 text-xs text-[#0f131d] font-semibold">
               <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="9" strokeWidth={2} />
                 <circle cx="12" cy="12" r="5" strokeWidth={2} />
@@ -187,7 +186,7 @@ function ProjectCard({ project, onClick, searchQuery }) {
         {/* Stats row */}
         <div className="grid grid-cols-3 gap-2 mb-3 pt-3 border-t border-gray-50">
           <div className="text-center">
-            <p className="text-base font-bold text-[#1e3a5f]">{totalMolecules}</p>
+            <p className="text-base font-bold text-[#0f131d]">{totalMolecules}</p>
             <p className="text-xs text-gray-400">molecules</p>
           </div>
           <div className="text-center">
@@ -209,14 +208,30 @@ function ProjectCard({ project, onClick, searchQuery }) {
           </p>
         )}
 
-        {/* Footer: campaign count + chevron */}
+        {/* Footer: campaign count + delete + chevron */}
         <div className="flex items-center justify-between mt-1">
           <span className="text-xs text-gray-400">
             {project.campaigns.length} campaign{project.campaigns.length !== 1 ? 's' : ''}
           </span>
-          <svg className="w-4 h-4 text-gray-300 group-hover:text-[#22c55e] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
+          <div className="flex items-center gap-2">
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (window.confirm(`Delete "${project.name}"?`)) onDelete(project.id)
+              }}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.click() }}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </span>
+            <svg className="w-4 h-4 text-gray-300 group-hover:text-[#00e6a0] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
         </div>
       </div>
     </button>
@@ -229,9 +244,6 @@ function ProjectCard({ project, onClick, searchQuery }) {
 
 function NewProjectModal({ onClose, onCreated }) {
   const [name, setName] = useState('')
-  const [targetName, setTargetName] = useState('')
-  const [pdbId, setPdbId] = useState('')
-  const [uniprotId, setUniprotId] = useState('')
   const [description, setDescription] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -243,20 +255,16 @@ function NewProjectModal({ onClose, onCreated }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!name.trim() || !targetName.trim()) return
+    if (!name.trim()) return
     setSaving(true)
     try {
-      const project = await onCreated({
+      await onCreated({
         name: name.trim(),
         description: description.trim() || undefined,
-        target_name: targetName.trim(),
-        target_pdb_id: pdbId.trim() || undefined,
-        target_input_type: uniprotId.trim() ? 'uniprot_id' : 'pdb_id',
-        target_input_value: uniprotId.trim() || pdbId.trim() || targetName.trim(),
       })
-      return project
     } catch (err) {
       console.error('[NewProjectModal] Create failed:', err)
+    } finally {
       setSaving(false)
     }
   }
@@ -268,7 +276,7 @@ function NewProjectModal({ onClose, onCreated }) {
     >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
         {/* Header */}
-        <div className="bg-[#1e3a5f] px-6 py-4 flex items-center justify-between">
+        <div className="bg-[#0f131d] px-6 py-4 flex items-center justify-between">
           <div>
             <h3 className="text-white font-bold text-base">New Project</h3>
             <p className="text-blue-300 text-xs mt-0.5">Set up a new drug discovery project</p>
@@ -294,47 +302,10 @@ function NewProjectModal({ onClose, onCreated }) {
               value={name}
               onChange={e => setName(e.target.value)}
               required
-              placeholder="e.g. EGFR Inhibitors Phase III"
-              className="w-full text-sm px-3 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f] transition-colors"
+              autoFocus
+              placeholder="e.g. EGFR Inhibitor Discovery"
+              className="w-full text-sm px-3 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#0f131d]/20 focus:border-[#0f131d] transition-colors"
             />
-          </div>
-
-          {/* Target + PDB/UniProt row */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-1">
-              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                Target <span className="text-red-400">*</span>
-              </label>
-              <input
-                value={targetName}
-                onChange={e => setTargetName(e.target.value)}
-                required
-                placeholder="e.g. EGFR"
-                className="w-full text-sm px-3 py-2.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f] transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                PDB ID
-              </label>
-              <input
-                value={pdbId}
-                onChange={e => setPdbId(e.target.value.toUpperCase())}
-                placeholder="e.g. 1M17"
-                className="w-full text-sm px-3 py-2.5 rounded-lg border border-gray-200 font-mono focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f] transition-colors"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                UniProt ID
-              </label>
-              <input
-                value={uniprotId}
-                onChange={e => setUniprotId(e.target.value.toUpperCase())}
-                placeholder="e.g. P00533"
-                className="w-full text-sm px-3 py-2.5 rounded-lg border border-gray-200 font-mono focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f] transition-colors"
-              />
-            </div>
           </div>
 
           {/* Description */}
@@ -347,7 +318,7 @@ function NewProjectModal({ onClose, onCreated }) {
               onChange={e => setDescription(e.target.value)}
               rows={3}
               placeholder="Brief description of the drug discovery goals and context..."
-              className="w-full text-sm px-3 py-2.5 rounded-lg border border-gray-200 resize-none focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f] transition-colors"
+              className="w-full text-sm px-3 py-2.5 rounded-lg border border-gray-200 resize-none focus:outline-none focus:ring-2 focus:ring-[#0f131d]/20 focus:border-[#0f131d] transition-colors"
             />
           </div>
 
@@ -362,8 +333,8 @@ function NewProjectModal({ onClose, onCreated }) {
             </button>
             <button
               type="submit"
-              disabled={saving || !name.trim() || !targetName.trim()}
-              className="px-5 py-2.5 bg-[#22c55e] hover:bg-[#16a34a] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+              disabled={saving || !name.trim()}
+              className="px-5 py-2.5 bg-[#00e6a0] hover:bg-[#00c98b] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
             >
               {saving ? (
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -389,7 +360,7 @@ function NewProjectModal({ onClose, onCreated }) {
 // ---------------------------------------------------------------------------
 
 export default function ProjectListPage() {
-  const { projects, createProject, loading } = useWorkspace()
+  const { projects, createProject, deleteProject, loading } = useWorkspace()
   const navigate = useNavigate()
 
   const [searchRaw, setSearchRaw] = useState('')
@@ -426,6 +397,7 @@ export default function ProjectListPage() {
 
   const handleCreated = useCallback(async (data) => {
     const project = await createProject(data)
+    if (!project) return // auth error, toast already shown
     setShowNewProject(false)
     navigate(`/project/${project.id}`)
     return project
@@ -436,16 +408,16 @@ export default function ProjectListPage() {
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-[#1e3a5f]">My Projects</h1>
+          <h1 className="text-2xl font-bold text-[#0f131d]">My Projects</h1>
           <p className="text-sm text-gray-400 mt-0.5">
             <span className="font-medium text-gray-600">{projects.length}</span> projects
-            {activeCount > 0 && <> &middot; <span className="text-[#22c55e] font-medium">{activeCount} active</span></>}
+            {activeCount > 0 && <> &middot; <span className="text-[#00e6a0] font-medium">{activeCount} active</span></>}
             {emptyCount > 0 && <> &middot; <span className="text-gray-400">{emptyCount} empty</span></>}
           </p>
         </div>
         <button
           onClick={() => setShowNewProject(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#22c55e] hover:bg-[#16a34a] text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#00e6a0] hover:bg-[#00c98b] text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -463,7 +435,7 @@ export default function ProjectListPage() {
           value={searchRaw}
           onChange={e => setSearchRaw(e.target.value)}
           placeholder="Search projects by name, target, or description..."
-          className="w-full pl-10 pr-10 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f] transition-colors placeholder-gray-400"
+          className="w-full pl-10 pr-10 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#0f131d]/20 focus:border-[#0f131d] transition-colors placeholder-gray-400"
         />
         {searchRaw && (
           <button
@@ -480,7 +452,7 @@ export default function ProjectListPage() {
       {/* Project grid */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <svg className="w-8 h-8 animate-spin text-[#1e3a5f]" fill="none" viewBox="0 0 24 24">
+          <svg className="w-8 h-8 animate-spin text-[#0f131d]" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
@@ -491,7 +463,7 @@ export default function ProjectListPage() {
           {searchQuery ? (
             <>
               <p className="text-gray-500 font-medium">No projects matching &ldquo;{searchQuery}&rdquo;</p>
-              <button onClick={() => { setSearchRaw(''); setSearchQuery('') }} className="text-sm text-[#1e3a5f] hover:underline mt-2">
+              <button onClick={() => { setSearchRaw(''); setSearchQuery('') }} className="text-sm text-[#0f131d] hover:underline mt-2">
                 Clear search
               </button>
             </>
@@ -507,7 +479,7 @@ export default function ProjectListPage() {
               </p>
               <button
                 onClick={() => setShowNewProject(true)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#22c55e] hover:bg-[#16a34a] text-white text-sm font-semibold rounded-xl transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#00e6a0] hover:bg-[#00c98b] text-white text-sm font-semibold rounded-xl transition-colors"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -524,23 +496,10 @@ export default function ProjectListPage() {
               key={project.id}
               project={project}
               onClick={(id) => navigate(`/project/${id}`)}
+              onDelete={(id) => deleteProject(id)}
               searchQuery={searchQuery}
             />
           ))}
-        </div>
-      )}
-
-      {/* Recent Activity section */}
-      {MOCK_ACTIVITY.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Recent Activity
-          </h3>
-          <ActivityTimeline activities={MOCK_ACTIVITY} limit={5} showProject />
         </div>
       )}
 

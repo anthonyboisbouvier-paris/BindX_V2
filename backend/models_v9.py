@@ -38,7 +38,7 @@ class ProjectORM_V9(BaseV9):
     description: Mapped[Optional[str]] = mapped_column(Text)
     # Target info
     target_input_type: Mapped[Optional[str]] = mapped_column(Text)
-    target_input_value: Mapped[str] = mapped_column(Text, nullable=False)
+    target_input_value: Mapped[Optional[str]] = mapped_column(Text, default="")
     target_name: Mapped[Optional[str]] = mapped_column(Text)
     target_pdb_id: Mapped[Optional[str]] = mapped_column(Text)
     target_preview: Mapped[Optional[dict]] = mapped_column(JSONB)
@@ -73,6 +73,7 @@ class CampaignORM_V9(BaseV9):
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     pocket_config: Mapped[Optional[dict]] = mapped_column(JSONB)
+    strategy_notes: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
 
     # Relationships
