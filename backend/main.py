@@ -45,7 +45,7 @@ from models import (
     TargetAssessmentRequest, TargetAssessmentResult,
     AgentQuery, AgentResponse,
 )
-from pipeline.structure import query_rcsb_pdb, fetch_structure_from_sequence
+from pipeline.structure import query_rcsb_pdb, query_rcsb_pdb_multi, fetch_structure_from_sequence
 
 # V9 routers
 from routers.v9 import health as v9_health_router
@@ -1000,20 +1000,31 @@ def _fetch_chembl_info(uniprot_id: str) -> dict:
     return result
 
 
-def _build_structures_list(pdb_info: Optional[dict], uniprot_id: str) -> list[dict]:
+def _build_structures_list(pdb_info, uniprot_id: str) -> list[dict]:
     """Return all available structure options for the preview, in priority order.
 
-    Returns a list with up to 3 entries: PDB (if found), AlphaFold (if available),
-    ESMFold (always, as on-demand fallback). The first entry is marked recommended.
+    Parameters
+    ----------
+    pdb_info : dict, list[dict], or None
+        Single PDB result (legacy) or list from ``query_rcsb_pdb_multi()``.
+    uniprot_id : str
+        UniProt accession for AlphaFold lookup.
     """
     structures: list[dict] = []
 
-    if pdb_info is not None:
-        pdb_id = pdb_info.get("pdb_id", "unknown")
-        resolution = pdb_info.get("resolution")
-        method = pdb_info.get("method", "UNKNOWN")
-        ligand_id = pdb_info.get("ligand_id")
-        ligand_name = pdb_info.get("ligand_name")
+    # Normalize to list
+    pdb_list: list[dict] = []
+    if isinstance(pdb_info, list):
+        pdb_list = pdb_info
+    elif isinstance(pdb_info, dict):
+        pdb_list = [pdb_info]
+
+    for i, pdb in enumerate(pdb_list):
+        pdb_id = pdb.get("pdb_id", "unknown")
+        resolution = pdb.get("resolution")
+        method = pdb.get("method", "UNKNOWN")
+        ligand_id = pdb.get("ligand_id")
+        ligand_name = pdb.get("ligand_name")
         source = "pdb_holo" if ligand_id else "pdb_experimental"
         label = "PDB Holo" if ligand_id else "PDB Experimental"
         confidence = 0.98 if ligand_id else 0.90
@@ -1032,9 +1043,9 @@ def _build_structures_list(pdb_info: Optional[dict], uniprot_id: str) -> list[di
             "ligand_id": ligand_id,
             "ligand_name": ligand_name,
             "confidence": confidence,
-            "recommended": True,
+            "recommended": i == 0,
             "explanation": desc,
-            "download_url": pdb_info.get("download_url"),
+            "download_url": pdb.get("download_url"),
         })
 
     af_info = _fetch_alphafold_info(uniprot_id)
@@ -1370,7 +1381,7 @@ async def preview_target(body: dict) -> dict:
         _preview_pool, _fetch_protein_name, uniprot_id,
     )
     pdb_info_future = loop.run_in_executor(
-        _preview_pool, query_rcsb_pdb, uniprot_id,
+        _preview_pool, query_rcsb_pdb_multi, uniprot_id,
     )
     chembl_future = loop.run_in_executor(
         _preview_pool, _fetch_chembl_info, uniprot_id,
@@ -1390,7 +1401,7 @@ async def preview_target(body: dict) -> dict:
         protein_name = None
     if isinstance(pdb_info, BaseException):
         logger.warning("RCSB PDB lookup raised: %s", pdb_info)
-        pdb_info = None
+        pdb_info = []
     if isinstance(chembl_info, BaseException):
         logger.warning("ChEMBL lookup raised: %s", chembl_info)
         chembl_info = {
@@ -1404,13 +1415,14 @@ async def preview_target(body: dict) -> dict:
     # Build all available structure options (PDB, AlphaFold, ESMFold)
     structures_list = _build_structures_list(pdb_info, uniprot_id)
     # Keep backward-compat single `structure` field = first (recommended) option
-    structure_info = structures_list[0] if structures_list else _build_structure_info(pdb_info, uniprot_id)
+    best_pdb = pdb_info[0] if isinstance(pdb_info, list) and pdb_info else (pdb_info if isinstance(pdb_info, dict) else None)
+    structure_info = structures_list[0] if structures_list else _build_structure_info(best_pdb, uniprot_id)
 
-    # Pocket detection requires downloading the PDB -- run in executor
+    # Pocket detection on best PDB structure
     pockets_info: list[dict] = []
     try:
         pockets_info = await loop.run_in_executor(
-            _preview_pool, _build_pockets_info, pdb_info, uniprot_id,
+            _preview_pool, _build_pockets_info, best_pdb, uniprot_id,
         )
     except Exception as exc:
         logger.warning("Pocket detection raised during preview: %s", exc)

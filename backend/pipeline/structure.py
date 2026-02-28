@@ -40,47 +40,42 @@ HTTP_TIMEOUT = (10, 120)
 def query_rcsb_pdb(uniprot_id: str) -> Optional[dict]:
     """Query RCSB PDB for experimental structures by UniProt accession.
 
-    Uses the RCSB Search API v2 to find structures with resolution < 3.0 A,
-    sorted by resolution. Scores results by resolution, ligand presence,
-    and experimental method (X-ray preferred).
-
-    Parameters
-    ----------
-    uniprot_id : str
-        UniProt accession (e.g. ``"P00533"``).
-
-    Returns
-    -------
-    dict or None
-        Dict with keys: ``pdb_id``, ``resolution``, ``method``, ``ligand_id``,
-        ``ligand_name``, ``download_url``.
-        Returns ``None`` if no suitable structure found.
+    Backward-compatible wrapper — returns the single best structure.
     """
-    # RCSB Search API v2
+    results = query_rcsb_pdb_multi(uniprot_id)
+    return results[0] if results else None
+
+
+def _rcsb_search(uniprot_id: str, extra_nodes: list = None, rows: int = 10) -> list[str]:
+    """Run an RCSB Search API v2 query and return PDB IDs."""
+    nodes = [
+        {
+            "type": "terminal",
+            "service": "text",
+            "parameters": {
+                "attribute": "rcsb_polymer_entity_container_identifiers.reference_sequence_identifiers.database_accession",
+                "operator": "exact_match",
+                "value": uniprot_id,
+            },
+        },
+        {
+            "type": "terminal",
+            "service": "text",
+            "parameters": {
+                "attribute": "rcsb_entry_info.resolution_combined",
+                "operator": "less",
+                "value": 3.5,
+            },
+        },
+    ]
+    if extra_nodes:
+        nodes.extend(extra_nodes)
+
     query = {
         "query": {
             "type": "group",
             "logical_operator": "and",
-            "nodes": [
-                {
-                    "type": "terminal",
-                    "service": "text",
-                    "parameters": {
-                        "attribute": "rcsb_polymer_entity_container_identifiers.reference_sequence_identifiers.database_accession",
-                        "operator": "exact_match",
-                        "value": uniprot_id,
-                    },
-                },
-                {
-                    "type": "terminal",
-                    "service": "text",
-                    "parameters": {
-                        "attribute": "rcsb_entry_info.resolution_combined",
-                        "operator": "less",
-                        "value": 3.0,
-                    },
-                },
-            ],
+            "nodes": nodes,
         },
         "return_type": "entry",
         "request_options": {
@@ -88,116 +83,163 @@ def query_rcsb_pdb(uniprot_id: str) -> Optional[dict]:
             "sort": [
                 {"sort_by": "rcsb_entry_info.resolution_combined", "direction": "asc"}
             ],
-            "paginate": {"start": 0, "rows": 10},
+            "paginate": {"start": 0, "rows": rows},
         },
     }
 
+    resp = requests.post(
+        "https://search.rcsb.org/rcsbsearch/v2/query",
+        json=query,
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        return []
+    return [e.get("identifier", "") for e in resp.json().get("result_set", []) if e.get("identifier")]
+
+
+# Common solvent/ion IDs to exclude from "ligand" detection
+_SOLVENT_IDS = frozenset({
+    "HOH", "SO4", "PO4", "GOL", "EDO", "ACE", "NAG", "MAN", "GAL",
+    "PEG", "DMS", "BME", "CL", "NA", "MG", "ZN", "CA", "K", "MN",
+    "FE", "CU", "CO", "NI", "IOD", "BR", "FMT", "ACT", "TRS", "MPD",
+    "PG4", "EPE", "MES", "CIT", "TAR", "SUC", "MLI", "NH4",
+})
+
+
+def _fetch_pdb_detail(pdb_id: str) -> Optional[dict]:
+    """Fetch details + ligand info for a single PDB entry."""
     try:
-        logger.info("Querying RCSB PDB for %s ...", uniprot_id)
-        resp = requests.post(
-            "https://search.rcsb.org/rcsbsearch/v2/query",
-            json=query,
-            timeout=15,
+        detail_resp = requests.get(
+            f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}",
+            timeout=10,
         )
-        if resp.status_code != 200:
-            logger.warning(
-                "RCSB search returned %d for %s", resp.status_code, uniprot_id
-            )
+        if detail_resp.status_code != 200:
             return None
+        detail = detail_resp.json()
+    except Exception:
+        return None
 
-        data = resp.json()
-        results = data.get("result_set", [])
-        if not results:
-            logger.info("RCSB PDB: no results for %s", uniprot_id)
-            return None
+    resolution_raw = detail.get("rcsb_entry_info", {}).get("resolution_combined", [99.0])
+    resolution: float = (
+        resolution_raw[0]
+        if isinstance(resolution_raw, list) and resolution_raw
+        else float(resolution_raw) if resolution_raw else 99.0
+    )
+    method: str = (
+        detail.get("exptl", [{}])[0].get("method", "UNKNOWN")
+        if detail.get("exptl")
+        else "UNKNOWN"
+    )
 
-        # Score and rank results
-        best: Optional[dict] = None
-        best_score: float = -999.0
-
-        for entry in results:
-            pdb_id = entry.get("identifier", "")
-            if not pdb_id:
+    # Check multiple nonpolymer entities for drug-like ligands
+    ligand_id: Optional[str] = None
+    ligand_name: Optional[str] = None
+    n_nonpoly = detail.get("rcsb_entry_info", {}).get("nonpolymer_entity_count", 0) or 0
+    for eidx in range(1, min(n_nonpoly + 1, 6)):
+        try:
+            lig_resp = requests.get(
+                f"https://data.rcsb.org/rest/v1/core/nonpolymer_entity/{pdb_id}/{eidx}",
+                timeout=5,
+            )
+            if lig_resp.status_code != 200:
                 continue
-
-            # Fetch entry details
-            try:
-                detail_resp = requests.get(
-                    f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}",
-                    timeout=10,
-                )
-                if detail_resp.status_code != 200:
-                    continue
-                detail = detail_resp.json()
-            except Exception as detail_exc:
-                logger.debug("Failed to fetch details for %s: %s", pdb_id, detail_exc)
-                continue
-
-            resolution_raw = detail.get("rcsb_entry_info", {}).get(
-                "resolution_combined", [99.0]
-            )
-            resolution: float = (
-                resolution_raw[0]
-                if isinstance(resolution_raw, list) and resolution_raw
-                else float(resolution_raw) if resolution_raw else 99.0
-            )
-            method: str = (
-                detail.get("exptl", [{}])[0].get("method", "UNKNOWN")
-                if detail.get("exptl")
-                else "UNKNOWN"
-            )
-
-            # Check for co-crystallized ligand
-            ligand_id: Optional[str] = None
-            ligand_name: Optional[str] = None
-            try:
-                lig_resp = requests.get(
-                    f"https://data.rcsb.org/rest/v1/core/nonpolymer_entity/{pdb_id}/1",
-                    timeout=5,
-                )
-                if lig_resp.status_code == 200:
-                    lig_data = lig_resp.json()
-                    ligand_id = lig_data.get("pdbx_entity_nonpoly", {}).get("comp_id")
-                    ligand_name = lig_data.get("pdbx_entity_nonpoly", {}).get("name")
-            except Exception:
-                pass
-
-            # Score: lower resolution better, ligand bonus, X-ray bonus
-            score: float = -resolution  # lower res = higher score
-            if ligand_id:
-                score += 15.0
-            if "X-RAY" in method.upper():
-                score += 5.0
-
-            if score > best_score:
-                best_score = score
-                best = {
-                    "pdb_id": pdb_id,
-                    "resolution": round(resolution, 2),
-                    "method": method,
-                    "ligand_id": ligand_id,
-                    "ligand_name": ligand_name,
-                    "download_url": f"https://files.rcsb.org/download/{pdb_id}.pdb",
-                }
-
-            # If we found a structure with a co-crystallized ligand, that is likely
-            # good enough -- stop fetching details for remaining entries.
-            if best and best.get("ligand_id"):
+            lig_data = lig_resp.json()
+            comp_id = lig_data.get("pdbx_entity_nonpoly", {}).get("comp_id")
+            if comp_id and comp_id.upper() not in _SOLVENT_IDS:
+                ligand_id = comp_id
+                ligand_name = lig_data.get("pdbx_entity_nonpoly", {}).get("name")
                 break
+        except Exception:
+            continue
 
-        if best:
+    score: float = -resolution
+    if ligand_id:
+        score += 15.0
+    if "X-RAY" in method.upper():
+        score += 5.0
+
+    return {
+        "pdb_id": pdb_id,
+        "resolution": round(resolution, 2),
+        "method": method,
+        "ligand_id": ligand_id,
+        "ligand_name": ligand_name,
+        "download_url": f"https://files.rcsb.org/download/{pdb_id}.pdb",
+        "score": round(score, 2),
+    }
+
+
+def query_rcsb_pdb_multi(uniprot_id: str, max_results: int = 5) -> list[dict]:
+    """Query RCSB PDB for experimental structures by UniProt accession.
+
+    Runs two searches: best resolution + structures with bound ligands.
+    Returns up to ``max_results`` unique structures sorted by score.
+
+    Parameters
+    ----------
+    uniprot_id : str
+        UniProt accession (e.g. ``"P00533"``).
+    max_results : int
+        Maximum number of structures to return.
+
+    Returns
+    -------
+    list[dict]
+        Each dict has keys: ``pdb_id``, ``resolution``, ``method``, ``ligand_id``,
+        ``ligand_name``, ``download_url``, ``score``.
+    """
+    try:
+        logger.info("Querying RCSB PDB for %s (multi-structure) ...", uniprot_id)
+
+        # Search 1: best resolution (any)
+        best_res_ids = _rcsb_search(uniprot_id, rows=8)
+
+        # Search 2: structures with bound small molecules (holo)
+        holo_filter = {
+            "type": "terminal",
+            "service": "text",
+            "parameters": {
+                "attribute": "rcsb_entry_info.nonpolymer_entity_count",
+                "operator": "greater",
+                "value": 0,
+            },
+        }
+        holo_ids = _rcsb_search(uniprot_id, extra_nodes=[holo_filter], rows=8)
+
+        # Merge unique PDB IDs (best resolution first, then holo)
+        seen = set()
+        merged_ids: list[str] = []
+        for pid in best_res_ids + holo_ids:
+            if pid not in seen:
+                seen.add(pid)
+                merged_ids.append(pid)
+
+        if not merged_ids:
+            logger.info("RCSB PDB: no results for %s", uniprot_id)
+            return []
+
+        # Fetch details for all candidates
+        scored: list[dict] = []
+        for pdb_id in merged_ids:
+            info = _fetch_pdb_detail(pdb_id)
+            if info:
+                scored.append(info)
+
+        # Sort by score descending, take top N
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        top = scored[:max_results]
+
+        for s in top:
             logger.info(
-                "RCSB PDB: best hit %s (%.2f A, %s, ligand=%s)",
-                best["pdb_id"],
-                best["resolution"],
-                best["method"],
-                best.get("ligand_id") or "none",
+                "RCSB PDB: %s (%.2f A, %s, ligand=%s, score=%.1f)",
+                s["pdb_id"], s["resolution"], s["method"],
+                s.get("ligand_id") or "none", s["score"],
             )
-        return best
+        return top
 
     except Exception as exc:
         logger.warning("RCSB PDB query failed for %s: %s", uniprot_id, exc)
-        return None
+        return []
 
 
 def _download_pdb_from_rcsb(pdb_info: dict, pdb_path: Path) -> bool:
