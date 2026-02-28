@@ -1,9 +1,11 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
 import { previewTarget, detectPockets } from '../api.js'
 import ProteinViewer from '../components/ProteinViewer.jsx'
+import ViewerDiagnostic from '../components/ViewerDiagnostic.jsx'
+import BindXLogo from '../components/BindXLogo.jsx'
 
 // ---------------------------------------------------------------------------
 // UniProt public API helper
@@ -56,6 +58,50 @@ async function fetchUniProtInfo(uniprotId) {
 }
 
 // ---------------------------------------------------------------------------
+// RCSB PDB API helper — fetch structure info from a PDB code
+// ---------------------------------------------------------------------------
+
+async function fetchPDBInfo(pdbId) {
+  const id = pdbId.trim().toUpperCase()
+  const res = await fetch(`https://data.rcsb.org/rest/v1/core/entry/${id}`)
+  if (!res.ok) {
+    if (res.status === 404) throw new Error(`PDB ID "${id}" not found. Please check the code (e.g. 1M17, 4HJO).`)
+    throw new Error(`RCSB PDB service error (${res.status}).`)
+  }
+  const data = await res.json()
+
+  const title = data.struct?.title || id
+  const method = data.exptl?.[0]?.method || null
+  const resolution = data.rcsb_entry_info?.resolution_combined?.[0] || null
+
+  // Get ligand IDs (non-polymer entities that are not water)
+  const ligands = (data.rcsb_entry_info?.nonpolymer_bound_components || [])
+    .filter(l => l !== 'HOH')
+
+  // Try to get UniProt mapping
+  let uniprotId = null
+  try {
+    const mapRes = await fetch(`https://data.rcsb.org/rest/v1/core/polymer_entity/${id}/1`)
+    if (mapRes.ok) {
+      const mapData = await mapRes.json()
+      const uniprotRef = mapData.rcsb_polymer_entity_container_identifiers?.reference_sequence_identifiers
+        ?.find(r => r.database_name === 'UniProt')
+      uniprotId = uniprotRef?.database_accession || null
+    }
+  } catch (_) { /* ignore */ }
+
+  return {
+    pdb_id: id,
+    title,
+    method,
+    resolution,
+    ligands,
+    uniprotId,
+    download_url: `https://files.rcsb.org/download/${id}.pdb`,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Step indicator
 // ---------------------------------------------------------------------------
 
@@ -73,16 +119,16 @@ function StepIndicator({ current }) {
         const active = i === idx
         return (
           <div key={s.key} className="flex items-center gap-2">
-            {i > 0 && <div className={`w-8 h-px ${done || active ? 'bg-[#0f131d]' : 'bg-gray-200'}`} />}
+            {i > 0 && <div className={`w-8 h-px ${done || active ? 'bg-bx-surface' : 'bg-gray-200'}`} />}
             <div className="flex items-center gap-1.5">
-              <span className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center ${
-                done ? 'bg-[#00e6a0] text-white'
-                  : active ? 'bg-[#0f131d] text-white'
+              <span className={`w-6 h-6 rounded-full text-sm font-bold flex items-center justify-center ${
+                done ? 'bg-bx-mint text-white'
+                  : active ? 'bg-bx-surface text-white'
                   : 'bg-gray-200 text-gray-400'
               }`}>
                 {done ? '\u2713' : i + 1}
               </span>
-              <span className={`text-xs font-medium ${active ? 'text-[#0f131d]' : 'text-gray-400'}`}>
+              <span className={`text-sm font-medium ${active ? 'text-bx-light-text' : 'text-gray-400'}`}>
                 {s.label}
               </span>
             </div>
@@ -116,7 +162,7 @@ function PocketCard({ pocket, index, selected, onSelect }) {
     >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className={`w-5 h-5 rounded-full text-xs font-bold flex items-center justify-center ${
+          <span className={`w-5 h-5 rounded-full text-sm font-bold flex items-center justify-center ${
             selected ? 'bg-amber-400 text-white' : 'bg-gray-200 text-gray-500'
           }`}>
             {index + 1}
@@ -125,7 +171,7 @@ function PocketCard({ pocket, index, selected, onSelect }) {
             Pocket #{index + 1}
           </span>
           {pocket.method && (
-            <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+            <span className="text-sm text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
               {pocket.method}
             </span>
           )}
@@ -134,8 +180,8 @@ function PocketCard({ pocket, index, selected, onSelect }) {
           {prob}%
         </span>
       </div>
-      <p className="text-xs text-gray-500 mb-1">{pocket.explanation}</p>
-      <p className="text-xs text-gray-400">{residues.length} residues</p>
+      <p className="text-sm text-gray-500 mb-1">{pocket.explanation}</p>
+      <p className="text-sm text-gray-400">{residues.length} residues</p>
     </button>
   )
 }
@@ -155,6 +201,7 @@ export default function TargetSetup() {
   // Input state
   const [inputMode, setInputMode] = useState('uniprot')
   const [uniprotId, setUniprotId] = useState('')
+  const [pdbCode, setPdbCode] = useState('')
   const [fastaInput, setFastaInput] = useState('')
 
   // Loading + error
@@ -172,6 +219,20 @@ export default function TargetSetup() {
   const [pocketsCache, setPocketsCache] = useState({})
   const [pocketsLoading, setPocketsLoading] = useState(false)
 
+  // Live diagnostic from ProteinViewer
+  const [viewerDiag, setViewerDiag] = useState(null)
+
+  // Memoize uniprotFeatures to avoid infinite re-render loop
+  // (new object reference on every render triggers ProteinViewer useEffect → removeAllSurfaces → addSurface async killed)
+  const uniprotFeaturesMemo = useMemo(() => {
+    if (!uniprotInfo) return null
+    return {
+      activeSites: uniprotInfo.activeSites,
+      bindingSites: uniprotInfo.bindingSites,
+      domains: uniprotInfo.domains,
+    }
+  }, [uniprotInfo])
+
   // Saving
   const [saving, setSaving] = useState(false)
   const [initialized, setInitialized] = useState(false)
@@ -186,7 +247,10 @@ export default function TargetSetup() {
     if (!tp) { setInitialized(true); return }
 
     // Restore state from saved target_preview
-    if (project.target_input_value) {
+    if (project.target_input_type === 'pdb') {
+      setInputMode('pdb')
+      setPdbCode(project.target_input_value || '')
+    } else if (project.target_input_value) {
       setUniprotId(project.target_input_value)
     }
     if (tp.uniprot) {
@@ -262,6 +326,72 @@ export default function TargetSetup() {
   }, [uniprotId])
 
   // ---------------------------------------------------------------------------
+  // Search by PDB code
+  // ---------------------------------------------------------------------------
+
+  const handleSearchPDB = useCallback(async () => {
+    const code = pdbCode.trim().toUpperCase()
+    if (!code) return
+
+    setLoading(true)
+    setError(null)
+    setPreviewData(null)
+    setUniprotInfo(null)
+
+    try {
+      // Step 1: Fetch PDB info from RCSB
+      setLoadingStep('Fetching structure info from RCSB PDB...')
+      const pdbInfo = await fetchPDBInfo(code)
+
+      // Step 2: If we found a UniProt mapping, fetch UniProt info
+      if (pdbInfo.uniprotId) {
+        setLoadingStep('Fetching protein data from UniProt...')
+        try {
+          const info = await fetchUniProtInfo(pdbInfo.uniprotId)
+          setUniprotInfo(info)
+          setUniprotId(pdbInfo.uniprotId)
+        } catch (_) { /* non-critical */ }
+      }
+
+      // Step 3: Detect pockets via backend
+      setLoadingStep('Detecting binding pockets (P2Rank)...')
+      const ligandId = pdbInfo.ligands?.[0] || null
+      const pocketsResult = await detectPockets(pdbInfo.download_url, pdbInfo.pdb_id, ligandId)
+      const pockets = pocketsResult.pockets || []
+
+      // Build structure entry
+      const structure = {
+        pdb_id: pdbInfo.pdb_id,
+        source: 'pdb',
+        method: pdbInfo.method,
+        resolution: pdbInfo.resolution,
+        download_url: pdbInfo.download_url,
+        label: `${pdbInfo.pdb_id} — ${pdbInfo.title}`,
+        ligand_name: ligandId,
+        ligand_id: ligandId,
+        recommended: true,
+      }
+
+      setPreviewData({
+        protein_name: pdbInfo.title,
+        structures: [structure],
+        structure,
+        pockets,
+        chembl_info: null,
+      })
+      setSelectedPocketIdx(0)
+      setSelectedStructureIdx(0)
+      setPocketsCache({ [pdbInfo.download_url]: pockets })
+
+    } catch (err) {
+      setError(err.message || 'Failed to fetch PDB data')
+    } finally {
+      setLoading(false)
+      setLoadingStep('')
+    }
+  }, [pdbCode])
+
+  // ---------------------------------------------------------------------------
   // Validate & save target
   // ---------------------------------------------------------------------------
 
@@ -278,9 +408,12 @@ export default function TargetSetup() {
     try {
       const selectedStructure = previewData.structures?.[selectedStructureIdx] || previewData.structure
 
+      const inputType = inputMode === 'pdb' ? 'pdb' : 'uniprot'
+      const inputValue = inputMode === 'pdb' ? pdbCode.trim().toUpperCase() : uniprotId.trim().toUpperCase()
+
       await updateProject(projectId, {
-        target_input_type: 'uniprot',
-        target_input_value: uniprotId.trim().toUpperCase(),
+        target_input_type: inputType,
+        target_input_value: inputValue,
         target_name: uniprotInfo?.name || previewData.protein_name,
         target_pdb_id: selectedStructure?.pdb_id || null,
         structure_source: selectedStructure?.source || null,
@@ -308,7 +441,7 @@ export default function TargetSetup() {
     } finally {
       setSaving(false)
     }
-  }, [previewData, projectId, selectedStructureIdx, selectedPocketIdx, uniprotId, uniprotInfo, updateProject, refreshProjects, addToast, navigate, pocketsCache])
+  }, [previewData, projectId, selectedStructureIdx, selectedPocketIdx, uniprotId, pdbCode, inputMode, uniprotInfo, updateProject, refreshProjects, addToast, navigate, pocketsCache])
 
   // ---------------------------------------------------------------------------
   // Selected structure for 3D viewer
@@ -356,7 +489,7 @@ export default function TargetSetup() {
       {/* Back link */}
       <button
         onClick={() => navigate(`/project/${projectId}`)}
-        className="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#0f131d] transition-colors"
+        className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-bx-light-text transition-colors"
       >
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -367,29 +500,39 @@ export default function TargetSetup() {
       <StepIndicator current={step} />
 
       {/* ========== STEP 1: Input ========== */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-6 py-5">
-        <h2 className="text-lg font-bold text-[#0f131d] mb-1">Target Setup</h2>
+      <div className="card px-6 py-5">
+        <h2 className="text-lg font-bold text-bx-light-text mb-1">Target Setup</h2>
         <p className="text-sm text-gray-500 mb-5">
-          Enter a UniProt ID to fetch protein data, resolve 3D structure, and detect binding pockets.
+          Enter a UniProt ID, PDB code, or FASTA sequence to set up your target.
         </p>
 
         {/* Mode tabs */}
         <div className="flex gap-2 mb-4">
           <button
             onClick={() => setInputMode('uniprot')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+            className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${
               inputMode === 'uniprot'
-                ? 'bg-[#0f131d] text-white'
+                ? 'bg-bx-surface text-white'
                 : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
             }`}
           >
             UniProt ID
           </button>
           <button
+            onClick={() => setInputMode('pdb')}
+            className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${
+              inputMode === 'pdb'
+                ? 'bg-bx-surface text-white'
+                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+            }`}
+          >
+            PDB Code
+          </button>
+          <button
             onClick={() => setInputMode('fasta')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+            className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${
               inputMode === 'fasta'
-                ? 'bg-[#0f131d] text-white'
+                ? 'bg-bx-surface text-white'
                 : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
             }`}
           >
@@ -405,7 +548,7 @@ export default function TargetSetup() {
               onChange={e => setUniprotId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
               placeholder="e.g. P00533 (EGFR)"
-              className="flex-1 px-4 py-2.5 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#0f131d]/20 focus:border-[#0f131d] font-mono"
+              className="flex-1 px-4 py-2.5 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-bx-mint/20 focus:border-bx-surface font-mono"
               disabled={loading}
             />
             <button
@@ -414,15 +557,40 @@ export default function TargetSetup() {
               className={`px-5 py-2.5 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 ${
                 loading || !uniprotId.trim()
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  : 'bg-[#0f131d] text-white hover:bg-[#141925]'
+                  : 'bg-bx-surface text-white hover:bg-bx-elevated'
               }`}
             >
               {loading ? (
                 <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
+                  <BindXLogo variant="loading" size={16} />
+                  Searching...
+                </>
+              ) : (previewData ? 'Re-search' : 'Search')}
+            </button>
+          </div>
+        ) : inputMode === 'pdb' ? (
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={pdbCode}
+              onChange={e => setPdbCode(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSearchPDB()}
+              placeholder="e.g. 1M17, 4HJO, 6LU7"
+              className="flex-1 px-4 py-2.5 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-bx-mint/20 focus:border-bx-surface font-mono"
+              disabled={loading}
+            />
+            <button
+              onClick={handleSearchPDB}
+              disabled={loading || !pdbCode.trim()}
+              className={`px-5 py-2.5 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 ${
+                loading || !pdbCode.trim()
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-bx-surface text-white hover:bg-bx-elevated'
+              }`}
+            >
+              {loading ? (
+                <>
+                  <BindXLogo variant="loading" size={16} />
                   Searching...
                 </>
               ) : (previewData ? 'Re-search' : 'Search')}
@@ -435,12 +603,12 @@ export default function TargetSetup() {
               onChange={e => setFastaInput(e.target.value)}
               placeholder=">protein_name&#10;MTEYKLVVVGAGGVGKSALTIQLIQNHFVDE..."
               rows={5}
-              className="w-full px-4 py-3 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#0f131d]/20 focus:border-[#0f131d] font-mono resize-none"
+              className="w-full px-4 py-3 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-bx-mint/20 focus:border-bx-surface font-mono resize-none"
               disabled={true}
             />
             <div className="bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 space-y-2">
-              <p className="text-xs text-amber-700 font-medium">Structure prediction from FASTA sequence</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-amber-600">
+              <p className="text-sm text-amber-700 font-medium">Structure prediction from FASTA sequence</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-amber-600">
                 <div className="flex items-start gap-2">
                   <span className="text-amber-400 mt-0.5">&#9679;</span>
                   <span><strong>ESMFold</strong> — Fast prediction (~2 min). Requires GPU backend. <em>Coming soon.</em></span>
@@ -456,12 +624,9 @@ export default function TargetSetup() {
 
         {/* Loading step indicator */}
         {loading && loadingStep && (
-          <div className="mt-4 flex items-center gap-2 text-sm text-blue-600">
-            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            {loadingStep}
+          <div className="mt-4 flex items-center gap-3 text-sm text-blue-600">
+            <BindXLogo variant="loading" size={24} />
+            <span>{loadingStep}</span>
           </div>
         )}
 
@@ -478,8 +643,8 @@ export default function TargetSetup() {
         <>
           {/* UniProt protein info */}
           {uniprotInfo && (
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className="bg-gradient-to-r from-[#0f131d] to-[#141925] px-5 py-4">
+            <div className="card overflow-hidden">
+              <div className="bg-gradient-to-r from-bx-surface to-bx-elevated px-5 py-4">
                 <div className="flex items-center gap-3">
                   <div>
                     <h3 className="text-white font-bold text-base">{uniprotInfo.name}</h3>
@@ -487,11 +652,11 @@ export default function TargetSetup() {
                       {uniprotInfo.gene && (
                         <span className="text-blue-200 text-sm font-mono">{uniprotInfo.gene}</span>
                       )}
-                      <span className="text-blue-300 text-xs italic">{uniprotInfo.organism}</span>
-                      <span className="text-xs font-mono bg-white/10 text-blue-100 px-2 py-0.5 rounded">
+                      <span className="text-blue-300 text-sm italic">{uniprotInfo.organism}</span>
+                      <span className="text-sm font-mono bg-white/10 text-blue-100 px-2 py-0.5 rounded">
                         {uniprotId.toUpperCase()}
                       </span>
-                      <span className="text-xs text-blue-300">{uniprotInfo.seqLen} aa</span>
+                      <span className="text-sm text-blue-300">{uniprotInfo.seqLen} aa</span>
                     </div>
                   </div>
                 </div>
@@ -500,36 +665,36 @@ export default function TargetSetup() {
               <div className="px-5 py-4 space-y-3">
                 {uniprotInfo.function && (
                   <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Function</p>
+                    <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Function</p>
                     <p className="text-sm text-gray-700 leading-relaxed line-clamp-3">{uniprotInfo.function}</p>
                   </div>
                 )}
                 {uniprotInfo.diseases?.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Associated Diseases</p>
+                    <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Associated Diseases</p>
                     <div className="flex flex-wrap gap-1">
                       {uniprotInfo.diseases.slice(0, 5).map((d, i) => (
-                        <span key={i} className="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded-md">{d}</span>
+                        <span key={i} className="text-sm bg-red-50 text-red-700 px-2 py-0.5 rounded-md">{d}</span>
                       ))}
                     </div>
                   </div>
                 )}
                 {uniprotInfo.keywords?.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Keywords</p>
+                    <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Keywords</p>
                     <div className="flex flex-wrap gap-1">
                       {uniprotInfo.keywords.slice(0, 10).map((k, i) => (
-                        <span key={i} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{k}</span>
+                        <span key={i} className="text-sm bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{k}</span>
                       ))}
                     </div>
                   </div>
                 )}
                 {uniprotInfo.domains?.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Domains</p>
+                    <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Domains</p>
                     <div className="flex flex-wrap gap-1">
                       {uniprotInfo.domains.map((d, i) => (
-                        <span key={i} className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
+                        <span key={i} className="text-sm bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
                           {d.name} ({d.start}-{d.end})
                         </span>
                       ))}
@@ -550,30 +715,36 @@ export default function TargetSetup() {
                 </svg>
                 3D Structure
                 {selectedStructure?.pdb_id && (
-                  <span className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
+                  <span className="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
                     {selectedStructure.pdb_id}
                   </span>
                 )}
                 {selectedStructure?.source === 'alphafold' && (
-                  <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded">AlphaFold</span>
+                  <span className="text-sm bg-purple-50 text-purple-700 px-2 py-0.5 rounded">AlphaFold</span>
                 )}
               </h3>
               {pdbUrl ? (
                 <ProteinViewer
                   pdbUrl={pdbUrl}
                   selectedPocket={selectedPocket}
-                  uniprotFeatures={uniprotInfo ? {
-                    activeSites: uniprotInfo.activeSites,
-                    bindingSites: uniprotInfo.bindingSites,
-                    domains: uniprotInfo.domains,
-                  } : null}
+                  uniprotFeatures={uniprotFeaturesMemo}
                   height={420}
+                  onDiagnostic={setViewerDiag}
                 />
               ) : (
                 <div className="h-[420px] bg-[#0f1923] rounded-xl flex items-center justify-center">
                   <p className="text-gray-500 text-sm">No structure available for 3D view</p>
                 </div>
               )}
+
+              {/* Viewer Diagnostic — below 3D viewer */}
+              <ViewerDiagnostic
+                pdbUrl={pdbUrl}
+                selectedPocket={selectedPocket}
+                uniprotFeatures={uniprotFeaturesMemo}
+                selectedStructure={selectedStructure}
+                live={viewerDiag}
+              />
             </div>
 
             {/* Right: Structure selection + Pockets */}
@@ -605,7 +776,7 @@ export default function TargetSetup() {
                             <span className="text-sm font-semibold text-gray-700">
                               {s.pdb_id || s.label}
                             </span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            <span className={`text-sm px-1.5 py-0.5 rounded ${
                               s.source === 'alphafold'
                                 ? 'bg-purple-100 text-purple-700'
                                 : 'bg-gray-100 text-gray-500'
@@ -614,24 +785,24 @@ export default function TargetSetup() {
                             </span>
                           </div>
                           {s.resolution && (
-                            <span className="text-xs text-gray-500">
+                            <span className="text-sm text-gray-500">
                               {s.resolution.toFixed(2)} \u00C5
                             </span>
                           )}
                           {s.source === 'alphafold' && s.confidence && (
-                            <span className="text-xs text-purple-500">
+                            <span className="text-sm text-purple-500">
                               pLDDT: {s.confidence.toFixed(1)}
                             </span>
                           )}
                         </div>
                         {s.ligand_name && (
-                          <p className="text-xs text-amber-600 mt-1">Co-crystal: {s.ligand_name}</p>
+                          <p className="text-sm text-amber-600 mt-1">Co-crystal: {s.ligand_name}</p>
                         )}
                         {s.recommended && (
-                          <span className="text-xs text-green-600 font-medium">Recommended</span>
+                          <span className="text-sm text-green-600 font-medium">Recommended</span>
                         )}
                         {s.source === 'alphafold' && (
-                          <p className="text-xs text-purple-500 mt-1">Full-length predicted structure (may look different from PDB which only covers crystallized domains)</p>
+                          <p className="text-sm text-purple-500 mt-1">Full-length predicted structure (may look different from PDB which only covers crystallized domains)</p>
                         )}
                       </button>
                     )})}
@@ -644,20 +815,19 @@ export default function TargetSetup() {
                 <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                   Detected Pockets
                   {pocketsLoading ? (
-                    <span className="text-xs text-gray-400 font-normal flex items-center gap-1">
-                      <span className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm text-gray-400 font-normal flex items-center gap-1">
+                      <BindXLogo variant="loading" size={12} />
                       Detecting pockets...
                     </span>
                   ) : (
-                    <span className="text-xs text-gray-400 font-normal">
+                    <span className="text-sm text-gray-400 font-normal">
                       ({pocketsForStructure.length} found via P2Rank)
                     </span>
                   )}
                 </h3>
                 {pocketsLoading ? (
-                  <div className="text-center py-6 bg-gray-50 rounded-lg">
-                    <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                    <p className="text-gray-400 text-sm">Running P2Rank on this structure...</p>
+                  <div className="flex flex-col items-center py-6 bg-gray-50 rounded-lg">
+                    <BindXLogo variant="loading" size={48} label="Running P2Rank on this structure..." />
                   </div>
                 ) : pocketsForStructure.length > 0 ? (
                   <div className="space-y-2">
@@ -687,20 +857,21 @@ export default function TargetSetup() {
                       <p className="text-xl font-bold text-green-700">
                         {previewData.chembl_info.n_actives?.toLocaleString()}
                       </p>
-                      <p className="text-xs text-green-600">Active compounds</p>
+                      <p className="text-sm text-green-600">Active compounds</p>
                     </div>
                     <div className="text-center">
                       <p className="text-xl font-bold text-green-700">
                         {previewData.chembl_info.n_with_ic50?.toLocaleString()}
                       </p>
-                      <p className="text-xs text-green-600">With IC50 data</p>
+                      <p className="text-sm text-green-600">With IC50 data</p>
                     </div>
                   </div>
-                  <p className="text-xs text-green-600 mt-2">
+                  <p className="text-sm text-green-600 mt-2">
                     Target: {previewData.chembl_info.target_chembl_id}
                   </p>
                 </div>
               )}
+
             </div>
           </div>
 
@@ -721,15 +892,12 @@ export default function TargetSetup() {
               className={`px-6 py-2.5 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 ${
                 saving || pocketsForStructure.length === 0
                   ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  : 'bg-[#00e6a0] text-white hover:bg-[#00c98b]'
+                  : 'bg-bx-mint text-white hover:bg-bx-mint-dim'
               }`}
             >
               {saving ? (
                 <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
+                  <BindXLogo variant="loading" size={16} />
                   Saving...
                 </>
               ) : (

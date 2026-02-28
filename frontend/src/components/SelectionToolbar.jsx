@@ -66,7 +66,7 @@ function ExportDropdown({ onExport, onClose }) {
         <button
           key={opt.id}
           onClick={() => { onExport(opt.id); onClose() }}
-          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-[#0f131d] transition-colors text-left"
+          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-bx-light-text transition-colors text-left"
         >
           <span className="text-gray-400">{opt.icon}</span>
           {opt.label}
@@ -116,14 +116,14 @@ export default function SelectionToolbar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-2.5">
+    <div className="flex flex-wrap items-center gap-3 card px-4 py-2.5">
       {/* Left — selection state + quick select */}
       <div className="flex items-center gap-2 flex-wrap">
         {/* Selection pill */}
         <div
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-semibold border transition-colors ${
             selectedCount > 0
-              ? 'bg-[#0f131d] text-white border-[#0f131d]'
+              ? 'bg-bx-surface text-white border-bx-surface'
               : 'bg-gray-100 text-gray-500 border-gray-200'
           }`}
         >
@@ -144,7 +144,7 @@ export default function SelectionToolbar({
         {/* Quick select buttons */}
         <button
           onClick={onSelectAll}
-          className="text-xs text-gray-500 hover:text-[#0f131d] transition-colors hover:underline underline-offset-2"
+          className="text-sm text-gray-500 hover:text-bx-light-text transition-colors hover:underline underline-offset-2"
         >
           All ({totalCount})
         </button>
@@ -152,7 +152,7 @@ export default function SelectionToolbar({
         {bookmarkedCount > 0 && (
           <button
             onClick={onSelectBookmarked}
-            className="text-xs text-gray-500 hover:text-yellow-600 transition-colors hover:underline underline-offset-2 flex items-center gap-0.5"
+            className="text-sm text-gray-500 hover:text-yellow-600 transition-colors hover:underline underline-offset-2 flex items-center gap-0.5"
           >
             <svg className="w-3 h-3 text-yellow-400" fill="currentColor" viewBox="0 0 24 24">
               <path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
@@ -164,7 +164,7 @@ export default function SelectionToolbar({
         {activeFilterCount > 0 && filteredCount != null && (
           <button
             onClick={onSelectFiltered}
-            className="text-xs text-blue-600 hover:text-[#0f131d] transition-colors hover:underline underline-offset-2 flex items-center gap-0.5"
+            className="text-sm text-blue-600 hover:text-bx-light-text transition-colors hover:underline underline-offset-2 flex items-center gap-0.5"
           >
             Filtered ({filteredCount})
           </button>
@@ -173,7 +173,7 @@ export default function SelectionToolbar({
         {selectedCount > 0 && (
           <button
             onClick={onSelectNone}
-            className="text-xs text-gray-400 hover:text-red-500 transition-colors flex items-center gap-0.5"
+            className="text-sm text-gray-400 hover:text-red-500 transition-colors flex items-center gap-0.5"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
@@ -199,7 +199,7 @@ export default function SelectionToolbar({
       {/* Right — action buttons */}
       <div className="flex items-center gap-2">
         {isFrozen && (
-          <span className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full border border-blue-200">
+          <span className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 text-sm font-medium rounded-full border border-blue-200">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -216,7 +216,7 @@ export default function SelectionToolbar({
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
               isFrozen
                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-[#0f131d] hover:bg-[#1a2332] text-white shadow-sm hover:shadow-md'
+                : 'bg-bx-surface hover:bg-bx-elevated text-white shadow-sm hover:shadow-md'
             }`}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -266,7 +266,7 @@ export default function SelectionToolbar({
             </svg>
             Bookmark
             {selectedCount > 0 && (
-              <span className="tabular-nums text-xs opacity-70">({selectedCount})</span>
+              <span className="tabular-nums text-sm opacity-70">({selectedCount})</span>
             )}
           </button>
         </div>

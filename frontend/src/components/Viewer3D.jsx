@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { getProteinUrl, getPoseUrl, getReportUrl } from '../api.js'
+import BindXLogo from './BindXLogo.jsx'
 
 // --------------------------------------------------
 // 3Dmol loader — CDN script tag approach
@@ -76,7 +77,7 @@ const COLOR_MODE_LABELS = {
 // --------------------------------------------------
 function SimplifiedToolbar({ onBack, onPrev, onNext, jobId, onReset }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-dockit-blue border-b border-dockit-blue-dark">
+    <div className="flex items-center justify-between px-4 py-3 bg-bx-surface border-b border-bx-bg">
       {/* Left: back */}
       <button
         onClick={onBack}
@@ -90,7 +91,7 @@ function SimplifiedToolbar({ onBack, onPrev, onNext, jobId, onReset }) {
 
       {/* Center: title */}
       <h3 className="text-white font-semibold text-sm flex items-center gap-2">
-        <svg className="w-4 h-4 text-dockit-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-4 h-4 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
         </svg>
@@ -126,7 +127,7 @@ function SimplifiedToolbar({ onBack, onPrev, onNext, jobId, onReset }) {
             rel="noopener noreferrer"
             download
             title="Download PDF report"
-            className="flex items-center gap-1 px-3 py-1.5 bg-dockit-green hover:bg-dockit-green-dark text-white rounded-lg text-sm font-medium transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 bg-bx-mint hover:bg-bx-mint-dim text-white rounded-lg text-sm font-medium transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -168,9 +169,9 @@ function FullToolbar({
   onReset,
 }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-dockit-blue border-b border-dockit-blue-dark">
+    <div className="flex items-center justify-between px-4 py-3 bg-bx-surface border-b border-bx-bg">
       <h3 className="text-white font-semibold text-sm flex items-center gap-2">
-        <svg className="w-4 h-4 text-dockit-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-4 h-4 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
         </svg>
@@ -183,7 +184,7 @@ function FullToolbar({
           <select
             value={selectedPoseIndex ?? ''}
             onChange={(e) => onPoseSelect(e.target.value !== '' ? parseInt(e.target.value) : null)}
-            className="text-xs bg-dockit-blue-light text-white border border-white/20 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-dockit-green"
+            className="text-sm bg-bx-elevated text-white border border-white/20 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-bx-mint"
           >
             <option value="">-- Select a ligand --</option>
             {topResults.map((r, i) => (
@@ -200,9 +201,9 @@ function FullToolbar({
             <button
               key={style}
               onClick={() => onStyleChange(style)}
-              className={`px-2 py-1 text-xs font-medium transition-colors ${
+              className={`px-2 py-1 text-sm font-medium transition-colors ${
                 currentStyle === style
-                  ? 'bg-dockit-green text-white'
+                  ? 'bg-bx-mint text-white'
                   : 'text-white/70 hover:text-white hover:bg-white/10'
               }`}
             >
@@ -216,7 +217,7 @@ function FullToolbar({
           value={colorMode}
           onChange={(e) => onColorChange(e.target.value)}
           title="Color mode"
-          className="text-xs bg-dockit-blue-light text-white border border-white/20 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-dockit-green"
+          className="text-sm bg-bx-elevated text-white border border-white/20 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-bx-mint"
         >
           {Object.entries(COLOR_MODE_LABELS).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
@@ -679,21 +680,18 @@ export default function Viewer3D({
       <div className="relative bg-gray-900" style={{ height: '420px' }}>
         {loading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-900">
-            <div className="w-12 h-12 border-3 border-dockit-green border-t-transparent rounded-full animate-spin mb-4" style={{ borderWidth: '3px' }} />
-            <p className="text-white/70 text-sm">Loading 3D structure...</p>
+            <BindXLogo variant="loading" size={48} label="Loading 3D structure..." />
           </div>
         )}
 
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-gray-900">
-            <svg className="w-12 h-12 text-red-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p className="text-red-400 text-sm font-medium mb-1">Visualization unavailable</p>
-            <p className="text-white/40 text-xs text-center px-8">{error}</p>
+            <BindXLogo variant="error" size={48} />
+            <p className="text-red-400 text-sm font-medium mb-1 mt-2">Visualization unavailable</p>
+            <p className="text-white/40 text-sm text-center px-8">{error}</p>
             <button
               onClick={initViewer}
-              className="mt-4 px-4 py-2 text-xs bg-dockit-blue text-white rounded-lg hover:bg-dockit-blue-light transition-colors"
+              className="mt-4 px-4 py-2 text-sm bg-bx-surface text-white rounded-lg hover:bg-bx-elevated transition-colors"
             >
               Retry
             </button>
@@ -716,7 +714,7 @@ export default function Viewer3D({
               </svg>
               <div>
                 <p className="text-white text-sm font-semibold">No docking pose available</p>
-                <p className="text-gray-400 text-xs">This molecule was not docked — only real docked poses are shown</p>
+                <p className="text-gray-400 text-sm">This molecule was not docked — only real docked poses are shown</p>
               </div>
             </div>
           </div>
@@ -724,14 +722,14 @@ export default function Viewer3D({
       </div>
 
       {/* Legend + annotation toggles */}
-      <div className="flex items-center gap-4 px-4 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 flex-wrap">
+      <div className="flex items-center gap-4 px-4 py-2 bg-gray-50 border-t border-gray-100 text-sm text-gray-500 flex-wrap">
         {/* Static legend items */}
         <span className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded-full bg-blue-400 inline-block" />
           Protein
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded-full bg-dockit-green inline-block" />
+          <span className="w-3 h-3 rounded-full bg-bx-mint inline-block" />
           Ligand
         </span>
 

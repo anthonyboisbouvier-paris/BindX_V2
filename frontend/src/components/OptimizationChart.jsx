@@ -217,7 +217,7 @@ export default function OptimizationChart({ iterations = [] }) {
       {/* Tooltip box */}
       {tooltip && (
         <div
-          className="absolute pointer-events-none bg-gray-900 text-white text-xs px-2.5 py-1.5 rounded-lg shadow-lg"
+          className="absolute pointer-events-none bg-gray-900 text-white text-sm px-2.5 py-1.5 rounded-lg shadow-lg"
           style={{
             left: `calc(${((tooltip.x + PAD.left) / WIDTH) * 100}% + 8px)`,
             top: `calc(${((tooltip.y + PAD.top) / HEIGHT) * 100}%)`,

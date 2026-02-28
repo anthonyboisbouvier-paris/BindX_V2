@@ -7,7 +7,7 @@ import InfoTip from './InfoTip.jsx'
 function StatusDot({ status }) {
   if (status === 'safe') {
     return (
-      <span className="inline-flex items-center gap-1.5 text-green-600 font-semibold text-xs">
+      <span className="inline-flex items-center gap-1.5 text-green-600 font-semibold text-sm">
         <span className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0" />
         Safe
       </span>
@@ -15,14 +15,14 @@ function StatusDot({ status }) {
   }
   if (status === 'risk') {
     return (
-      <span className="inline-flex items-center gap-1.5 text-red-600 font-semibold text-xs">
+      <span className="inline-flex items-center gap-1.5 text-red-600 font-semibold text-sm">
         <span className="w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0" />
         Risk
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1.5 text-yellow-600 font-semibold text-xs">
+    <span className="inline-flex items-center gap-1.5 text-yellow-600 font-semibold text-sm">
       <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 flex-shrink-0" />
       Unknown
     </span>
@@ -52,7 +52,7 @@ function SelectivityBadge({ nSafe, nTotal }) {
 export default function SafetyReport({ offTargetResults, moleculeName }) {
   if (!offTargetResults) {
     return (
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 text-center text-gray-400 text-sm">
+      <div className="card p-6 text-center text-gray-400 text-sm">
         No off-target safety data available.
       </div>
     )
@@ -64,18 +64,18 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
   const riskEntries = entries.filter(([, v]) => v.status === 'risk')
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="card overflow-hidden">
       {/* Header */}
-      <div className="bg-dockit-blue px-5 py-4 text-white">
+      <div className="bg-bx-surface px-5 py-4 text-white">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
             <h3 className="font-bold text-base">
               Off-Target Safety Report
               {moleculeName && (
-                <span className="text-dockit-green ml-2 font-mono">{moleculeName}</span>
+                <span className="text-bx-mint ml-2 font-mono">{moleculeName}</span>
               )}
             </h3>
-            <p className="text-white/60 text-xs mt-0.5">
+            <p className="text-white/60 text-sm mt-0.5">
               Cross-reactivity analysis against known anti-targets
               <InfoTip text="Anti-targets are proteins that, if inadvertently bound by the drug candidate, could cause adverse effects such as cardiac toxicity (hERG) or drug-drug interactions (CYPs)." />
             </p>
@@ -83,7 +83,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
           <SelectivityBadge nSafe={n_safe} nTotal={n_total} />
         </div>
         {selectivity_score !== undefined && (
-          <div className="mt-2 text-white/70 text-xs font-mono">
+          <div className="mt-2 text-white/70 text-sm font-mono">
             Selectivity score: {Number(selectivity_score).toFixed(2)}
             <InfoTip text="Composite selectivity score (0-1). A score close to 1 means the molecule is highly selective for the intended target and shows minimal binding to anti-targets." />
           </div>
@@ -95,22 +95,22 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100">
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              <th className="text-left px-4 py-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">
                 Anti-target
                 <InfoTip text="Protein that may be unintentionally bound, causing off-target side effects." />
               </th>
-              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              <th className="text-right px-4 py-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">
                 Score (kcal/mol)
                 <InfoTip text="Predicted binding affinity to this anti-target. More negative = stronger binding (higher risk)." />
               </th>
-              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              <th className="text-right px-4 py-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">
                 Threshold
                 <InfoTip text="Risk threshold for this anti-target. Scores below this threshold indicate potential off-target activity." />
               </th>
-              <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              <th className="text-center px-4 py-3 text-sm font-semibold text-gray-500 uppercase tracking-wide">
                 Status
               </th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide hidden sm:table-cell">
+              <th className="text-left px-4 py-3 text-sm font-semibold text-gray-500 uppercase tracking-wide hidden sm:table-cell">
                 Risk
               </th>
             </tr>
@@ -118,7 +118,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
           <tbody className="divide-y divide-gray-50">
             {entries.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs italic">
+                <td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-sm italic">
                   No anti-target data available.
                 </td>
               </tr>
@@ -128,17 +128,17 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
                 key={target}
                 className={`hover:bg-gray-50 transition-colors ${data.status === 'risk' ? 'bg-red-50/40' : ''}`}
               >
-                <td className="px-4 py-3 font-medium text-gray-800 text-xs">{target}</td>
-                <td className="px-4 py-3 text-right font-mono text-xs text-gray-600">
+                <td className="px-4 py-3 font-medium text-gray-800 text-sm">{target}</td>
+                <td className="px-4 py-3 text-right font-mono text-sm text-gray-600">
                   {data.score !== undefined ? Number(data.score).toFixed(1) : 'N/A'}
                 </td>
-                <td className="px-4 py-3 text-right font-mono text-xs text-gray-400">
+                <td className="px-4 py-3 text-right font-mono text-sm text-gray-400">
                   {data.threshold !== undefined ? Number(data.threshold).toFixed(1) : 'N/A'}
                 </td>
                 <td className="px-4 py-3 text-center">
                   <StatusDot status={data.status} />
                 </td>
-                <td className="px-4 py-3 text-xs text-gray-500 hidden sm:table-cell">
+                <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">
                   {data.risk_description || '—'}
                 </td>
               </tr>
@@ -155,18 +155,18 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
             <div>
-              <p className="text-xs font-semibold text-red-700 mb-1">
+              <p className="text-sm font-semibold text-red-700 mb-1">
                 Off-target activity detected ({riskEntries.length} target{riskEntries.length > 1 ? 's' : ''})
               </p>
               {warnings.map((w, i) => (
-                <p key={i} className="text-xs text-red-600 leading-relaxed mb-1">{w}</p>
+                <p key={i} className="text-sm text-red-600 leading-relaxed mb-1">{w}</p>
               ))}
               {warnings.length === 0 && riskEntries.map(([target, data]) => (
-                <p key={target} className="text-xs text-red-600 leading-relaxed">
+                <p key={target} className="text-sm text-red-600 leading-relaxed">
                   {target}: predicted binding ({Number(data.score).toFixed(1)} kcal/mol) exceeds risk threshold ({Number(data.threshold).toFixed(1)} kcal/mol). Risk: {data.risk_description}.
                 </p>
               ))}
-              <p className="text-xs text-red-500 mt-2 font-medium">
+              <p className="text-sm text-red-500 mt-2 font-medium">
                 Recommendation: Consider structural modifications to reduce binding to flagged anti-targets before further development.
               </p>
             </div>
@@ -183,7 +183,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
               <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
-              <span className="text-xs font-semibold text-blue-800">
+              <span className="text-sm font-semibold text-blue-800">
                 Broad Screening (SEA): 3000+ targets
               </span>
               <InfoTip text="Similarity Ensemble Approach (SEA) screening against 3000+ protein targets. Identifies potential off-target activity based on chemical similarity to known ligands." />
@@ -194,7 +194,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
               if (cs >= 0.8) badgeClass = 'bg-green-100 text-green-700 border-green-300'
               else if (cs >= 0.6) badgeClass = 'bg-yellow-100 text-yellow-700 border-yellow-300'
               return (
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${badgeClass} flex-shrink-0`}>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-sm font-bold border ${badgeClass} flex-shrink-0`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${cs >= 0.8 ? 'bg-green-500' : cs >= 0.6 ? 'bg-yellow-400' : 'bg-red-500'}`} />
                   Combined selectivity: {cs.toFixed(2)}
                 </span>
@@ -205,7 +205,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
           <div className="px-4 py-3 bg-white space-y-3">
             {/* Screened count */}
             {offTargetResults.sea_results?.n_targets_screened !== undefined && (
-              <p className="text-xs text-gray-500">
+              <p className="text-sm text-gray-500">
                 <span className="font-semibold text-gray-700">{offTargetResults.sea_results.n_targets_screened.toLocaleString()}</span> targets screened
                 {offTargetResults.sea_results.targets_hit?.length > 0 && (
                   <span> &mdash; <span className="font-semibold text-red-600">{offTargetResults.sea_results.targets_hit.length}</span> hits above threshold</span>
@@ -227,7 +227,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
                   const targetName = hit.target_name || hit.target || hit.chembl_id || `Target ${idx + 1}`
                   return (
                     <div key={idx} className="flex items-center gap-2">
-                      <span className="text-xs text-gray-700 w-36 truncate flex-shrink-0 font-medium" title={targetName}>
+                      <span className="text-sm text-gray-700 w-36 truncate flex-shrink-0 font-medium" title={targetName}>
                         {targetName}
                       </span>
                       <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -236,7 +236,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
                           style={{ width: `${pct}%` }}
                         />
                       </div>
-                      <span className={`text-xs font-semibold ${textColor} w-9 text-right flex-shrink-0`}>
+                      <span className={`text-sm font-semibold ${textColor} w-9 text-right flex-shrink-0`}>
                         {pct}%
                       </span>
                     </div>
@@ -269,7 +269,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
             {/* No hits message */}
             {(!offTargetResults.sea_results?.targets_hit || offTargetResults.sea_results.targets_hit.length === 0) &&
               !offTargetResults.tier1_hits?.length && (
-              <p className="text-xs text-green-600 font-medium flex items-center gap-1.5">
+              <p className="text-sm text-green-600 font-medium flex items-center gap-1.5">
                 <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                 </svg>
@@ -282,7 +282,7 @@ export default function SafetyReport({ offTargetResults, moleculeName }) {
 
       {/* Footer disclaimer */}
       <div className="px-5 py-3 bg-gray-50 border-t border-gray-100">
-        <p className="text-xs text-gray-400 italic leading-relaxed">
+        <p className="text-sm text-gray-400 italic leading-relaxed">
           Computational predictions. Off-target binding should be confirmed experimentally (e.g., selectivity panels, hERG patch-clamp assays).
         </p>
       </div>

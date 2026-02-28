@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BindX — Final Premium Animations</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#04060b;--s2:#0f131d;--text:#eaedf4;--sub:#8a93a8;--dim:#5d6579;--mint:#00e6a0;--cyan:#06b6d4;--blue:#3b82f6;--violet:#8b5cf6;--red:#f43f5e;--border:rgba(255,255,255,.055)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;overflow-x:hidden}
+
+.page-head{text-align:center;padding:3rem 2rem 1rem}
+.page-head h1{font-size:1.5rem;font-weight:800}
+.page-head h1 span{color:var(--mint)}
+.page-head p{color:var(--sub);font-size:.78rem;margin-top:.3rem}
+
+.demo{max-width:900px;margin:1.5rem auto;background:var(--s2);border:1px solid var(--border);border-radius:20px;overflow:hidden}
+.demo-head{display:flex;align-items:center;justify-content:space-between;padding:.7rem 1.3rem;border-bottom:1px solid var(--border)}
+.demo-head h3{font-size:.7rem;font-weight:700}
+.demo-head .tag{font-family:'Fira Code',monospace;font-size:.48rem;color:var(--mint);padding:.12rem .4rem;background:rgba(0,230,160,.08);border-radius:4px}
+.demo-body{position:relative;display:flex;align-items:center;justify-content:center;overflow:visible}
+.demo-note{padding:.55rem 1.3rem;border-top:1px solid var(--border);font-size:.58rem;color:var(--dim);line-height:1.5}
+
+/* ═══════════════════════════════════════════════════════
+   1. SPLASH — Convergence orbitale avec traînées
+   ═══════════════════════════════════════════════════════ */
+.splash-zone{width:100%;height:400px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.splash-zone::before{content:'';position:absolute;width:450px;height:450px;background:radial-gradient(circle,rgba(0,230,160,.025),transparent 65%);pointer-events:none}
+.splash-logo{width:150px;height:150px;overflow:visible}
+.splash-logo .r1{transform-origin:18px 28px;animation:s1-r1 1.6s cubic-bezier(.22,1,.36,1) forwards,s1-idle1 6s ease-in-out 2.2s infinite}
+.splash-logo .r2{transform-origin:28px 28px;animation:s1-r2 1.4s cubic-bezier(.22,1,.36,1) .12s forwards,s1-idle2 6s ease-in-out 2.4s infinite}
+.splash-logo .r3{transform-origin:38px 28px;animation:s1-r3 1.5s cubic-bezier(.22,1,.36,1) .22s forwards,s1-idle3 6s ease-in-out 2.6s infinite}
+.splash-logo .dot{animation:s1-dot .45s cubic-bezier(.34,1.56,.64,1) 1.1s forwards}
+.splash-logo .glow{animation:s1-glow .8s ease 1.1s forwards}
+
+@keyframes s1-r1{0%{transform:translate(-70px,-25px) scale(1.25) rotate(-8deg);opacity:0}35%{opacity:.3}100%{transform:translate(0,0) scale(1) rotate(0);opacity:.45}}
+@keyframes s1-r2{0%{transform:translate(5px,-55px) scale(.65) rotate(5deg);opacity:0}35%{opacity:.5}100%{transform:translate(0,0) scale(1) rotate(0);opacity:.7}}
+@keyframes s1-r3{0%{transform:translate(55px,35px) scale(1.3) rotate(10deg);opacity:0}35%{opacity:.6}100%{transform:translate(0,0) scale(1) rotate(0);opacity:1}}
+@keyframes s1-dot{0%{r:0;opacity:0}65%{r:5.5;opacity:1}100%{r:4;opacity:.85}}
+@keyframes s1-glow{0%{r:4;opacity:0}40%{opacity:.2}100%{r:28;opacity:0}}
+@keyframes s1-idle1{0%,100%{transform:translate(0,0) rotate(0)}50%{transform:translate(-2.5px,-1.5px) rotate(-.5deg)}}
+@keyframes s1-idle2{0%,100%{transform:translate(0,0)}50%{transform:translate(.5px,1.5px)}}
+@keyframes s1-idle3{0%,100%{transform:translate(0,0) rotate(0)}50%{transform:translate(2px,-1px) rotate(.3deg)}}
+
+/* Trails */
+.sp-trail{position:absolute;border-radius:50%;pointer-events:none;opacity:0}
+.spt1{width:5px;height:5px;background:var(--mint);left:18%;top:36%;animation:spt-a 1.6s ease forwards}
+.spt2{width:3px;height:3px;background:var(--mint);left:22%;top:32%;animation:spt-a 1.3s ease .08s forwards}
+.spt3{width:4px;height:4px;background:var(--cyan);left:49%;top:16%;animation:spt-b 1.4s ease .12s forwards}
+.spt4{width:3px;height:3px;background:var(--cyan);left:51%;top:22%;animation:spt-b 1.1s ease .2s forwards}
+.spt5{width:5px;height:5px;background:var(--blue);right:20%;bottom:32%;animation:spt-c 1.5s ease .22s forwards}
+.spt6{width:3px;height:3px;background:var(--blue);right:24%;bottom:36%;animation:spt-c 1.2s ease .3s forwards}
+@keyframes spt-a{0%{opacity:.6;transform:translate(0,0) scale(1)}50%{opacity:.25}100%{opacity:0;transform:translate(120px,20px) scale(.2)}}
+@keyframes spt-b{0%{opacity:.5;transform:translate(0,0) scale(1)}50%{opacity:.2}100%{opacity:0;transform:translate(4px,80px) scale(.2)}}
+@keyframes spt-c{0%{opacity:.6;transform:translate(0,0) scale(1)}50%{opacity:.2}100%{opacity:0;transform:translate(-90px,-40px) scale(.2)}}
+
+.splash-zone .sp-name{position:absolute;bottom:90px;font-weight:800;font-size:2rem;opacity:0;animation:s-fade .7s ease 1.3s forwards;letter-spacing:-.02em}
+.splash-zone .sp-name .x{color:var(--mint)}
+.splash-zone .sp-sub{position:absolute;bottom:64px;font-size:.75rem;color:var(--dim);opacity:0;animation:s-fade .5s ease 1.6s forwards}
+@keyframes s-fade{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+
+
+/* ═══════════════════════════════════════════════════════
+   2. LOADING — Docking + barre sous les cercles
+   ═══════════════════════════════════════════════════════ */
+.load-zone{width:100%;height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.load-inner{display:flex;flex-direction:column;align-items:center;gap:14px}
+.load-inner canvas{display:block}
+.load-dots{display:flex;gap:6px;align-items:center}
+.load-dot-l{width:5px;height:5px;border-radius:50%;animation:ldot-pulse 1.8s ease-in-out infinite}
+.load-dot-l:nth-child(1){background:var(--mint);animation-delay:0s}
+.load-dot-l:nth-child(2){background:var(--cyan);animation-delay:.25s}
+.load-dot-l:nth-child(3){background:var(--blue);animation-delay:.5s}
+@keyframes ldot-pulse{0%,100%{opacity:.2;transform:scale(.7)}50%{opacity:1;transform:scale(1)}}
+
+
+/* ═══════════════════════════════════════════════════════
+   3. SCREENING — Particules JS qui traversent
+   ═══════════════════════════════════════════════════════ */
+.screen-zone{width:100%;height:320px;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.screen-logo{width:180px;height:180px;overflow:visible;z-index:2}
+.screen-logo .r1{opacity:.45}.screen-logo .r2{opacity:.7}.screen-logo .r3{opacity:1}.screen-logo .dot{r:4;opacity:.85}
+.mol{position:absolute;border-radius:50%;pointer-events:none;z-index:1}
+
+
+/* ═══════════════════════════════════════════════════════
+   4. SUCCESS — Merge + flash + sparkles + ✓
+   ═══════════════════════════════════════════════════════ */
+.ok-zone{width:100%;height:320px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.ok-wrap{position:relative;display:flex;flex-direction:column;align-items:center}
+.ok-logo{width:130px;height:130px;overflow:visible}
+
+.ok-logo .r1{transform-origin:18px 28px;animation:ok-r1 4s ease infinite}
+.ok-logo .r2{transform-origin:28px 28px;animation:ok-r2 4s ease infinite}
+.ok-logo .r3{transform-origin:38px 28px;animation:ok-r3 4s ease infinite}
+.ok-logo .dbg{animation:ok-dbg 4s ease infinite}
+.ok-logo .dot{animation:ok-dot 4s ease infinite}
+.ok-logo .check{animation:ok-chk 4s ease infinite;stroke-dasharray:22;stroke-dashoffset:22}
+
+@keyframes ok-r1{
+  0%,28%{transform:translate(0,0);opacity:.45;stroke:#00e6a0}
+  48%{transform:translate(10px,0) scale(.82);opacity:.8}
+  55%{transform:translate(12px,0) scale(.78);opacity:.9;stroke:#00e6a0}
+  68%{transform:translate(2px,0);opacity:.55}
+  85%,100%{transform:translate(0,0);opacity:.45}
+}
+@keyframes ok-r2{
+  0%,28%{transform:translate(0,0);opacity:.7;stroke:#06b6d4}
+  48%{transform:translate(5px,0) scale(.88);opacity:.85}
+  55%{transform:translate(6px,0) scale(.85);opacity:1;stroke:#06b6d4}
+  68%{transform:translate(1px,0);opacity:.75}
+  85%,100%{transform:translate(0,0);opacity:.7}
+}
+@keyframes ok-r3{
+  0%,28%{transform:translate(0,0);opacity:1;stroke:#3b82f6}
+  48%{transform:translate(-1px,0) scale(.94);opacity:1}
+  55%{transform:translate(-1px,0) scale(.92);opacity:1;stroke:#3b82f6}
+  68%{transform:translate(0,0);opacity:1}
+  85%,100%{transform:translate(0,0);opacity:1}
+}
+@keyframes ok-dbg{
+  0%,50%{r:0;opacity:0}
+  57%{r:8;opacity:.2;fill:#00e6a0}
+  66%{r:22;opacity:.04}
+  78%,100%{r:28;opacity:0}
+}
+@keyframes ok-dot{
+  0%,50%{r:0;opacity:0}
+  56%{r:6.5;opacity:1;fill:#00e6a0}
+  64%{r:5.5;opacity:.92}
+  100%{r:5.5;opacity:.92;fill:#00e6a0}
+}
+@keyframes ok-chk{
+  0%,58%{stroke-dashoffset:22;opacity:0}
+  70%{stroke-dashoffset:0;opacity:1}
+  100%{stroke-dashoffset:0;opacity:1}
+}
+
+.sparkle{position:absolute;width:3px;height:3px;border-radius:50%;pointer-events:none;opacity:0}
+@keyframes spark{
+  0%,52%{opacity:0;transform:translate(0,0) scale(0)}
+  58%{opacity:.9;transform:translate(var(--sx),var(--sy)) scale(1.2)}
+  76%{opacity:.2;transform:translate(calc(var(--sx)*1.6),calc(var(--sy)*1.6)) scale(.4)}
+  90%,100%{opacity:0;transform:translate(calc(var(--sx)*2),calc(var(--sy)*2)) scale(0)}
+}
+.sp-mint{background:var(--mint)}.sp-cyan{background:var(--cyan)}.sp-blue{background:var(--blue)}.sp-violet{background:var(--violet)}
+
+
+/* ═══════════════════════════════════════════════════════
+   5. ERROR — Même structure que success mais rouge + ✕
+   ═══════════════════════════════════════════════════════ */
+.err-zone{width:100%;height:320px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.err-wrap{position:relative;display:flex;flex-direction:column;align-items:center}
+.err-logo{width:130px;height:130px;overflow:visible}
+
+.err-logo .r1{transform-origin:18px 28px;animation:er-r1 4s ease infinite}
+.err-logo .r2{transform-origin:28px 28px;animation:er-r2 4s ease infinite}
+.err-logo .r3{transform-origin:38px 28px;animation:er-r3 4s ease infinite}
+.err-logo .dbg{animation:er-dbg 4s ease infinite}
+.err-logo .dot{animation:er-dot 4s ease infinite}
+.err-logo .cross1,.err-logo .cross2{animation:er-cross 4s ease infinite;stroke-dasharray:14;stroke-dashoffset:14}
+.err-logo .cross2{animation-delay:.06s}
+
+@keyframes er-r1{
+  0%,28%{transform:translate(0,0);opacity:.45;stroke:#f43f5e}
+  48%{transform:translate(10px,0) scale(.82);opacity:.8}
+  55%{transform:translate(12px,0) scale(.78);opacity:.9}
+  68%{transform:translate(2px,0);opacity:.55}
+  85%,100%{transform:translate(0,0);opacity:.45}
+}
+@keyframes er-r2{
+  0%,28%{transform:translate(0,0);opacity:.7;stroke:#f43f5e}
+  48%{transform:translate(5px,0) scale(.88);opacity:.85}
+  55%{transform:translate(6px,0) scale(.85);opacity:1}
+  68%{transform:translate(1px,0);opacity:.75}
+  85%,100%{transform:translate(0,0);opacity:.7}
+}
+@keyframes er-r3{
+  0%,28%{transform:translate(0,0);opacity:1;stroke:#f43f5e}
+  48%{transform:translate(-1px,0) scale(.94);opacity:1}
+  55%{transform:translate(-1px,0) scale(.92);opacity:1}
+  68%{transform:translate(0,0);opacity:1}
+  85%,100%{transform:translate(0,0);opacity:1}
+}
+@keyframes er-dbg{
+  0%,50%{r:0;opacity:0}
+  57%{r:8;opacity:.2;fill:#f43f5e}
+  66%{r:22;opacity:.04}
+  78%,100%{r:28;opacity:0}
+}
+@keyframes er-dot{
+  0%,50%{r:0;opacity:0}
+  56%{r:6.5;opacity:1;fill:#f43f5e}
+  64%{r:5.5;opacity:.92}
+  100%{r:5.5;opacity:.92;fill:#f43f5e}
+}
+@keyframes er-cross{
+  0%,58%{stroke-dashoffset:14;opacity:0}
+  70%{stroke-dashoffset:0;opacity:1}
+  100%{stroke-dashoffset:0;opacity:1}
+}
+
+/* Red sparkles */
+.sp-red{background:#f43f5e}
+.sp-redlt{background:#fb7185}
+
+
+/* ═══════════════════════════════════════════════════════
+   6. PHASE TRANSITION — Chromatique
+   ═══════════════════════════════════════════════════════ */
+.phase-zone{width:100%;height:280px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.phase-logo{width:130px;height:130px;overflow:visible}
+
+.phase-logo .r1{transform-origin:18px 28px;animation:ph-r1 6s ease-in-out infinite}
+.phase-logo .r2{transform-origin:28px 28px;animation:ph-r2 6s ease-in-out infinite}
+.phase-logo .r3{transform-origin:38px 28px;animation:ph-r3 6s ease-in-out infinite}
+.phase-logo .dot{animation:ph-dot 6s ease-in-out infinite}
+
+@keyframes ph-r1{
+  0%,18%{stroke:#00e6a0;opacity:.45;transform:translate(0,0)}
+  28%{opacity:.2;transform:translate(-10px,0) scale(.85)}
+  40%{opacity:0;transform:translate(-18px,0) scale(.65)}
+  52%{opacity:0;transform:translate(18px,0) scale(.65);stroke:#06b6d4}
+  62%{opacity:.2;transform:translate(10px,0) scale(.85)}
+  78%,100%{stroke:#06b6d4;opacity:.45;transform:translate(0,0)}
+}
+@keyframes ph-r2{
+  0%,18%{stroke:#06b6d4;opacity:.7}
+  38%,62%{opacity:.45}
+  78%,100%{stroke:#3b82f6;opacity:.7}
+}
+@keyframes ph-r3{
+  0%,18%{stroke:#3b82f6;opacity:1}
+  38%,62%{opacity:.65}
+  78%,100%{stroke:#8b5cf6;opacity:1}
+}
+@keyframes ph-dot{
+  0%,18%{fill:#3b82f6;opacity:.85}
+  38%{opacity:.25}
+  62%{opacity:.25}
+  78%,100%{fill:#8b5cf6;opacity:.85}
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   7. HOVER — Exploded view avec labels OUTSIDE
+   ═══════════════════════════════════════════════════════ */
+.hov-zone{width:100%;height:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.8rem}
+.hov-wrap{position:relative;width:280px;height:180px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.hov-logo{width:130px;height:130px;overflow:visible;position:relative;z-index:2}
+.hov-logo .r1,.hov-logo .r2,.hov-logo .r3,.hov-logo .dot{transition:all .7s cubic-bezier(.22,1,.36,1)}
+.hov-logo .r1{opacity:.45}.hov-logo .r2{opacity:.7}.hov-logo .r3{opacity:1}.hov-logo .dot{r:4;opacity:.85}
+
+/* Labels OUTSIDE the SVG */
+.hov-label{position:absolute;font-family:'Fira Code',monospace;font-size:.55rem;color:var(--dim);opacity:0;transition:all .7s cubic-bezier(.22,1,.36,1);pointer-events:none;white-space:nowrap}
+.hov-l1{left:0;top:50%;transform:translateY(-50%) translateX(10px)}.hov-l2{top:8px;left:50%;transform:translateX(-50%) translateY(10px)}.hov-l3{right:0;top:50%;transform:translateY(-50%) translateX(-10px)}
+.hov-line{position:absolute;pointer-events:none;opacity:0;transition:all .7s cubic-bezier(.22,1,.36,1)}
+
+/* Hover state */
+.hov-wrap:hover .hov-logo .r1{transform:translate(-18px,-6px);opacity:.7}
+.hov-wrap:hover .hov-logo .r2{transform:translate(-2px,-10px);opacity:.85}
+.hov-wrap:hover .hov-logo .r3{transform:translate(14px,4px);opacity:1}
+.hov-wrap:hover .hov-logo .dot{transform:translate(14px,4px);filter:drop-shadow(0 0 8px rgba(59,130,246,.5))}
+.hov-wrap:hover .hov-l1{opacity:1;transform:translateY(-50%) translateX(0);color:var(--mint)}
+.hov-wrap:hover .hov-l2{opacity:1;transform:translateX(-50%) translateY(0);color:var(--cyan)}
+.hov-wrap:hover .hov-l3{opacity:1;transform:translateY(-50%) translateX(0);color:var(--blue)}
+.hov-wrap:hover .hov-line{opacity:1}
+
+.hov-hint{font-size:.58rem;color:var(--dim);font-style:italic}
+
+
+/* ═══════════════════════════════════════════════════════
+   8. MAGNETIC ATTRACT — Mouse-reactive
+   ═══════════════════════════════════════════════════════ */
+.mag-zone{width:100%;height:360px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.8rem;overflow:hidden;cursor:crosshair}
+.mag-logo{overflow:visible}
+.mag-hint{font-size:.58rem;color:var(--dim);font-style:italic}
+
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>Premium <span>Animations</span> — Final</h1>
+  <p>Génériques, sans texte, utilisables partout.</p>
+</div>
+
+<!-- ═══ 1. SPLASH ═══ -->
+<div class="demo">
+  <div class="demo-head"><h3>1. Convergence — App launch, page load, splash screen</h3><span class="tag">ENTRANCE</span></div>
+  <div class="demo-body">
+    <div class="splash-zone">
+      <div class="sp-trail spt1"></div><div class="sp-trail spt2"></div>
+      <div class="sp-trail spt3"></div><div class="sp-trail spt4"></div>
+      <div class="sp-trail spt5"></div><div class="sp-trail spt6"></div>
+      <svg class="splash-logo" viewBox="0 0 56 56" fill="none">
+        <circle class="glow" cx="38" cy="28" fill="#3b82f6" r="8" opacity="0"/>
+        <g class="r1"><circle cx="18" cy="28" r="15" stroke="#00e6a0" stroke-width="1.5" fill="none"/></g>
+        <g class="r2"><circle cx="28" cy="28" r="12" stroke="#06b6d4" stroke-width="2" fill="none"/></g>
+        <g class="r3"><circle cx="38" cy="28" r="9" stroke="#3b82f6" stroke-width="2.5" fill="none"/></g>
+        <circle class="dot" cx="38" cy="28" fill="#3b82f6" r="0"/>
+      </svg>
+      <div class="sp-name">Bind<span class="x">X</span></div>
+      <div class="sp-sub">In Silico Drug Discovery Platform</div>
+    </div>
+  </div>
+  <div class="demo-note">Les 3 cercles volent depuis 3 directions avec rotation + traînées. Convergence élastique, puis respiration idle infinie. Utilisable : splash, hero, page transition.</div>
+</div>
+
+<!-- ═══ 2. LOADING ═══ -->
+<div class="demo">
+  <div class="demo-head"><h3>2. Loading — Calcul en cours, traitement, import</h3><span class="tag">PROCESSING</span></div>
+  <div class="demo-body">
+    <div class="load-zone">
+      <div class="load-inner">
+        <canvas id="loadCanvas" width="160" height="160"></canvas>
+        <div class="load-dots">
+          <div class="load-dot-l"></div>
+          <div class="load-dot-l"></div>
+          <div class="load-dot-l"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="demo-note">Les 3 cerceaux tournent autour du point central avec accélération/décélération sinusoïdale. Le point se déplace sous les forces centrifuges proportionnelles à la masse de chaque cerceau. Utilisable : calcul, import, scoring, n'importe quel run.</div>
+</div>
+
+<!-- ═══ 3. SCREENING ═══ -->
+<div class="demo">
+  <div class="demo-head"><h3>3. Flux — Screening, filtrage, pipeline actif</h3><span class="tag">STREAMING</span></div>
+  <div class="demo-body">
+    <div class="screen-zone" id="funnel">
+      <svg class="screen-logo" viewBox="0 0 56 56" fill="none">
+        <circle class="r1" cx="18" cy="28" r="15" stroke="#00e6a0" stroke-width="1.5" fill="none"/>
+        <circle class="r2" cx="28" cy="28" r="12" stroke="#06b6d4" stroke-width="2" fill="none"/>
+        <circle class="r3" cx="38" cy="28" r="9" stroke="#3b82f6" stroke-width="2.5" fill="none"/>
+        <circle class="dot" cx="38" cy="28" r="4" fill="#3b82f6"/>
+      </svg>
+    </div>
+  </div>
+  <div class="demo-note">Des particules de tailles variées coulent de gauche à droite, rétrécissent et disparaissent en traversant chaque cercle. Le logo est le funnel. Utilisable : screening, import library, data flow.</div>
+</div>
+
+<!-- ═══ 4. SUCCESS ═══ -->
+<div class="demo">
+  <div class="demo-head"><h3>4. Succès — Tâche terminée, validation, résultat</h3><span class="tag">SUCCESS</span></div>
+  <div class="demo-body">
+    <div class="ok-zone">
+      <div class="ok-wrap">
+        <div class="sparkle sp-mint" style="--sx:-55px;--sy:-38px;left:50%;top:50%;animation:spark 4s ease infinite"></div>
+        <div class="sparkle sp-cyan" style="--sx:50px;--sy:-32px;left:50%;top:50%;animation:spark 4s ease infinite .04s"></div>
+        <div class="sparkle sp-blue" style="--sx:58px;--sy:18px;left:50%;top:50%;animation:spark 4s ease infinite .08s"></div>
+        <div class="sparkle sp-mint" style="--sx:-45px;--sy:42px;left:50%;top:50%;animation:spark 4s ease infinite .12s"></div>
+        <div class="sparkle sp-violet" style="--sx:22px;--sy:-52px;left:50%;top:50%;animation:spark 4s ease infinite .06s"></div>
+        <div class="sparkle sp-cyan" style="--sx:-58px;--sy:12px;left:50%;top:50%;animation:spark 4s ease infinite .1s"></div>
+        <div class="sparkle sp-blue" style="--sx:38px;--sy:44px;left:50%;top:50%;animation:spark 4s ease infinite .14s"></div>
+        <div class="sparkle sp-mint" style="--sx:-18px;--sy:-50px;left:50%;top:50%;animation:spark 4s ease infinite .03s"></div>
+        <div class="sparkle sp-violet" style="--sx:-30px;--sy:48px;left:50%;top:50%;animation:spark 4s ease infinite .09s"></div>
+        <div class="sparkle sp-cyan" style="--sx:48px;--sy:-8px;left:50%;top:50%;animation:spark 4s ease infinite .07s"></div>
+        <svg class="ok-logo" viewBox="0 0 56 56" fill="none">
+          <circle class="dbg" cx="38" cy="28" fill="#00e6a0" r="0" opacity="0"/>
+          <g class="r1"><circle cx="18" cy="28" r="15" stroke="#00e6a0" stroke-width="1.5" fill="none" opacity=".45"/></g>
+          <g class="r2"><circle cx="28" cy="28" r="12" stroke="#06b6d4" stroke-width="2" fill="none" opacity=".7"/></g>
+          <g class="r3"><circle cx="38" cy="28" r="9" stroke="#3b82f6" stroke-width="2.5" fill="none"/></g>
+          <circle class="dot" cx="38" cy="28" fill="#00e6a0" r="0"/>
+          <path class="check" d="M34.5 28.5L37 31L42 25.5" stroke="#04060b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+  <div class="demo-note">Les cercles convergent serrés → burst mint radial + 10 sparkles multicolores → point vert avec ✓ animé. Utilisable : run terminé, phase validée, export réussi.</div>
+</div>
+
+<!-- ═══ 5. ERROR ═══ -->
+<div class="demo">
+  <div class="demo-head"><h3>5. Erreur — Échec, timeout, crash</h3><span class="tag">ERROR</span></div>
+  <div class="demo-body">
+    <div class="err-zone">
+      <div class="err-wrap">
+        <div class="sparkle sp-red" style="--sx:-50px;--sy:-35px;left:50%;top:50%;animation:spark 4s ease infinite"></div>
+        <div class="sparkle sp-redlt" style="--sx:48px;--sy:-28px;left:50%;top:50%;animation:spark 4s ease infinite .05s"></div>
+        <div class="sparkle sp-red" style="--sx:52px;--sy:20px;left:50%;top:50%;animation:spark 4s ease infinite .1s"></div>
+        <div class="sparkle sp-redlt" style="--sx:-42px;--sy:38px;left:50%;top:50%;animation:spark 4s ease infinite .13s"></div>
+        <div class="sparkle sp-red" style="--sx:18px;--sy:-48px;left:50%;top:50%;animation:spark 4s ease infinite .07s"></div>
+        <div class="sparkle sp-redlt" style="--sx:-52px;--sy:10px;left:50%;top:50%;animation:spark 4s ease infinite .11s"></div>
+        <svg class="err-logo" viewBox="0 0 56 56" fill="none">
+          <circle class="dbg" cx="38" cy="28" fill="#f43f5e" r="0" opacity="0"/>
+          <g class="r1"><circle cx="18" cy="28" r="15" stroke="#f43f5e" stroke-width="1.5" fill="none" opacity=".45"/></g>
+          <g class="r2"><circle cx="28" cy="28" r="12" stroke="#f43f5e" stroke-width="2" fill="none" opacity=".7"/></g>
+          <g class="r3"><circle cx="38" cy="28" r="9" stroke="#f43f5e" stroke-width="2.5" fill="none"/></g>
+          <circle class="dot" cx="38" cy="28" fill="#f43f5e" r="0"/>
+          <line class="cross1" x1="35.5" y1="25.5" x2="40.5" y2="30.5" stroke="#04060b" stroke-width="2" stroke-linecap="round"/>
+          <line class="cross2" x1="40.5" y1="25.5" x2="35.5" y2="30.5" stroke="#04060b" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+  <div class="demo-note">Même structure que le succès mais tout rouge. Les cercles convergent → burst rouge + sparkles rouges → point rouge avec ✕ animé. Symétrique au succès. Utilisable : crash, timeout, erreur réseau.</div>
+</div>
+
+<!-- ═══ 6. PHASE TRANSITION ═══ -->
+<div class="demo">
+  <div class="demo-head"><h3>6. Transition — Changement de phase, avancement, shift</h3><span class="tag">TRANSITION</span></div>
+  <div class="demo-body">
+    <div class="phase-zone">
+      <svg class="phase-logo" viewBox="0 0 56 56" fill="none">
+        <g class="r1"><circle cx="18" cy="28" r="15" stroke="#00e6a0" stroke-width="1.5" fill="none" opacity=".45"/></g>
+        <g class="r2"><circle cx="28" cy="28" r="12" stroke="#06b6d4" stroke-width="2" fill="none" opacity=".7"/></g>
+        <g class="r3"><circle cx="38" cy="28" r="9" stroke="#3b82f6" stroke-width="2.5" fill="none"/></g>
+        <circle class="dot" cx="38" cy="28" fill="#3b82f6" r="4" opacity=".85"/>
+      </svg>
+    </div>
+  </div>
+  <div class="demo-note">Le 1er cercle sort par la gauche, revient avec la couleur du suivant. Tout le spectre avance (mint→cyan→blue → cyan→blue→violet). Utilisable : changement de phase, avancement, navigation entre étapes.</div>
+</div>
+
+<!-- ═══ 7. HOVER EXPLODED ═══ -->
+<div class="demo">
+  <div class="demo-head"><h3>7. Exploded — Hover, inspection, détail</h3><span class="tag">INTERACTIVE</span></div>
+  <div class="demo-body">
+    <div class="hov-zone">
+      <div class="hov-wrap">
+        <span class="hov-label hov-l1">Screen</span>
+        <span class="hov-label hov-l2">Filter</span>
+        <span class="hov-label hov-l3">Enhance</span>
+        <!-- SVG connector lines -->
+        <svg class="hov-line" style="position:absolute;inset:0;width:100%;height:100%;z-index:1" viewBox="0 0 280 180" fill="none">
+          <line x1="42" y1="90" x2="95" y2="82" stroke="#00e6a0" stroke-width=".7" stroke-dasharray="2 2" opacity=".4"/>
+          <line x1="140" y1="32" x2="140" y2="58" stroke="#06b6d4" stroke-width=".7" stroke-dasharray="2 2" opacity=".4"/>
+          <line x1="240" y1="90" x2="192" y2="96" stroke="#3b82f6" stroke-width=".7" stroke-dasharray="2 2" opacity=".4"/>
+        </svg>
+        <svg class="hov-logo" viewBox="0 0 56 56" fill="none">
+          <g class="r1"><circle cx="18" cy="28" r="15" stroke="#00e6a0" stroke-width="1.5" fill="none"/></g>
+          <g class="r2"><circle cx="28" cy="28" r="12" stroke="#06b6d4" stroke-width="2" fill="none"/></g>
+          <g class="r3"><circle cx="38" cy="28" r="9" stroke="#3b82f6" stroke-width="2.5" fill="none"/></g>
+          <circle class="dot" cx="38" cy="28" r="4" fill="#3b82f6"/>
+        </svg>
+      </div>
+      <div class="hov-hint">↑ Survolez le logo</div>
+    </div>
+  </div>
+  <div class="demo-note">Les cercles s'écartent avec spring, les labels apparaissent à l'extérieur (gauche, haut, droite) avec lignes pointillées. Utilisable : hover nav, tooltip, onboarding, documentation.</div>
+</div>
+
+<!-- ═══ 8. MAGNETIC ═══ -->
+<div class="demo">
+  <div class="demo-head"><h3>8. Magnétique — Réaction au curseur en temps réel</h3><span class="tag">REACTIVE</span></div>
+  <div class="demo-body">
+    <div class="mag-zone" id="magZone">
+      <svg class="mag-logo" id="magLogo" viewBox="0 0 56 56" fill="none" width="160" height="160" style="overflow:visible">
+        <defs>
+          <radialGradient id="mglow" cx="38" cy="28" r="12" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#3b82f6" stop-opacity=".15"/>
+            <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle id="mg" cx="38" cy="28" r="12" fill="url(#mglow)" opacity="0"/>
+        <g id="mr1"><circle cx="18" cy="28" r="15" stroke="#00e6a0" stroke-width="1.5" fill="none" opacity=".45"/></g>
+        <g id="mr2"><circle cx="28" cy="28" r="12" stroke="#06b6d4" stroke-width="2" fill="none" opacity=".7"/></g>
+        <g id="mr3"><circle cx="38" cy="28" r="9" stroke="#3b82f6" stroke-width="2.5" fill="none"/></g>
+        <circle id="mdot" cx="38" cy="28" r="4" fill="#3b82f6" opacity=".85"/>
+      </svg>
+      <div class="mag-hint">↑ Déplacez votre curseur</div>
+    </div>
+  </div>
+  <div class="demo-note">Les cercles réagissent à la position du curseur en temps réel. Le grand cercle suit lentement, le moyen plus vite, le petit est aimanté. Parallax inversé. Utilisable : hero, landing page, background décoratif.</div>
+</div>
+
+<!-- ═══ JS — Funnel particles + Magnetic ═══ -->
+<script>
+// === LOADING V6 — Physics Hoops ===
+(function() {
+  const canvas = document.getElementById('loadCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = 160, H = 160;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+
+  const anchor = { x: W/2, y: H/2 };
+  const DOT_R = 4;
+  const dot = { x: anchor.x, y: anchor.y, vx: 0, vy: 0 };
+  const SPRING = 0.03, DAMPING = 0.93, CENTRIFUGAL = 0.06;
+
+  const rings = [
+    { radius: 36, strokeW: 1.3, color:[0,230,160], opacity:0.45, angle:0, mass:3.2,
+      speedFn: t => 0.4 + 0.8 * (0.5 + 0.5*Math.sin(t*0.8)) },
+    { radius: 28, strokeW: 1.7, color:[6,182,212], opacity:0.7, angle:Math.PI*0.7, mass:2.4,
+      speedFn: t => -(0.5 + 1.0 * (0.5 + 0.5*Math.sin(t*0.6 + 1))) },
+    { radius: 21, strokeW: 2.2, color:[59,130,246], opacity:0.9, angle:Math.PI*1.4, mass:1.7,
+      speedFn: t => 0.7 + 1.4 * (0.5 + 0.5*Math.sin(t*1.0 + 2)) }
+  ];
+
+  let lastT = performance.now(), elapsed = 0;
+
+  function tick(now) {
+    const dt = Math.min((now - lastT) / 1000, 0.05);
+    lastT = now; elapsed += dt;
+    ctx.clearRect(0, 0, W, H);
+
+    let fx = 0, fy = 0;
+    rings.forEach(r => {
+      const spd = r.speedFn(elapsed);
+      r.angle += spd * dt;
+      const orbitDist = r.radius - DOT_R;
+      const cx = dot.x + orbitDist * Math.cos(r.angle);
+      const cy = dot.y + orbitDist * Math.sin(r.angle);
+      const dirX = cx - dot.x, dirY = cy - dot.y;
+      const dist = Math.sqrt(dirX*dirX + dirY*dirY) || 1;
+      const force = r.mass * spd * spd * CENTRIFUGAL;
+      fx += (dirX/dist) * force; fy += (dirY/dist) * force;
+      r._cx = cx; r._cy = cy;
+    });
+
+    fx += (anchor.x - dot.x) * SPRING;
+    fy += (anchor.y - dot.y) * SPRING;
+    dot.vx = (dot.vx + fx * dt) * DAMPING;
+    dot.vy = (dot.vy + fy * dt) * DAMPING;
+    dot.x += dot.vx; dot.y += dot.vy;
+
+    rings.forEach(r => {
+      const orbitDist = r.radius - DOT_R;
+      r._cx = dot.x + orbitDist * Math.cos(r.angle);
+      r._cy = dot.y + orbitDist * Math.sin(r.angle);
+    });
+
+    const glR = 16 + Math.sin(now/500)*3;
+    const grd = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, glR);
+    grd.addColorStop(0, 'rgba(59,130,246,0.08)');
+    grd.addColorStop(1, 'rgba(59,130,246,0)');
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(dot.x, dot.y, glR, 0, Math.PI*2); ctx.fill();
+
+    rings.forEach(r => {
+      ctx.beginPath(); ctx.arc(r._cx, r._cy, r.radius, 0, Math.PI*2);
+      ctx.strokeStyle = `rgba(${r.color[0]},${r.color[1]},${r.color[2]},${r.opacity})`;
+      ctx.lineWidth = r.strokeW; ctx.stroke();
+    });
+
+    ctx.beginPath(); ctx.arc(dot.x, dot.y, DOT_R, 0, Math.PI*2);
+    ctx.fillStyle = '#3b82f6'; ctx.fill();
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+
+// === FUNNEL PARTICLES ===
+(function(){
+  const f=document.getElementById('funnel');
+  if(!f)return;
+  const H=f.offsetHeight;
+  const cy=H/2;
+  const cols=['#00e6a0','#00e6a0','#00e6a0','#06b6d4','#06b6d4','#3b82f6'];
+  function spawn(){
+    const el=document.createElement('div');
+    el.className='mol';
+    const sz=3+Math.random()*6;
+    const y=cy-50+Math.random()*100;
+    const c=cols[Math.floor(Math.random()*cols.length)];
+    const dur=2.2+Math.random()*1.8;
+    const survive=Math.random()>.72;
+    el.style.cssText=`width:${sz}px;height:${sz}px;background:${c};left:-10px;top:${y}px;opacity:.65`;
+    f.appendChild(el);
+    let t0=null;
+    const endX=survive?f.offsetWidth*0.62:f.offsetWidth*(0.2+Math.random()*0.25);
+    const drift=(Math.random()-.5)*35;
+    function tick(ts){
+      if(!t0)t0=ts;
+      const p=Math.min((ts-t0)/(dur*1000),1);
+      const ease=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;
+      const x=-10+ease*(endX+10);
+      const yd=Math.sin(p*Math.PI*2.5)*drift*(1-p);
+      const sc=survive?1-p*.6:Math.max(0,1-p*2.2);
+      const op=survive?(.65-p*.35):Math.max(0,.65*(1-p*2.5));
+      el.style.transform=`translate(${x}px,${yd}px) scale(${sc})`;
+      el.style.opacity=op;
+      if(p<1&&op>0.01)requestAnimationFrame(tick);else el.remove();
+    }
+    requestAnimationFrame(tick);
+  }
+  setInterval(spawn,100);
+  for(let i=0;i<6;i++)setTimeout(spawn,i*60);
+})();
+
+// Magnetic cursor-reactive
+(function(){
+  const zone=document.getElementById('magZone');
+  const r1=document.getElementById('mr1');
+  const r2=document.getElementById('mr2');
+  const r3=document.getElementById('mr3');
+  const dot=document.getElementById('mdot');
+  const gw=document.getElementById('mg');
+  if(!zone)return;
+
+  let mx=0.5,my=0.5;
+  let cx1=0,cy1=0,cx2=0,cy2=0,cx3=0,cy3=0;
+
+  zone.addEventListener('mousemove',e=>{
+    const r=zone.getBoundingClientRect();
+    mx=(e.clientX-r.left)/r.width;
+    my=(e.clientY-r.top)/r.height;
+  });
+  zone.addEventListener('mouseleave',()=>{mx=.5;my=.5});
+
+  function lerp(a,b,t){return a+(b-a)*t}
+  function tick(){
+    const dx=(mx-.5)*2, dy=(my-.5)*2;
+    // Each circle has different follow speed & range
+    const t1x=-dx*18, t1y=-dy*12;   // slow, inverted = parallax
+    const t2x=dx*8,  t2y=dy*6;      // medium, follows
+    const t3x=dx*22, t3y=dy*16;     // fast, magnetic
+
+    cx1=lerp(cx1,t1x,.04); cy1=lerp(cy1,t1y,.04);
+    cx2=lerp(cx2,t2x,.06); cy2=lerp(cy2,t2y,.06);
+    cx3=lerp(cx3,t3x,.09); cy3=lerp(cy3,t3y,.09);
+
+    r1.style.transform=`translate(${cx1}px,${cy1}px)`;
+    r2.style.transform=`translate(${cx2}px,${cy2}px)`;
+    r3.style.transform=`translate(${cx3}px,${cy3}px)`;
+    dot.style.transform=`translate(${cx3}px,${cy3}px)`;
+
+    // Glow intensity based on proximity
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    gw.style.opacity=Math.max(0,1-dist)*.3;
+
+    requestAnimationFrame(tick);
+  }
+  tick();
+})();
+</script>
+
+</body>
+</html>

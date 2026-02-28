@@ -39,7 +39,7 @@ export default function FreezeDialog({
   const headerBg = isRiskyUnfreeze
     ? 'bg-red-600'
     : isFreeze
-    ? 'bg-[#0f131d]'
+    ? 'bg-bx-surface'
     : 'bg-gray-700'
 
   // -------------------------------------------------------------------------
@@ -48,7 +48,7 @@ export default function FreezeDialog({
   const confirmClass = isRiskyUnfreeze
     ? 'bg-red-600 hover:bg-red-700 text-white'
     : isFreeze
-    ? 'bg-[#0f131d] hover:bg-[#1a2332] text-white'
+    ? 'bg-bx-surface hover:bg-bx-elevated text-white'
     : 'bg-gray-600 hover:bg-gray-700 text-white'
 
   const confirmLabel = isFreeze

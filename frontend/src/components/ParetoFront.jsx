@@ -407,9 +407,9 @@ export default function ParetoFront({ molecules, onSelect }) {
         <Toolbar {...{ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy, setColorBy,
           sizeBy, setSizeBy, showDominated, setShowDominated, showStats, setShowStats,
           handleResetZoom, exportCSV, paretoCount, zoom, selected }} />
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm p-4">
+        <div className="card p-4">
           <RadarOverlay molecules={radarMols} width={400} height={350} />
-          <p className="text-xs text-gray-400 text-center mt-2">
+          <p className="text-sm text-gray-400 text-center mt-2">
             {radarMols.length === 0 ? 'Select molecules to compare' : `Comparing ${radarMols.length} molecule(s)`}
             {' — Ctrl+click points in scatter to select up to 3'}
           </p>
@@ -426,16 +426,16 @@ export default function ParetoFront({ molecules, onSelect }) {
         <Toolbar {...{ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy, setColorBy,
           sizeBy, setSizeBy, showDominated, setShowDominated, showStats, setShowStats,
           handleResetZoom, exportCSV, paretoCount, zoom, selected }} />
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
+        <div className="card overflow-hidden">
           <div className="grid grid-cols-2 gap-4 p-4">
             <div>
-              <p className="text-xs font-semibold text-gray-500 mb-2">{xLabel} Distribution</p>
+              <p className="text-sm font-semibold text-gray-500 mb-2">{xLabel} Distribution</p>
               <svg width="100%" viewBox={`0 0 ${PW} 80`}>
                 <Histogram values={xValues} width={PW} height={70} color="#3b82f6" />
               </svg>
             </div>
             <div>
-              <p className="text-xs font-semibold text-gray-500 mb-2">{yLabel} Distribution</p>
+              <p className="text-sm font-semibold text-gray-500 mb-2">{yLabel} Distribution</p>
               <svg width="100%" viewBox={`0 0 ${PW} 80`}>
                 <Histogram values={yValues} width={PW} height={70} color="#00e6a0" />
               </svg>
@@ -457,7 +457,7 @@ export default function ParetoFront({ molecules, onSelect }) {
         sizeBy, setSizeBy, showDominated, setShowDominated, showStats, setShowStats,
         handleResetZoom, exportCSV, paretoCount, zoom, selected }} />
 
-      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm"
+      <div className="card overflow-hidden"
         style={{ cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'crosshair' }}>
         <svg ref={svgRef} viewBox={`0 0 ${VW} ${VH}`} className="w-full" style={{ display: 'block' }}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
@@ -617,7 +617,7 @@ export default function ParetoFront({ molecules, onSelect }) {
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-5 text-xs text-gray-500 px-1">
+      <div className="flex flex-wrap items-center gap-5 text-sm text-gray-500 px-1">
         <div className="flex items-center gap-2">
           <svg width={24} height={12}>
             <circle cx={6} cy={6} r={5} fill="#00e6a0" stroke="#fff" strokeWidth={1.5} />
@@ -646,63 +646,63 @@ function Toolbar({ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy,
   return (
     <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-1.5">
-        <label className="text-xs font-medium text-gray-500">X:</label>
+        <label className="text-sm font-medium text-gray-500">X:</label>
         <select value={xKey} onChange={e => setXKey(e.target.value)}
-          className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#0f131d]">
+          className="text-sm border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-bx-mint">
           {ALL_OBJECTIVES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
       </div>
       <div className="flex items-center gap-1.5">
-        <label className="text-xs font-medium text-gray-500">Y:</label>
+        <label className="text-sm font-medium text-gray-500">Y:</label>
         <select value={yKey} onChange={e => setYKey(e.target.value)}
-          className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#0f131d]">
+          className="text-sm border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-bx-mint">
           {ALL_OBJECTIVES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
       </div>
       <div className="flex gap-0.5 p-0.5 bg-gray-100 rounded-lg">
         {[{ v: 'scatter', l: 'Scatter' }, { v: 'radar', l: 'Radar' }, { v: 'distribution', l: 'Dist.' }].map(({ v, l }) => (
           <button key={v} onClick={() => setViewMode(v)}
-            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${viewMode === v ? 'bg-white text-[#0f131d] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`px-2 py-0.5 rounded text-sm font-medium transition-colors ${viewMode === v ? 'bg-white text-bx-light-text shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {l}
           </button>
         ))}
       </div>
       <select value={colorBy} onChange={e => setColorBy(e.target.value)}
-        className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700">
+        className="text-sm border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700">
         {Object.entries(COLOR_SCHEMES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
       </select>
       <select value={sizeBy} onChange={e => setSizeBy(e.target.value)}
-        className="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700">
+        className="text-sm border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700">
         <option value="none">Size: off</option>
         {ALL_OBJECTIVES.map(o => <option key={o.key} value={o.key}>Size: {o.label}</option>)}
       </select>
-      <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
+      <label className="flex items-center gap-1 text-sm text-gray-500 cursor-pointer">
         <input type="checkbox" checked={showDominated} onChange={e => setShowDominated(e.target.checked)}
-          className="accent-[#0f131d]" />
+          className="accent-bx-mint" />
         Dominated
       </label>
       <div className="ml-auto flex items-center gap-2">
         {zoom > 1 && (
-          <button onClick={handleResetZoom} className="text-xs text-blue-600 hover:underline">Reset zoom</button>
+          <button onClick={handleResetZoom} className="text-sm text-blue-600 hover:underline">Reset zoom</button>
         )}
         <button onClick={exportCSV}
-          className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+          className="flex items-center gap-1 px-2 py-1 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
           CSV
         </button>
         <button onClick={() => setShowStats(v => !v)}
-          className={`px-2 py-1 text-xs font-medium rounded-lg transition-colors ${showStats ? 'bg-[#0f131d] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+          className={`px-2 py-1 text-sm font-medium rounded-lg transition-colors ${showStats ? 'bg-bx-surface text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
           Stats
         </button>
         {paretoCount > 0 && (
-          <span className="text-xs text-gray-400">
-            <span className="font-semibold text-[#00e6a0]">{paretoCount}</span> on front
+          <span className="text-sm text-gray-400">
+            <span className="font-semibold text-bx-mint">{paretoCount}</span> on front
           </span>
         )}
         {selected.length > 0 && (
-          <span className="text-xs text-blue-600 font-medium">{selected.length} selected</span>
+          <span className="text-sm text-blue-600 font-medium">{selected.length} selected</span>
         )}
       </div>
     </div>
@@ -714,20 +714,20 @@ function Toolbar({ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy,
 // --------------------------------------------------
 function StatsPanel({ stats, xLabel, yLabel }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-      <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Statistics</h4>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+    <div className="card p-4">
+      <h4 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Statistics</h4>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
         <div>
           <p className="text-gray-400 mb-1">Points</p>
-          <p className="font-bold text-[#0f131d]">{stats.n}</p>
+          <p className="font-bold text-bx-light-text">{stats.n}</p>
         </div>
         <div>
           <p className="text-gray-400 mb-1">Correlation (r)</p>
-          <p className="font-bold text-[#0f131d]">{stats.correlation}</p>
+          <p className="font-bold text-bx-light-text">{stats.correlation}</p>
         </div>
         <div>
           <p className="text-gray-400 mb-1">Pareto front</p>
-          <p className="font-bold text-[#00e6a0]">{stats.paretoCount} ({stats.paretoPercent}%)</p>
+          <p className="font-bold text-bx-mint">{stats.paretoCount} ({stats.paretoPercent}%)</p>
         </div>
         <div>
           <p className="text-gray-400 mb-1">{xLabel} mean</p>

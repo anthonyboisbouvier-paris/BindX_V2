@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import BindXLogo from './BindXLogo.jsx'
 
 // ---------------------------------------------------------------------------
 // Run type icons
@@ -132,12 +133,7 @@ const STATUS_CONFIG = {
   running: {
     ring: 'ring-2 ring-blue-400 ring-offset-1',
     bg: 'bg-blue-500',
-    icon: (
-      <svg className="w-4 h-4 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-      </svg>
-    ),
+    icon: <BindXLogo variant="loading" size={16} />,
     label: 'Running',
     labelColor: 'text-blue-600',
     connectorColor: 'bg-blue-200',
@@ -202,18 +198,11 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
 
   if (!runs.length) {
     return (
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center">
+      <div className="card p-8 text-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-            <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
+          <BindXLogo variant="idle" size={48} />
           <p className="text-sm font-medium text-gray-600">No runs yet</p>
-          <p className="text-xs text-gray-400">Create your first run to start analyzing molecules</p>
+          <p className="text-sm text-gray-400">Create your first run to start analyzing molecules</p>
         </div>
       </div>
     )
@@ -224,7 +213,7 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
   const failedCount = runs.filter(r => r.status === 'failed').length
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="card overflow-hidden">
       {/* Header */}
       <div className="px-5 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -232,9 +221,9 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
               d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Run History</h3>
+          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Run History</h3>
         </div>
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-3 text-sm">
           {completedCount > 0 && (
             <span className="flex items-center gap-1 text-green-600 font-medium">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,10 +234,7 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
           )}
           {runningCount > 0 && (
             <span className="flex items-center gap-1 text-blue-600 font-medium">
-              <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
+              <BindXLogo variant="loading" size={12} />
               {runningCount} running
             </span>
           )}
@@ -300,7 +286,7 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
                     {/* Run label */}
                     <div className="text-center">
                       <p className="text-[10px] text-gray-400 tabular-nums">#{i + 1}</p>
-                      <p className="text-xs font-semibold text-gray-700 leading-tight">{typeLabel}</p>
+                      <p className="text-sm font-semibold text-gray-700 leading-tight">{typeLabel}</p>
                     </div>
 
                     {/* Status */}

@@ -180,13 +180,13 @@ export default function ExportModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-[#0f131d] text-white">
+            <div className="p-2 rounded-xl bg-bx-surface text-white">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                   d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
               </svg>
             </div>
-            <h2 className="font-bold text-[#0f131d] text-lg">Export Molecules</h2>
+            <h2 className="font-bold text-bx-light-text text-lg">Export Molecules</h2>
           </div>
           <button
             onClick={onClose}
@@ -212,7 +212,7 @@ export default function ExportModal({
                     key={opt.value}
                     className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer border transition-all ${
                       scope === opt.value && !disabled
-                        ? 'border-[#0f131d] bg-blue-50'
+                        ? 'border-bx-surface bg-blue-50'
                         : disabled
                         ? 'border-gray-100 opacity-40 cursor-not-allowed'
                         : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
@@ -225,9 +225,9 @@ export default function ExportModal({
                       checked={scope === opt.value}
                       onChange={() => !disabled && setScope(opt.value)}
                       disabled={disabled}
-                      className="accent-[#0f131d]"
+                      className="accent-bx-mint"
                     />
-                    <span className={`text-sm font-medium ${scope === opt.value ? 'text-[#0f131d]' : 'text-gray-700'}`}>
+                    <span className={`text-sm font-medium ${scope === opt.value ? 'text-bx-light-text' : 'text-gray-700'}`}>
                       {opt.label}
                     </span>
                     <span className={`ml-auto text-xs tabular-nums font-semibold ${
@@ -251,8 +251,8 @@ export default function ExportModal({
                   onClick={() => setFormat(f.value)}
                   className={`flex flex-col items-center gap-2 py-4 rounded-xl border-2 transition-all ${
                     format === f.value
-                      ? 'border-[#0f131d] bg-blue-50 text-[#0f131d]'
-                      : 'border-gray-100 text-gray-500 hover:border-blue-200 hover:bg-blue-50/20 hover:text-[#0f131d]'
+                      ? 'border-bx-surface bg-blue-50 text-bx-light-text'
+                      : 'border-gray-100 text-gray-500 hover:border-blue-200 hover:bg-blue-50/20 hover:text-bx-light-text'
                   }`}
                 >
                   {f.icon}
@@ -278,7 +278,7 @@ export default function ExportModal({
                     key={opt.value}
                     className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer border transition-all ${
                       csvColumns === opt.value
-                        ? 'border-[#0f131d] bg-blue-50'
+                        ? 'border-bx-surface bg-blue-50'
                         : 'border-gray-100 hover:border-gray-200'
                     }`}
                   >
@@ -288,9 +288,9 @@ export default function ExportModal({
                       value={opt.value}
                       checked={csvColumns === opt.value}
                       onChange={() => setCsvColumns(opt.value)}
-                      className="accent-[#0f131d]"
+                      className="accent-bx-mint"
                     />
-                    <span className={`text-sm font-medium ${csvColumns === opt.value ? 'text-[#0f131d]' : 'text-gray-700'}`}>
+                    <span className={`text-sm font-medium ${csvColumns === opt.value ? 'text-bx-light-text' : 'text-gray-700'}`}>
                       {opt.label}
                     </span>
                     <span className="ml-auto text-xs text-gray-400 tabular-nums">{opt.count} cols</span>
@@ -321,7 +321,7 @@ export default function ExportModal({
                       type="checkbox"
                       checked={pdfOptions[opt.key]}
                       onChange={() => setPdfOptions(prev => ({ ...prev, [opt.key]: !prev[opt.key] }))}
-                      className="accent-[#0f131d]"
+                      className="accent-bx-mint"
                     />
                     <span className="text-sm font-medium text-gray-700">{opt.label}</span>
                   </label>
@@ -367,7 +367,7 @@ export default function ExportModal({
             onClick={handleExport}
             disabled={exportMols.length === 0}
             className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold
-                       bg-[#0f131d] hover:bg-[#1a2332] text-white transition-colors
+                       bg-bx-surface hover:bg-bx-elevated text-white transition-colors
                        disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

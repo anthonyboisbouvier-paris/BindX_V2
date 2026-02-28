@@ -31,7 +31,7 @@ function QualityBar({ value }) {
   let labelColor = 'text-red-600'
   let qualityLabel = 'Low'
   if (value >= 0.6) {
-    colorClass = 'bg-dockit-green'
+    colorClass = 'bg-bx-mint'
     labelColor = 'text-green-700'
     qualityLabel = 'Good'
   } else if (value >= 0.3) {
@@ -48,7 +48,7 @@ function QualityBar({ value }) {
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className={`text-xs font-bold w-16 text-right ${labelColor}`}>
+      <span className={`text-sm font-bold w-16 text-right ${labelColor}`}>
         {qualityLabel} ({pct}%)
       </span>
     </div>
@@ -61,7 +61,7 @@ function QualityBar({ value }) {
 function TypeBadge({ type }) {
   const cfg = getTypeConfig(type)
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.text}`}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-sm font-semibold ${cfg.bg} ${cfg.text}`}>
       <span
         className="w-1.5 h-1.5 rounded-full flex-shrink-0"
         style={{ backgroundColor: cfg.dot }}
@@ -77,7 +77,7 @@ function TypeBadge({ type }) {
 function FunctionalIcon({ is_functional }) {
   if (is_functional) {
     return (
-      <svg className="w-4 h-4 text-dockit-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="w-4 h-4 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
       </svg>
     )
@@ -125,12 +125,12 @@ export default function InteractionView({ interactions }) {
 
       {/* Quality bar */}
       <div className="p-3 bg-gray-50 rounded-lg space-y-2">
-        <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+        <div className="flex items-center justify-between text-sm text-gray-500 mb-1">
           <span className="font-medium">Interaction Quality</span>
           <InfoTip text="Overall quality score based on the fraction of key functional residues contacted and the number of hydrogen bonds formed." />
         </div>
         <QualityBar value={interaction_quality} />
-        <p className="text-xs text-gray-500 mt-1">
+        <p className="text-sm text-gray-500 mt-1">
           {summary || `${functional_contacts}/${total_functional} functional residues contacted — ${key_hbonds} key H-bond${key_hbonds !== 1 ? 's' : ''}`}
         </p>
       </div>
@@ -138,7 +138,7 @@ export default function InteractionView({ interactions }) {
       {/* Interaction table */}
       {rows.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-gray-100">
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
@@ -159,7 +159,7 @@ export default function InteractionView({ interactions }) {
                   key={`${row.residue}-${idx}`}
                   className={`hover:bg-gray-50 transition-colors ${row.is_functional ? 'bg-green-50/30' : ''}`}
                 >
-                  <td className="px-3 py-2 font-mono font-semibold text-dockit-blue">
+                  <td className="px-3 py-2 font-mono font-semibold text-bx-light-text">
                     {row.residue}
                     {row.residue_number !== undefined && row.residue_number !== null && (
                       <span className="text-gray-400 font-normal ml-1 text-[10px]">
@@ -179,12 +179,12 @@ export default function InteractionView({ interactions }) {
           </table>
         </div>
       ) : (
-        <p className="text-xs text-gray-400 text-center py-4">No interaction contacts recorded</p>
+        <p className="text-sm text-gray-400 text-center py-4">No interaction contacts recorded</p>
       )}
 
       {/* Method badge */}
       <div className="flex justify-end">
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium border ${
           isMock
             ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
             : 'bg-green-50 text-green-700 border-green-200'

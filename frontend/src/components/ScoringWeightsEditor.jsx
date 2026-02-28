@@ -72,7 +72,7 @@ function WeightRow({ name, value, onChange }) {
           className="w-2.5 h-2.5 rounded-full shrink-0"
           style={{ backgroundColor: meta.color }}
         />
-        <span className="text-xs text-gray-600 truncate">{meta.label}</span>
+        <span className="text-sm text-gray-600 truncate">{meta.label}</span>
       </div>
       <div className="flex-1 relative">
         <input
@@ -89,7 +89,7 @@ function WeightRow({ name, value, onChange }) {
           }}
         />
       </div>
-      <span className="text-xs font-mono font-semibold text-gray-700 w-10 text-right shrink-0">
+      <span className="text-sm font-mono font-semibold text-gray-700 w-10 text-right shrink-0">
         {value.toFixed(2)}
       </span>
     </div>
@@ -133,13 +133,13 @@ export default function ScoringWeightsEditor({ weights: externalWeights, onChang
   }, [onChange, onReset])
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="card overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-50">
         <div className="flex items-center justify-between">
           <h4 className="text-sm font-semibold text-gray-700">Scoring Weights</h4>
           <button
             onClick={handleReset}
-            className="text-xs text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1"
+            className="text-sm text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -167,7 +167,7 @@ export default function ScoringWeightsEditor({ weights: externalWeights, onChang
           {/* Pie chart */}
           <div className="flex flex-col items-center justify-center gap-1 shrink-0">
             <WeightPieChart weights={weights} />
-            <span className="text-xs text-gray-400">Distribution</span>
+            <span className="text-sm text-gray-400">Distribution</span>
           </div>
         </div>
 
@@ -177,7 +177,7 @@ export default function ScoringWeightsEditor({ weights: externalWeights, onChang
             ? 'bg-green-50 border-green-100'
             : 'bg-red-50 border-red-100'
         }`}>
-          <span className="text-xs font-medium text-gray-600">Total</span>
+          <span className="text-sm font-medium text-gray-600">Total</span>
           <div className="flex items-center gap-1.5">
             <span className={`text-sm font-bold font-mono ${isValid ? 'text-green-600' : 'text-red-600'}`}>
               {total.toFixed(2)}

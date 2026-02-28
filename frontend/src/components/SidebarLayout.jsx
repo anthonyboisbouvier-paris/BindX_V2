@@ -7,18 +7,19 @@ import { useAuth } from '../contexts/AuthContext'
 // Brand logo SVG
 // ---------------------------------------------------------------------------
 
-function BindXLogo({ size = 32 }) {
-  const s = size * 26 / 32 // scale viewBox
+function BindXNavLogo({ size = 32 }) {
+  // Static 3-circles logo — stroke/dot sizes adapt for small sizes (per design system)
+  const small = size <= 26
+  const sw1 = small ? 2 : 1.5
+  const sw2 = small ? 2.5 : 2
+  const sw3 = small ? 3 : 2.5
+  const dotR = small ? 4.5 : 4
   return (
-    <svg width={size} height={size} viewBox="0 0 26 26" fill="none">
-      <defs><linearGradient id="sidebar-lg" x1="0" y1="0" x2="26" y2="26"><stop stopColor="#00e6a0" /><stop offset="1" stopColor="#06b6d4" /></linearGradient></defs>
-      <path d="M8.5 5.5L13 3L17.5 5.5V10.5L13 13L8.5 10.5Z" stroke="url(#sidebar-lg)" strokeWidth="1.4" fill="none" />
-      <path d="M8.5 15.5L13 13L17.5 15.5V20.5L13 23L8.5 20.5Z" stroke="url(#sidebar-lg)" strokeWidth="1.4" fill="none" />
-      <circle cx="13" cy="13" r="2.2" fill="url(#sidebar-lg)" />
-      <circle cx="8.5" cy="5.5" r="1.1" fill="url(#sidebar-lg)" opacity=".5" />
-      <circle cx="17.5" cy="5.5" r="1.1" fill="url(#sidebar-lg)" opacity=".5" />
-      <circle cx="8.5" cy="20.5" r="1.1" fill="url(#sidebar-lg)" opacity=".5" />
-      <circle cx="17.5" cy="20.5" r="1.1" fill="url(#sidebar-lg)" opacity=".5" />
+    <svg width={size} height={size} viewBox="0 0 56 56" fill="none" style={{ overflow: 'visible' }}>
+      <circle cx="18" cy="28" r="15" stroke="#00e6a0" strokeWidth={sw1} fill="none" opacity=".5" />
+      <circle cx="28" cy="28" r="12" stroke="#06b6d4" strokeWidth={sw2} fill="none" opacity=".7" />
+      <circle cx="38" cy="28" r="9" stroke="#3b82f6" strokeWidth={sw3} fill="none" />
+      <circle cx="38" cy="28" r={dotR} fill="#3b82f6" opacity=".85" />
     </svg>
   )
 }
@@ -99,11 +100,11 @@ function PhaseNavItem({ phase, projectId, currentPhaseId }) {
   const isFrozen = phase.status === 'frozen'
   const isCurrentPhase = phase.id === currentPhaseId
 
-  const baseClass = 'flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs transition-colors duration-150 w-full text-left'
+  const baseClass = 'flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-[.68rem] transition-colors duration-150 w-full text-left'
 
   if (notCreated) {
     return (
-      <div className={`${baseClass} text-white/25 cursor-default`}>
+      <div className={`${baseClass} text-bx-dim cursor-default`}>
         <PhaseStatusDot status={phase.status} notCreated={true} />
         <span className="flex-1 truncate">{phase.label}</span>
         <span className="text-white/20 text-[10px]">Not started</span>
@@ -119,8 +120,8 @@ function PhaseNavItem({ phase, projectId, currentPhaseId }) {
           baseClass,
           isFrozen ? 'opacity-70' : '',
           isActive
-            ? 'bg-white/10 text-white font-medium'
-            : 'text-white/60 hover:text-white hover:bg-white/5',
+            ? 'bg-bx-mint/[.08] text-bx-mint font-semibold border border-bx-mint/10'
+            : 'text-bx-sub hover:text-white hover:bg-white/5',
         ].join(' ')
       }
     >
@@ -148,9 +149,9 @@ function ProjectTree({ project, projectId, currentPhaseId }) {
         end
         className={({ isActive }) =>
           [
-            'flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors duration-150',
+            'flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-[.68rem] font-medium transition-colors duration-150',
             isActive
-              ? 'bg-white/10 text-white font-semibold'
+              ? 'bg-bx-mint/[.08] text-bx-mint font-semibold border border-bx-mint/10'
               : 'text-white/80 hover:text-white hover:bg-white/5',
           ].join(' ')
         }
@@ -160,10 +161,10 @@ function ProjectTree({ project, projectId, currentPhaseId }) {
       </NavLink>
 
       {campaign ? (
-        <div className="ml-3 border-l border-white/10 pl-2 mt-1">
+        <div className="ml-3 border-l border-white/[.07] pl-2 mt-1">
           {/* Campaign header — not a link, just a label */}
           <div className="px-2 py-1.5 mb-0.5">
-            <p className="text-white/40 text-[10px] uppercase tracking-wider font-semibold truncate">
+            <p className="text-bx-dim text-[10px] uppercase tracking-[.1em] font-bold truncate">
               {campaign.name}
             </p>
           </div>
@@ -181,8 +182,8 @@ function ProjectTree({ project, projectId, currentPhaseId }) {
           </div>
         </div>
       ) : (
-        <div className="ml-3 border-l border-white/10 pl-2 mt-1">
-          <p className="px-2 py-1.5 text-white/25 text-xs italic">No campaigns yet</p>
+        <div className="ml-3 border-l border-white/[.07] pl-2 mt-1">
+          <p className="px-2 py-1.5 text-bx-dim text-xs italic">No campaigns yet</p>
         </div>
       )}
     </div>
@@ -199,10 +200,10 @@ function BottomNavLink({ to, icon, label }) {
       to={to}
       className={({ isActive }) =>
         [
-          'flex items-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors duration-150',
+          'flex items-center gap-2 px-2.5 py-1.5 text-[.68rem] rounded-[7px] font-medium transition-colors duration-150',
           isActive
-            ? 'bg-white/10 text-white font-medium'
-            : 'text-white/40 hover:text-white hover:bg-white/5',
+            ? 'bg-bx-mint/[.08] text-bx-mint font-semibold border border-bx-mint/10'
+            : 'text-bx-sub hover:text-white hover:bg-white/5',
         ].join(' ')
       }
     >
@@ -249,38 +250,46 @@ export default function SidebarLayout() {
   return (
     <div className="flex min-h-screen">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:flex-col w-60 bg-bx-s1 shrink-0 min-h-screen">
+      <aside className="hidden md:flex md:flex-col w-[230px] bg-bx-bg shrink-0 min-h-screen">
 
         {/* Brand header */}
-        <div className="px-4 py-4 border-b border-white/10">
+        <div className="px-4 py-4 border-b border-white/[.07]">
           <Link to="/" className="flex items-center gap-2.5 group">
-            <BindXLogo size={32} />
+            <BindXNavLogo size={26} />
             <div>
-              <p className="text-white font-bold text-base leading-none tracking-tight group-hover:text-bx-mint transition-colors">
+              <p className="text-white font-extrabold text-[1.05rem] leading-none tracking-tight group-hover:text-bx-mint transition-colors" style={{ letterSpacing: '-.02em' }}>
                 Bind<span className="text-bx-mint">X</span>
               </p>
-              <p className="text-white/30 text-[10px] leading-none mt-0.5 font-mono">v9.0</p>
+              <p className="text-bx-dim text-[10px] leading-none mt-0.5 font-mono">v9.0</p>
             </div>
           </Link>
         </div>
 
         {/* Navigation link — context-dependent */}
         <div className="px-3 pt-3 pb-1">
+          <p className="px-2 mb-1 text-[10px] font-bold uppercase tracking-[.1em] text-bx-dim">Main</p>
           {projectId ? (
             <NavLink
               to="/"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors duration-150 text-white/55 hover:text-white hover:bg-white/5"
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-[.68rem] font-medium transition-colors duration-150 text-bx-sub hover:text-white hover:bg-white/5"
             >
               <IconArrowLeft />
               <span>All Projects</span>
             </NavLink>
           ) : (
             <NavLink
-              to="/welcome"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors duration-150 text-white/55 hover:text-white hover:bg-white/5"
+              to="/"
+              className={({ isActive }) =>
+                [
+                  'flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-[.68rem] font-medium transition-colors duration-150',
+                  isActive
+                    ? 'bg-bx-mint/[.08] text-bx-mint font-semibold border border-bx-mint/10'
+                    : 'text-bx-sub hover:text-white hover:bg-white/5',
+                ].join(' ')
+              }
             >
-              <IconArrowLeft />
-              <span>Home</span>
+              <IconFolder />
+              <span>Projects</span>
             </NavLink>
           )}
         </div>
@@ -288,7 +297,7 @@ export default function SidebarLayout() {
         {/* Divider + project tree (when a project is selected) */}
         {projectId && currentProject && (
           <div className="px-3 pb-2">
-            <div className="h-px bg-white/10 my-2" />
+            <div className="h-px bg-white/[.07] my-2" />
             <ProjectTree
               project={currentProject}
               projectId={projectId}
@@ -300,7 +309,7 @@ export default function SidebarLayout() {
         {/* Placeholder when no project is selected */}
         {!projectId && (
           <nav className="flex-1 px-3 py-3" aria-label="Sidebar placeholder">
-            <p className="px-3 text-white/25 text-xs italic">Select a project to begin</p>
+            <p className="px-3 text-bx-dim text-xs italic">Select a project to begin</p>
           </nav>
         )}
 
@@ -308,28 +317,29 @@ export default function SidebarLayout() {
         <div className="flex-1" />
 
         {/* Bottom links */}
-        <div className="px-3 py-3 border-t border-white/10 space-y-0.5">
+        <div className="px-3 py-3 border-t border-white/[.07] space-y-0.5">
+          <p className="px-2 mb-1 text-[10px] font-bold uppercase tracking-[.1em] text-bx-dim">Resources</p>
           <BottomNavLink to="/references" icon={<IconBook />} label="References" />
           <BottomNavLink to="/methodology" icon={<IconFlask />} label="Methodology" />
           <button
             onClick={handleLogout}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-md transition-colors duration-150 text-white/40 hover:text-white hover:bg-white/5 w-full"
+            className="flex items-center gap-2 px-2.5 py-1.5 text-[.68rem] rounded-[7px] font-medium transition-colors duration-150 text-bx-sub hover:text-white hover:bg-white/5 w-full"
           >
             <IconLogout />
             <span>Sign out</span>
           </button>
           {user?.email && (
-            <p className="text-white/20 text-[10px] px-3 pt-0.5 truncate">{user.email}</p>
+            <p className="text-bx-dim text-[10px] px-3 pt-0.5 truncate font-mono">{user.email}</p>
           )}
-          <p className="text-white/20 text-[10px] px-3 pt-0.5 font-mono">BindX v9.0</p>
+          <p className="text-bx-dim text-[10px] px-3 pt-0.5 font-mono">BindX v9.0</p>
         </div>
       </aside>
 
       {/* Mobile horizontal nav */}
-      <div className="md:hidden fixed top-0 inset-x-0 z-50 bg-bx-s1 border-b border-white/10">
+      <div className="md:hidden fixed top-0 inset-x-0 z-50 bg-bx-bg border-b border-white/[.07]">
         <div className="flex items-center justify-between px-4 h-12">
           <Link to="/" className="flex items-center gap-2">
-            <BindXLogo size={24} />
+            <BindXNavLogo size={24} />
             <span className="text-white font-bold text-sm">BindX</span>
           </Link>
 
@@ -378,10 +388,10 @@ export default function SidebarLayout() {
       </div>
 
       {/* Content area */}
-      <main className="flex-1 min-w-0 bg-dockit-gray">
+      <main className="flex-1 min-w-0 bg-bx-light-bg">
         {/* Mobile spacer */}
         <div className="md:hidden h-12" aria-hidden="true" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="max-w-7xl mx-auto" style={{ padding: '1.8rem 2.2rem' }}>
           <Outlet />
         </div>
       </main>

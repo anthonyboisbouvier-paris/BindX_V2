@@ -15,6 +15,7 @@ import RunProgress from '../components/RunProgress.jsx'
 import FreezeDialog from '../components/FreezeDialog.jsx'
 import ParetoFront from '../components/ParetoFront.jsx'
 import Badge from '../components/Badge.jsx'
+import BindXLogo from '../components/BindXLogo.jsx'
 
 // ---------------------------------------------------------------------------
 // CSV export helper
@@ -42,7 +43,7 @@ function exportCSV(molecules, columns, filename = 'molecules.csv') {
 // ---------------------------------------------------------------------------
 function FreezeBanner() {
   return (
-    <div className="flex items-center gap-2.5 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 text-sm text-blue-700">
+    <div className="flex items-center gap-2.5 rounded-[9px] px-4 py-2.5 text-sm" style={{ background: 'var(--blue-soft)', color: 'var(--blue)', border: '1px solid rgba(59,130,246,.12)' }}>
       <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
           d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -60,69 +61,30 @@ function FreezeBanner() {
 // ---------------------------------------------------------------------------
 function StatsBar({ stats }) {
   const cards = [
-    {
-      value: stats.total_molecules ?? 0,
-      label: 'Molecules',
-      topColor: 'bg-[#0f131d]',
-      valueColor: 'text-[#0f131d]',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-        </svg>
-      ),
-    },
-    {
-      value: stats.bookmarked ?? 0,
-      label: 'Bookmarked',
-      topColor: 'bg-yellow-400',
-      valueColor: 'text-yellow-600',
-      icon: (
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-        </svg>
-      ),
-    },
-    {
-      value: stats.runs_completed ?? 0,
-      label: 'Runs done',
-      topColor: 'bg-[#00e6a0]',
-      valueColor: 'text-green-600',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-        </svg>
-      ),
-    },
+    { value: stats.total_molecules ?? 0, label: 'Molecules', colorClass: 'text-bx-mint' },
+    { value: stats.bookmarked ?? 0, label: 'Bookmarked', colorClass: 'text-bx-amber' },
+    { value: stats.runs_completed ?? 0, label: 'Runs done', colorClass: 'text-bx-cyan' },
     {
       value: stats.runs_running ?? 0,
       label: 'Running',
-      topColor: stats.runs_running > 0 ? 'bg-blue-500' : 'bg-gray-200',
-      valueColor: stats.runs_running > 0 ? 'text-blue-600' : 'text-gray-400',
+      colorClass: stats.runs_running > 0 ? 'text-bx-blue' : 'text-bx-dim',
       animated: stats.runs_running > 0,
-      icon: (
-        <svg className={`w-4 h-4 ${stats.runs_running > 0 ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-      ),
     },
   ]
 
   return (
-    <div className="flex items-stretch gap-3 flex-wrap">
-      {cards.map(card => (
-        <div key={card.label} className="flex flex-col bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden min-w-[100px]">
-          <div className={`h-1 ${card.topColor} ${card.animated ? 'animate-pulse' : ''}`} />
-          <div className="px-4 py-3 flex items-center gap-3">
-            <div className={`${card.valueColor} opacity-60`}>{card.icon}</div>
-            <div>
-              <p className={`text-2xl font-bold tabular-nums ${card.valueColor}`}>{card.value}</p>
-              <p className="text-[11px] text-gray-400 font-medium">{card.label}</p>
+    <div className="dark-inset">
+      <div className="grid grid-cols-4 gap-4">
+        {cards.map(card => (
+          <div key={card.label} className="text-center py-2">
+            <div className="flex items-center justify-center gap-1.5 mb-0.5">
+              {card.animated && <BindXLogo variant="loading" size={14} />}
+              <p className={`stat-value ${card.colorClass}`}>{card.value}</p>
             </div>
+            <p className="stat-label">{card.label}</p>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }
@@ -211,7 +173,7 @@ function AdmetRadar({ admet }) {
 // ---------------------------------------------------------------------------
 function ScoresTab({ mol }) {
   const scores = [
-    { label: 'Docking', value: mol.docking_score, unit: 'kcal/mol', color: 'bg-[#0f131d]', textColor: 'text-[#0f131d]', format: v => v.toFixed(1) },
+    { label: 'Docking', value: mol.docking_score, unit: 'kcal/mol', color: 'bg-bx-surface', textColor: 'text-bx-light-text', format: v => v.toFixed(1) },
     { label: 'CNN Score', value: mol.cnn_score, unit: '', color: 'bg-green-500', textColor: 'text-green-600', format: v => v.toFixed(2) },
     { label: 'CNN Aff.', value: mol.cnn_affinity, unit: 'pKi', color: 'bg-teal-500', textColor: 'text-teal-600', format: v => v.toFixed(1) },
     { label: 'Composite', value: mol.composite_score, unit: '/100', color: 'bg-amber-500', textColor: 'text-amber-700', format: v => v.toFixed(1) },
@@ -236,7 +198,7 @@ function ScoresTab({ mol }) {
         ))}
       </div>
       {scores.every(s => s.value == null) && (
-        <p className="text-xs text-gray-400 text-center py-4">No scores available yet — run Docking and Scoring analyses.</p>
+        <p className="text-sm text-gray-400 text-center py-4">No scores available yet — run Docking and Scoring analyses.</p>
       )}
     </div>
   )
@@ -254,13 +216,13 @@ function PropertiesTab({ mol }) {
 
   const available = props.filter(p => mol[p.key] != null)
   if (!available.length) {
-    return <p className="text-xs text-gray-400 text-center py-4">No physicochemical properties available yet.</p>
+    return <p className="text-sm text-gray-400 text-center py-4">No physicochemical properties available yet.</p>
   }
 
   return (
     <div className="space-y-3">
       {mol.lipinski_pass != null && (
-        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium ${
+        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${
           mol.lipinski_pass ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'
         }`}>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -306,7 +268,7 @@ function PropertiesTab({ mol }) {
 
 function AdmetTab({ mol }) {
   if (!mol.admet) {
-    return <p className="text-xs text-gray-400 text-center py-4">No ADMET data — run the ADMET analysis first.</p>
+    return <p className="text-sm text-gray-400 text-center py-4">No ADMET data — run the ADMET analysis first.</p>
   }
   return <AdmetRadar admet={mol.admet} />
 }
@@ -314,7 +276,7 @@ function AdmetTab({ mol }) {
 function SafetyTab({ mol, details }) {
   const safety = details?.safety
   if (!safety) {
-    return <p className="text-xs text-gray-400 text-center py-4">No safety data available for this molecule.</p>
+    return <p className="text-sm text-gray-400 text-center py-4">No safety data available for this molecule.</p>
   }
 
   const riskColor = r => r === 'high' ? 'text-red-600 bg-red-50 border-red-200' :
@@ -324,7 +286,7 @@ function SafetyTab({ mol, details }) {
   return (
     <div className="space-y-3">
       {/* PAINS */}
-      <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs border ${
+      <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm border ${
         safety.pains_pass ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-600'
       }`}>
         <span className="font-semibold">PAINS Filter</span>
@@ -336,7 +298,7 @@ function SafetyTab({ mol, details }) {
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider mb-1">Brenk Alerts</p>
           {safety.brenk_alerts.map((a, i) => (
-            <p key={i} className="text-xs text-amber-700">{a}</p>
+            <p key={i} className="text-sm text-amber-700">{a}</p>
           ))}
         </div>
       )}
@@ -349,7 +311,7 @@ function SafetyTab({ mol, details }) {
             {safety.off_target.map((ot, i) => (
               <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg px-2.5 py-1.5">
                 <div>
-                  <p className="text-xs font-medium text-gray-700">{ot.target}</p>
+                  <p className="text-sm font-medium text-gray-700">{ot.target}</p>
                   <p className="text-[10px] text-gray-400">{ot.family} · similarity {(ot.similarity * 100).toFixed(0)}%</p>
                 </div>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${riskColor(ot.risk)}`}>
@@ -380,7 +342,7 @@ function SafetyTab({ mol, details }) {
       )}
 
       {/* Ames + Hepatotox */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
+      <div className="grid grid-cols-2 gap-2 text-sm">
         {safety.ames_risk != null && (
           <div className="bg-gray-50 rounded-lg px-2.5 py-2 border border-gray-100">
             <p className="text-[9px] text-gray-400 uppercase tracking-wider">Ames risk</p>
@@ -405,13 +367,13 @@ function SafetyTab({ mol, details }) {
 function SynthesisTab({ details }) {
   const synth = details?.synthesis
   if (!synth) {
-    return <p className="text-xs text-gray-400 text-center py-4">No retrosynthesis data for this molecule.</p>
+    return <p className="text-sm text-gray-400 text-center py-4">No retrosynthesis data for this molecule.</p>
   }
 
   return (
     <div className="space-y-3">
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-2 text-xs">
+      <div className="grid grid-cols-3 gap-2 text-sm">
         <div className="bg-gray-50 rounded-lg px-2.5 py-2 text-center border border-gray-100">
           <p className="text-[9px] text-gray-400 uppercase">Steps</p>
           <p className="font-bold text-gray-800 text-base">{synth.num_steps}</p>
@@ -433,23 +395,23 @@ function SynthesisTab({ details }) {
         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Retrosynthesis route</p>
         {synth.steps.map((step, i) => (
           <div key={i} className="flex items-start gap-2.5">
-            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-[#0f131d] text-white text-[9px] font-bold flex items-center justify-center mt-0.5">
+            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-bx-surface text-white text-[9px] font-bold flex items-center justify-center mt-0.5">
               {i + 1}
             </div>
             <div className="flex-1 bg-gray-50 rounded-lg p-2.5 border border-gray-100">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-xs font-semibold text-gray-700">{step.product}</p>
+                  <p className="text-sm font-semibold text-gray-700">{step.product}</p>
                   <p className="text-[10px] text-gray-500 mt-0.5">{step.reagent}</p>
                   <p className="text-[9px] text-gray-400 italic mt-0.5">{step.conditions}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-xs font-bold text-[#00e6a0] tabular-nums">{(step.yield * 100).toFixed(0)}%</p>
+                  <p className="text-sm font-bold text-bx-mint tabular-nums">{(step.yield * 100).toFixed(0)}%</p>
                   <p className="text-[9px] text-gray-400">yield</p>
                 </div>
               </div>
               <div className="mt-2 w-full bg-gray-200 rounded-full h-1">
-                <div className="h-1 bg-[#00e6a0] rounded-full" style={{ width: `${step.yield * 100}%` }} />
+                <div className="h-1 bg-bx-mint rounded-full" style={{ width: `${step.yield * 100}%` }} />
               </div>
             </div>
           </div>
@@ -462,7 +424,7 @@ function SynthesisTab({ details }) {
 function InteractionsTab({ details }) {
   const inter = details?.interactions
   if (!inter) {
-    return <p className="text-xs text-gray-400 text-center py-4">No interaction data — run Enrichment to compute ProLIF interactions.</p>
+    return <p className="text-sm text-gray-400 text-center py-4">No interaction data — run Enrichment to compute ProLIF interactions.</p>
   }
 
   const typeColors = {
@@ -500,14 +462,14 @@ function InteractionsTab({ details }) {
         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Interacting residues</p>
         {inter.residues?.map((r, i) => (
           <div key={i} className="flex items-center gap-2.5 py-1.5 border-b border-gray-50 last:border-0">
-            <span className="text-xs font-mono font-semibold text-gray-700 w-16 flex-shrink-0">{r.name}</span>
+            <span className="text-sm font-mono font-semibold text-gray-700 w-16 flex-shrink-0">{r.name}</span>
             <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${typeColors[r.type] || 'bg-gray-100 text-gray-600'} flex-shrink-0`}>
               {r.type}
             </span>
             <div className="flex-1 flex items-center gap-1.5">
               <div className="flex-1 bg-gray-100 rounded-full h-1">
                 <div
-                  className="h-1 bg-[#0f131d] rounded-full"
+                  className="h-1 bg-bx-surface rounded-full"
                   style={{ width: `${((maxDist - r.distance) / maxDist) * 100}%`, opacity: 0.6 }}
                 />
               </div>
@@ -558,7 +520,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
       {/* Panel header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <h3 className="font-bold text-[#0f131d] text-sm truncate">
+          <h3 className="font-bold text-bx-light-text text-sm truncate">
             {molecule.name || molecule.id}
           </h3>
           {!isFrozen && (
@@ -599,7 +561,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
         style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
 
         {/* 3D Viewer placeholder */}
-        <div className="rounded-xl bg-[#0a0d15] border border-[#0f131d]/30 overflow-hidden">
+        <div className="rounded-xl bg-[#0a0d15] border border-bx-surface/30 overflow-hidden">
           <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-red-500" />
@@ -610,7 +572,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
             <span className="text-[9px] text-white/25 font-mono">backend not connected</span>
           </div>
           <div className="h-28 flex flex-col items-center justify-center gap-2">
-            <svg className="w-10 h-10 text-[#0f131d]/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-10 h-10 text-bx-light-text/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
                 d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
             </svg>
@@ -626,9 +588,9 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-shrink-0 px-2.5 py-2 text-xs font-semibold border-b-2 transition-all duration-150 whitespace-nowrap ${
+                className={`flex-shrink-0 px-2.5 py-2 text-sm font-semibold border-b-2 transition-all duration-150 whitespace-nowrap ${
                   activeTab === tab.id
-                    ? 'border-[#0f131d] text-[#0f131d]'
+                    ? 'border-bx-surface text-bx-light-text'
                     : 'border-transparent text-gray-400 hover:text-gray-600 hover:border-gray-200'
                 }`}
               >
@@ -654,7 +616,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
               <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">SMILES</p>
               <button
                 onClick={copySmiles}
-                className="flex items-center gap-1 text-[9px] text-gray-400 hover:text-[#0f131d] transition-colors"
+                className="flex items-center gap-1 text-[9px] text-gray-400 hover:text-bx-light-text transition-colors"
               >
                 {copied ? (
                   <>
@@ -684,8 +646,8 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
         <button
           onClick={() => prevMol && onRowClick && onRowClick(prevMol)}
           disabled={!prevMol}
-          className={`flex items-center gap-1 text-xs font-medium transition-colors ${
-            prevMol ? 'text-[#0f131d] hover:text-[#1a2332]' : 'text-gray-300 cursor-not-allowed'
+          className={`flex items-center gap-1 text-sm font-medium transition-colors ${
+            prevMol ? 'text-bx-light-text hover:text-[#1a2332]' : 'text-gray-300 cursor-not-allowed'
           }`}
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -699,8 +661,8 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
         <button
           onClick={() => nextMol && onRowClick && onRowClick(nextMol)}
           disabled={!nextMol}
-          className={`flex items-center gap-1 text-xs font-medium transition-colors ${
-            nextMol ? 'text-[#0f131d] hover:text-[#1a2332]' : 'text-gray-300 cursor-not-allowed'
+          className={`flex items-center gap-1 text-sm font-medium transition-colors ${
+            nextMol ? 'text-bx-light-text hover:text-[#1a2332]' : 'text-gray-300 cursor-not-allowed'
           }`}
         >
           {nextMol ? nextMol.name || 'Next' : 'Next'}
@@ -961,7 +923,7 @@ export default function PhaseDashboard() {
         <RunProgress run={activeRun} onCancel={handleCancelRun} />
 
         {/* Empty state */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center">
+        <div className="card p-12 text-center">
           <div className="flex flex-col items-center gap-4 max-w-sm mx-auto">
             <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
               <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -978,7 +940,7 @@ export default function PhaseDashboard() {
             {!isFrozen && (
               <button
                 onClick={handleNewRun}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[#0f131d] text-white rounded-xl text-sm font-semibold hover:bg-[#1a2332] transition-colors shadow-sm"
+                className="flex items-center gap-2 px-5 py-2.5 bg-bx-surface text-white rounded-xl text-sm font-semibold hover:bg-bx-elevated transition-colors shadow-sm"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1070,13 +1032,8 @@ export default function PhaseDashboard() {
                 visibleKeys={visibleKeys}
                 onChange={setVisibleKeys}
               />
-              <span className="text-xs text-gray-400 tabular-nums flex items-center gap-1.5">
-                {moleculesLoading && (
-                  <svg className="w-3 h-3 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                )}
+              <span className="text-sm text-gray-400 tabular-nums flex items-center gap-1.5">
+                {moleculesLoading && <BindXLogo variant="loading" size={12} />}
                 {filteredMolecules.length !== phaseMolecules.length
                   ? `${filteredMolecules.length} of ${phaseMolecules.length} molecules`
                   : `${phaseMolecules.length} molecules`}
@@ -1115,18 +1072,18 @@ export default function PhaseDashboard() {
       <RunHistory runs={currentPhaseRuns} onCancel={handleCancelRun} onArchive={handleArchiveRun} />
 
       {/* Pareto Analysis (collapsible) */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="card overflow-hidden">
         <button
           onClick={() => setShowPareto(v => !v)}
           className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors text-left"
         >
           <div className="flex items-center gap-2.5">
-            <svg className="w-4 h-4 text-[#0f131d]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-bx-light-text" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
             <span className="font-semibold text-gray-700 text-sm">Pareto Analysis</span>
-            <span className="text-xs text-gray-400">2D objective scatter plot</span>
+            <span className="text-sm text-gray-400">2D objective scatter plot</span>
           </div>
           <svg
             className={`w-4 h-4 text-gray-400 transition-transform duration-150 ${showPareto ? 'rotate-180' : ''}`}
@@ -1194,12 +1151,12 @@ function FilterBarWithCount({ molecules, columns, onFilteredChange, onFilterCoun
 // ---------------------------------------------------------------------------
 function Breadcrumb({ projectId, projectName, phase, phaseTypeMeta }) {
   return (
-    <nav className="flex items-center gap-1.5 text-xs text-gray-400" aria-label="Breadcrumb">
-      <Link to="/" className="hover:text-[#0f131d] transition-colors">Projects</Link>
+    <nav className="flex items-center gap-1.5 text-sm text-gray-400" aria-label="Breadcrumb">
+      <Link to="/" className="hover:text-bx-mint transition-colors">Projects</Link>
       <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
       </svg>
-      <Link to={`/project/${projectId}`} className="hover:text-[#0f131d] transition-colors truncate max-w-[120px]">
+      <Link to={`/project/${projectId}`} className="hover:text-bx-light-text transition-colors truncate max-w-[120px]">
         {projectName || 'Project'}
       </Link>
       <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1217,14 +1174,14 @@ function Breadcrumb({ projectId, projectName, phase, phaseTypeMeta }) {
 // ---------------------------------------------------------------------------
 function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className={`h-1.5 ${isFrozen ? 'bg-blue-400' : 'bg-[#00e6a0]'}`} />
+    <div className="card overflow-hidden">
+      <div className={`h-1.5 ${isFrozen ? 'bg-blue-400' : 'bg-bx-mint'}`} />
       <div className="px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           {/* Title + stats */}
           <div className="space-y-3">
             <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-[#0f131d]">
+              <h1 className="text-xl font-bold text-bx-light-text">
                 {phase.label}
                 <span className="ml-2 text-base font-normal text-gray-400">
                   — {phaseTypeMeta.label || phase.type}
@@ -1262,15 +1219,12 @@ function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, on
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   : hasActiveRun
                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    : 'bg-[#0f131d] hover:bg-[#1a2332] text-white shadow-sm hover:shadow-md'
+                    : 'bg-bx-surface hover:bg-bx-elevated text-white shadow-sm hover:shadow-md'
               }`}
             >
               {hasActiveRun ? (
                 <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
+                  <BindXLogo variant="loading" size={16} />
                   Run in progress
                 </>
               ) : (

@@ -67,8 +67,8 @@ function SortIcon({ direction, rank }) {
   }
   return (
     <div className="flex items-center gap-0.5 flex-shrink-0">
-      {rank && <span className="text-[8px] text-[#0f131d] font-bold">{rank}</span>}
-      <svg className="w-3 h-3 text-[#0f131d]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      {rank && <span className="text-[8px] text-bx-light-text font-bold">{rank}</span>}
+      <svg className="w-3 h-3 text-bx-light-text" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         {direction === 'asc' ? (
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
         ) : (
@@ -224,7 +224,7 @@ export default function MoleculeTable({
 
   if (!molecules.length) {
     return (
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
+      <div className="card p-10 text-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
             <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -233,14 +233,14 @@ export default function MoleculeTable({
             </svg>
           </div>
           <p className="text-sm font-medium text-gray-600">No molecules in this view</p>
-          <p className="text-xs text-gray-400">Try adjusting your filters or run an Import to add molecules</p>
+          <p className="text-sm text-gray-400">Try adjusting your filters or run an Import to add molecules</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="flex flex-col card overflow-hidden">
       {/* Scrollable table */}
       <div
         ref={tableRef}
@@ -265,7 +265,7 @@ export default function MoleculeTable({
                   checked={allVisible}
                   ref={el => { if (el) el.indeterminate = someVisible }}
                   onChange={onSelectAll}
-                  className="accent-[#0f131d] cursor-pointer w-3.5 h-3.5"
+                  className="accent-bx-mint cursor-pointer w-3.5 h-3.5"
                   aria-label="Select all"
                 />
               </th>
@@ -289,7 +289,7 @@ export default function MoleculeTable({
                     className={`px-3 py-2.5 border-b border-gray-200 font-semibold uppercase tracking-wide text-[10px] whitespace-nowrap select-none ${
                       col.type === 'number' ? 'text-right' : 'text-left'
                     } ${col.sortable ? 'cursor-pointer transition-colors' : ''} ${
-                      isActive ? 'text-[#0f131d] bg-blue-50/50' : 'text-gray-500 hover:text-[#0f131d] hover:bg-gray-100'
+                      isActive ? 'text-bx-light-text bg-blue-50/50' : 'text-gray-500 hover:text-bx-light-text hover:bg-gray-100'
                     }`}
                     style={{ minWidth: col.width || 80 }}
                     onClick={e => handleHeaderClick(col, e)}
@@ -322,7 +322,7 @@ export default function MoleculeTable({
                 <tr
                   key={mol.id}
                   className={`cursor-pointer transition-colors duration-100 group ${rowBg} hover:bg-blue-50/60 ${
-                    isSelected ? 'border-l-[3px] border-[#0f131d]' :
+                    isSelected ? 'border-l-[3px] border-bx-surface' :
                     isBookmarked ? 'border-l-2 border-yellow-300' :
                     'border-l-2 border-transparent'
                   }`}
@@ -337,7 +337,7 @@ export default function MoleculeTable({
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => onToggleSelect && onToggleSelect(mol.id)}
-                      className="accent-[#0f131d] cursor-pointer w-3.5 h-3.5"
+                      className="accent-bx-mint cursor-pointer w-3.5 h-3.5"
                       aria-label={`Select ${mol.name || mol.id}`}
                     />
                   </td>
@@ -393,7 +393,7 @@ export default function MoleculeTable({
 
       {/* Footer */}
       <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-        <span className="text-xs text-gray-400">
+        <span className="text-sm text-gray-400">
           Showing{' '}
           <strong className="text-gray-600 tabular-nums">{sorted.length}</strong>
           {' '}of{' '}
@@ -402,12 +402,12 @@ export default function MoleculeTable({
         </span>
         <div className="flex items-center gap-3">
           {sorts.length > 0 && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+            <div className="flex items-center gap-1.5 text-sm text-gray-500">
               <span>Sorted by</span>
               {sorts.map((s, i) => (
                 <span key={s.key} className="flex items-center gap-0.5">
                   {i > 0 && <span className="text-gray-300">·</span>}
-                  <span className="font-medium text-[#0f131d]">
+                  <span className="font-medium text-bx-light-text">
                     {columns.find(c => c.key === s.key)?.label || s.key}
                   </span>
                   <span className="text-[10px] text-gray-400">{s.dir === 'asc' ? '↑' : '↓'}</span>
@@ -422,7 +422,7 @@ export default function MoleculeTable({
             </div>
           )}
           {selectedIds.size > 0 && (
-            <span className="text-xs text-[#0f131d] font-medium tabular-nums">
+            <span className="text-sm text-bx-light-text font-medium tabular-nums">
               {selectedIds.size} selected
             </span>
           )}

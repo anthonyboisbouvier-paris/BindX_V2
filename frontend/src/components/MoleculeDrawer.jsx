@@ -74,9 +74,9 @@ function TabButton({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-2 text-xs font-semibold whitespace-nowrap transition-colors border-b-2 ${
+      className={`px-3 py-2 text-sm font-semibold whitespace-nowrap transition-colors border-b-2 ${
         active
-          ? 'border-[#0f131d] text-[#0f131d]'
+          ? 'border-bx-surface text-bx-light-text'
           : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
       }`}
     >
@@ -94,7 +94,7 @@ function NoDataCard({ runType, message }) {
       </svg>
       <p className="text-sm text-gray-400 font-medium">{message || `No data available`}</p>
       {runType && (
-        <p className="text-xs text-gray-300 mt-1">Run a <span className="font-semibold">{runType}</span> analysis to generate this data</p>
+        <p className="text-sm text-gray-300 mt-1">Run a <span className="font-semibold">{runType}</span> analysis to generate this data</p>
       )}
     </div>
   )
@@ -112,7 +112,7 @@ function MiniBar({ value, max, colorClass = 'bg-blue-500' }) {
 function ProgressBar({ value, label, description, colorClass = 'bg-blue-500' }) {
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs">
+      <div className="flex items-center justify-between text-sm">
         <span className="font-medium text-gray-700">{label}</span>
         <span className="text-gray-500">{value}%</span>
       </div>
@@ -133,7 +133,7 @@ function TabScores({ molecule, allMolecules }) {
       key: 'docking_score',
       label: 'Docking Score',
       unit: 'kcal/mol',
-      color: { bg: 'bg-blue-50', border: 'border-blue-100', value: 'text-[#0f131d]', accent: 'bg-blue-500' },
+      color: { bg: 'bg-blue-50', border: 'border-blue-100', value: 'text-bx-light-text', accent: 'bg-blue-500' },
       lowerIsBetter: true,
       decimals: 1,
     },
@@ -194,12 +194,12 @@ function TabScores({ molecule, allMolecules }) {
             <div key={s.key} className={`rounded-xl border ${c.border} ${c.bg} p-3`}>
               {val == null ? (
                 <div className="text-center text-gray-300">
-                  <p className="text-xs text-gray-400 font-medium mb-1">{s.label}</p>
-                  <p className="text-xs text-gray-300">Not computed</p>
+                  <p className="text-sm text-gray-400 font-medium mb-1">{s.label}</p>
+                  <p className="text-sm text-gray-300">Not computed</p>
                 </div>
               ) : (
                 <>
-                  <p className="text-xs text-gray-500 font-medium mb-1">{s.label}</p>
+                  <p className="text-sm text-gray-500 font-medium mb-1">{s.label}</p>
                   <p className={`text-xl font-bold tabular-nums ${c.value}`}>{fmt(val, s.decimals)}</p>
                   <p className="text-[10px] text-gray-400 mb-2">{s.unit}</p>
                   {rank != null && (
@@ -218,7 +218,7 @@ function TabScores({ molecule, allMolecules }) {
       {/* Bar chart vs phase average */}
       {Object.keys(phaseAvg).length > 0 && (
         <div className="bg-gray-50 rounded-xl p-3 space-y-2">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+          <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
             vs Phase Average
           </p>
           {scores.map(s => {
@@ -241,7 +241,7 @@ function TabScores({ molecule, allMolecules }) {
                       style={{ width: `${(ref / maxVal) * 100}%` }}
                     />
                   </div>
-                  <span className={`text-xs font-bold tabular-nums ${s.color.value}`}>
+                  <span className={`text-sm font-bold tabular-nums ${s.color.value}`}>
                     {fmt(val, s.decimals)}
                   </span>
                 </div>
@@ -324,7 +324,7 @@ function TabProperties({ molecule }) {
             <span className={`text-sm font-bold ${lipinskiPass ? 'text-green-700' : 'text-red-700'}`}>
               Lipinski Rule of 5:
             </span>
-            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+            <span className={`px-2 py-0.5 rounded-full text-sm font-bold ${
               lipinskiPass ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
             }`}>
               {lipinskiPass ? 'PASS' : 'FAIL'}
@@ -332,7 +332,7 @@ function TabProperties({ molecule }) {
           </div>
           <div className="space-y-1 pl-2 border-l-2 border-gray-200">
             {lipinskiChecks.map((c, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs">
+              <div key={i} className="flex items-center gap-2 text-sm">
                 <span className={c.pass ? 'text-green-500' : 'text-red-500'}>
                   {c.pass ? (
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -356,7 +356,7 @@ function TabProperties({ molecule }) {
       {(molecule.scaffold || molecule.cluster_id != null || molecule.interactions_count != null) && (
         <div className="bg-gray-50 rounded-xl p-3 space-y-2">
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Additional</p>
-          <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="grid grid-cols-2 gap-2 text-sm">
             {molecule.scaffold && (
               <div>
                 <span className="text-gray-400">Scaffold</span>
@@ -467,7 +467,7 @@ function TabADMET({ molecule }) {
       <div className="flex flex-col items-center gap-2">
         <RadarSVG values={values} color={overallColor} />
         <div className="text-center">
-          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+          <span className={`text-sm font-semibold px-2 py-1 rounded-full ${
             overallVariant === 'green' ? 'bg-green-100 text-green-700' :
             overallVariant === 'yellow' ? 'bg-yellow-100 text-yellow-700' :
             'bg-red-100 text-red-700'
@@ -493,7 +493,7 @@ function TabADMET({ molecule }) {
         <div className="bg-gray-50 rounded-xl p-3 space-y-1">
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Key ADMET Metrics</p>
           {molecule.hERG != null && (
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-gray-500">hERG Risk</span>
               <span className={`font-bold tabular-nums ${molecule.hERG < 0.2 ? 'text-green-600' : molecule.hERG < 0.4 ? 'text-yellow-600' : 'text-red-600'}`}>
                 {pct(molecule.hERG)}% {molecule.hERG < 0.2 ? '(Safe)' : molecule.hERG < 0.4 ? '(Moderate)' : '(High)'}
@@ -501,7 +501,7 @@ function TabADMET({ molecule }) {
             </div>
           )}
           {molecule.metabolic_stability != null && (
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-gray-500">Metabolic Stability</span>
               <span className={`font-bold tabular-nums ${molecule.metabolic_stability > 0.6 ? 'text-green-600' : 'text-yellow-600'}`}>
                 {pct(molecule.metabolic_stability)}%
@@ -509,13 +509,13 @@ function TabADMET({ molecule }) {
             </div>
           )}
           {molecule.BBB != null && (
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-gray-500">BBB Penetration</span>
               <span className="font-bold tabular-nums text-gray-700">{pct(molecule.BBB)}%</span>
             </div>
           )}
           {molecule.solubility != null && (
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-gray-500">Solubility</span>
               <span className={`font-bold tabular-nums ${molecule.solubility > 0.5 ? 'text-green-600' : 'text-yellow-600'}`}>
                 {pct(molecule.solubility)}%
@@ -543,7 +543,7 @@ function TabSafety({ molecule, details }) {
     <div className="space-y-4">
       {/* PAINS + Brenk */}
       <div className="space-y-2">
-        <div className={`flex items-center gap-2 p-2 rounded-lg text-xs ${
+        <div className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
           safety.pains_pass ? 'bg-green-50' : 'bg-red-50'
         }`}>
           <span className={safety.pains_pass ? 'text-green-500' : 'text-red-500'}>
@@ -565,11 +565,11 @@ function TabSafety({ molecule, details }) {
 
         {safety.brenk_alerts && safety.brenk_alerts.length > 0 && (
           <div className="bg-amber-50 border border-amber-100 rounded-lg p-2">
-            <p className="text-xs font-semibold text-amber-700 mb-1">
+            <p className="text-sm font-semibold text-amber-700 mb-1">
               Brenk Alerts ({safety.brenk_alerts.length})
             </p>
             {safety.brenk_alerts.map((a, i) => (
-              <p key={i} className="text-xs text-amber-600 flex items-start gap-1">
+              <p key={i} className="text-sm text-amber-600 flex items-start gap-1">
                 <span className="mt-0.5 flex-shrink-0">--</span>
                 {a}
               </p>
@@ -577,7 +577,7 @@ function TabSafety({ molecule, details }) {
           </div>
         )}
         {(!safety.brenk_alerts || safety.brenk_alerts.length === 0) && (
-          <div className="flex items-center gap-2 text-xs text-green-600">
+          <div className="flex items-center gap-2 text-sm text-green-600">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
             </svg>
@@ -589,9 +589,9 @@ function TabSafety({ molecule, details }) {
       {/* Off-target */}
       {safety.off_target && safety.off_target.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Off-Target Screening</p>
+          <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">Off-Target Screening</p>
           <div className="rounded-xl border border-gray-100 overflow-hidden">
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left">
                   <th className="px-3 py-2 font-semibold text-gray-500">Target</th>
@@ -627,7 +627,7 @@ function TabSafety({ molecule, details }) {
           { label: 'Hepatotoxicity', value: pct(safety.hepatotox_risk), pass: safety.hepatotox_risk < 0.2, threshold: 20 },
         ].filter(r => r.value != null).map(r => (
           <div key={r.label} className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-sm">
               <span className="font-medium text-gray-700">{r.label}</span>
               <span className={`font-bold ${r.pass ? 'text-green-600' : 'text-red-600'}`}>
                 {r.value}% — {r.pass ? 'Safe' : 'Risk'} (threshold: {r.threshold}%)
@@ -645,10 +645,10 @@ function TabSafety({ molecule, details }) {
 
       {/* Confidence breakdown */}
       {safety.confidence && (
-        <div className="bg-[#0f131d]/5 rounded-xl p-3 space-y-2">
+        <div className="bg-bx-surface/5 rounded-xl p-3 space-y-2">
           <div className="flex items-center justify-between mb-1">
-            <p className="text-xs font-semibold text-[#0f131d]">Confidence</p>
-            <span className="text-sm font-bold text-[#0f131d]">{pct(safety.confidence.overall)}% overall</span>
+            <p className="text-sm font-semibold text-bx-light-text">Confidence</p>
+            <span className="text-sm font-bold text-bx-light-text">{pct(safety.confidence.overall)}% overall</span>
           </div>
           {[
             { key: 'binding',     label: 'Binding' },
@@ -656,15 +656,15 @@ function TabSafety({ molecule, details }) {
             { key: 'selectivity', label: 'Selectivity' },
             { key: 'safety',      label: 'Safety' },
           ].map(c => (
-            <div key={c.key} className="flex items-center gap-2 text-xs">
+            <div key={c.key} className="flex items-center gap-2 text-sm">
               <span className="w-20 text-gray-500 flex-shrink-0">{c.label}</span>
               <div className="flex-1 bg-white/60 rounded-full h-1.5 overflow-hidden">
                 <div
-                  className="bg-[#0f131d] h-full rounded-full"
+                  className="bg-bx-surface h-full rounded-full"
                   style={{ width: `${pct(safety.confidence[c.key]) || 0}%` }}
                 />
               </div>
-              <span className="w-8 text-right font-semibold text-[#0f131d]">
+              <span className="w-8 text-right font-semibold text-bx-light-text">
                 {pct(safety.confidence[c.key]) || '—'}%
               </span>
             </div>
@@ -693,19 +693,19 @@ function TabSynthesis({ details }) {
               <div key={i}>
                 <div className="bg-white rounded-xl border border-gray-100 p-3 shadow-sm">
                   <div className="flex items-start gap-2 mb-2">
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#0f131d] text-white text-[10px] font-bold flex items-center justify-center">
+                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-bx-surface text-white text-[10px] font-bold flex items-center justify-center">
                       {i + 1}
                     </span>
                     <p className="font-semibold text-sm text-gray-800">{step.product}</p>
                   </div>
-                  <div className="pl-7 space-y-1 text-xs text-gray-600">
+                  <div className="pl-7 space-y-1 text-sm text-gray-600">
                     <div className="flex items-start gap-1">
                       <span className="text-gray-400 flex-shrink-0">Reagent:</span>
                       <span className="font-medium">{step.reagent}</span>
                     </div>
                     <div className="flex items-start gap-1">
                       <span className="text-gray-400 flex-shrink-0">Conditions:</span>
-                      <span className="font-mono text-xs">{step.conditions}</span>
+                      <span className="font-mono text-sm">{step.conditions}</span>
                     </div>
                     <div className="flex items-center gap-2 mt-2">
                       <span className="text-gray-400">Yield:</span>
@@ -733,7 +733,7 @@ function TabSynthesis({ details }) {
           </div>
 
           <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-            <div className="grid grid-cols-3 gap-3 text-center text-xs">
+            <div className="grid grid-cols-3 gap-3 text-center text-sm">
               <div>
                 <p className="text-gray-400">Total Steps</p>
                 <p className="font-bold text-gray-800 text-sm">{synthesis.num_steps}</p>
@@ -775,10 +775,10 @@ function TabInteractions({ details }) {
   return (
     <div className="space-y-4">
       {/* Summary */}
-      <div className="bg-[#0f131d]/5 rounded-xl p-3">
-        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+      <div className="bg-bx-surface/5 rounded-xl p-3">
+        <div className="grid grid-cols-3 gap-2 text-center text-sm">
           {[
-            { label: 'Total',       value: total_contacts, color: 'text-[#0f131d]' },
+            { label: 'Total',       value: total_contacts, color: 'text-bx-light-text' },
             { label: 'H-Bonds',     value: hbonds,          color: 'text-green-600' },
             { label: 'Hydrophobic', value: hydrophobic,     color: 'text-orange-500' },
             { label: 'Ionic',       value: ionic,           color: 'text-blue-600' },
@@ -801,7 +801,7 @@ function TabInteractions({ details }) {
       {/* Residues table */}
       {residues.length > 0 && (
         <div className="rounded-xl border border-gray-100 overflow-hidden">
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left">
                 <th className="px-3 py-2 font-semibold text-gray-500">Residue</th>
@@ -907,7 +907,7 @@ export default function MoleculeDrawer({
         {/* ----------------------------------------------------------------- */}
         {/* Header                                                              */}
         {/* ----------------------------------------------------------------- */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-[#0f131d] flex-shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-bx-surface flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <h3 className="font-bold text-white text-sm truncate">
               {molecule.name || molecule.id}
@@ -950,10 +950,10 @@ export default function MoleculeDrawer({
 
         {/* Quick props strip */}
         <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 border-b border-gray-100 flex-shrink-0">
-          {molecule.scaffold && <span className="text-xs font-medium text-gray-600 capitalize">{molecule.scaffold}</span>}
+          {molecule.scaffold && <span className="text-sm font-medium text-gray-600 capitalize">{molecule.scaffold}</span>}
           {molecule.scaffold && <span className="text-gray-200">|</span>}
-          {molecule.MW != null && <span className="text-xs text-gray-500">MW {fmt(molecule.MW, 1)} Da</span>}
-          {molecule.logP != null && <span className="text-xs text-gray-500">LogP {fmt(molecule.logP)}</span>}
+          {molecule.MW != null && <span className="text-sm text-gray-500">MW {fmt(molecule.MW, 1)} Da</span>}
+          {molecule.logP != null && <span className="text-sm text-gray-500">LogP {fmt(molecule.logP)}</span>}
           {molecule.lipinski_pass != null && (
             <Badge variant={molecule.lipinski_pass ? 'green' : 'red'} size="sm">
               {molecule.lipinski_pass ? 'Lipinski OK' : 'Lipinski Fail'}
@@ -964,9 +964,9 @@ export default function MoleculeDrawer({
         {/* ----------------------------------------------------------------- */}
         {/* 3D Viewer placeholder                                               */}
         {/* ----------------------------------------------------------------- */}
-        <div className="flex-shrink-0 bg-[#0d1b2a] border-b border-[#0f131d]/30">
+        <div className="flex-shrink-0 bg-[#0d1b2a] border-b border-bx-surface/30">
           <div className="h-36 flex flex-col items-center justify-center gap-2 relative">
-            <svg className="w-10 h-10 text-[#0f131d]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-10 h-10 text-bx-light-text" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.8}
                 d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
             </svg>
@@ -1044,7 +1044,7 @@ export default function MoleculeDrawer({
             </button>
 
             {idx != null && total != null && (
-              <span className="text-xs text-gray-400 tabular-nums">{idx} of {total}</span>
+              <span className="text-sm text-gray-400 tabular-nums">{idx} of {total}</span>
             )}
 
             <button

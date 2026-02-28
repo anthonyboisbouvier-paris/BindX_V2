@@ -114,7 +114,7 @@ function scoreTextClass(val) {
 }
 
 function overallTextClass(val) {
-  if (val >= 0.7) return 'text-dockit-green'
+  if (val >= 0.7) return 'text-bx-mint'
   if (val >= 0.5) return 'text-yellow-500'
   return 'text-red-500'
 }
@@ -151,7 +151,7 @@ function SourceStatusIcon({ status }) {
   // unknown
   return (
     <span className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center">
-      <span className="text-gray-300 text-xs font-bold leading-none">?</span>
+      <span className="text-gray-300 text-sm font-bold leading-none">?</span>
     </span>
   )
 }
@@ -186,7 +186,7 @@ function StructureSourceHierarchy({ pipeline_summary }) {
 
   return (
     <div className="px-5 pt-4 pb-2">
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+      <p className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
         Structure Source Hierarchy
         <InfoTip text="Shows which protein structure source was used. Sources are ordered by reliability: experimental data is most accurate, computational predictions are fallbacks." />
       </p>
@@ -213,22 +213,22 @@ function StructureSourceHierarchy({ pipeline_summary }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`text-xs font-semibold ${
+                    className={`text-sm font-semibold ${
                       isUsed ? 'text-green-800' : isFailed ? 'text-red-600' : 'text-gray-400'
                     }`}
                   >
                     {src.label}
                   </span>
                   {isUsed && pdbId && src.key === 'pdb_experimental' && (
-                    <span className="text-xs font-mono text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
+                    <span className="text-sm font-mono text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
                       {pdbId}
                     </span>
                   )}
                   {isUsed && pdbResolution && src.key === 'pdb_experimental' && (
-                    <span className="text-xs text-green-600">{pdbResolution} A</span>
+                    <span className="text-sm text-green-600">{pdbResolution} A</span>
                   )}
                 </div>
-                <p className={`text-xs leading-tight mt-0.5 ${
+                <p className={`text-sm leading-tight mt-0.5 ${
                   isUsed ? 'text-green-700' : isFailed ? 'text-red-500' : 'text-gray-400'
                 }`}>
                   {isFailed ? 'Not available for this protein' : src.description}
@@ -236,7 +236,7 @@ function StructureSourceHierarchy({ pipeline_summary }) {
               </div>
 
               <span
-                className={`flex-shrink-0 text-xs font-mono ${
+                className={`flex-shrink-0 text-sm font-mono ${
                   isUsed ? 'text-green-600' : 'text-gray-300'
                 }`}
               >
@@ -253,7 +253,7 @@ function StructureSourceHierarchy({ pipeline_summary }) {
           <svg className="w-4 h-4 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <p className="text-xs text-yellow-700 leading-relaxed">
+          <p className="text-sm text-yellow-700 leading-relaxed">
             {disorderPct}% of residues are in disordered regions. Predictions in these areas may be less reliable.
           </p>
         </div>
@@ -299,7 +299,7 @@ function ComponentRow({ name, data }) {
         </div>
         {/* Note */}
         {data.note && (
-          <p className="text-xs text-gray-400 mt-1 leading-relaxed">{data.note}</p>
+          <p className="text-sm text-gray-400 mt-1 leading-relaxed">{data.note}</p>
         )}
       </div>
     </div>
@@ -312,7 +312,7 @@ function ComponentRow({ name, data }) {
 export default function ConfidenceBreakdown({ confidence, moleculeName, pipeline_summary }) {
   if (!confidence) {
     return (
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 text-center text-gray-400 text-sm">
+      <div className="card p-6 text-center text-gray-400 text-sm">
         No confidence data available.
       </div>
     )
@@ -329,16 +329,16 @@ export default function ConfidenceBreakdown({ confidence, moleculeName, pipeline
     : null
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="card overflow-hidden">
       {/* Header */}
-      <div className="bg-dockit-blue px-5 py-4 text-white">
+      <div className="bg-bx-surface px-5 py-4 text-white">
         <h3 className="font-bold text-base">
           Confidence Breakdown
           {moleculeName && (
-            <span className="text-dockit-green ml-2 font-mono">{moleculeName}</span>
+            <span className="text-bx-mint ml-2 font-mono">{moleculeName}</span>
           )}
         </h3>
-        <p className="text-white/60 text-xs mt-0.5">
+        <p className="text-white/60 text-sm mt-0.5">
           Multi-component reliability assessment
           <InfoTip text="The overall confidence score aggregates uncertainty from each pipeline step. A high score means the prediction is well-supported across all computational tools." />
         </p>
@@ -381,10 +381,10 @@ export default function ConfidenceBreakdown({ confidence, moleculeName, pipeline
 
         <div>
           <p className="text-sm font-semibold text-gray-700">Overall Confidence</p>
-          <p className={`text-xs mt-1 font-medium ${overallTextClass(overall)}`}>
+          <p className={`text-sm mt-1 font-medium ${overallTextClass(overall)}`}>
             {overall >= 0.7 ? 'High confidence' : overall >= 0.5 ? 'Moderate confidence' : 'Low confidence — review carefully'}
           </p>
-          <p className="text-xs text-gray-400 mt-1 leading-relaxed max-w-xs">
+          <p className="text-sm text-gray-400 mt-1 leading-relaxed max-w-xs">
             {overall >= 0.7
               ? 'Prediction is well-supported across all pipeline components.'
               : overall >= 0.5
@@ -396,9 +396,9 @@ export default function ConfidenceBreakdown({ confidence, moleculeName, pipeline
 
       {/* Component breakdown */}
       <div className="px-5 py-2">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide py-2">Component Scores</p>
+        <p className="text-sm font-semibold text-gray-400 uppercase tracking-wide py-2">Component Scores</p>
         {componentEntries.length === 0 ? (
-          <p className="text-xs text-gray-400 italic py-4 text-center">No component data available.</p>
+          <p className="text-sm text-gray-400 italic py-4 text-center">No component data available.</p>
         ) : (
           componentEntries.map(([name, data]) => (
             <ComponentRow key={name} name={name} data={data} />
@@ -414,10 +414,10 @@ export default function ConfidenceBreakdown({ confidence, moleculeName, pipeline
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div>
-              <p className="text-xs font-semibold text-amber-700">
+              <p className="text-sm font-semibold text-amber-700">
                 Key limitation: {COMPONENT_LABELS[lowestEntry[0]] || lowestEntry[0]}
               </p>
-              <p className="text-xs text-amber-600 mt-0.5 leading-relaxed">
+              <p className="text-sm text-amber-600 mt-0.5 leading-relaxed">
                 {lowestEntry[1].note || `The ${COMPONENT_LABELS[lowestEntry[0]] || lowestEntry[0]} step has the lowest confidence (${Math.round((lowestEntry[1].score ?? 0) * 100)}%). This is the primary source of uncertainty in this prediction.`}
               </p>
             </div>

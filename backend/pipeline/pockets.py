@@ -391,7 +391,7 @@ def extract_ligand_pocket(
                         chain = line[21:22].strip() or "A"
                         res_num = line[22:26].strip()
                         res_name = line[17:20].strip()
-                        residue_label = f"{chain}_{res_name}{res_num}"
+                        residue_label = f"{res_name}_{chain}_{res_num}"
                         protein_atoms.append((x, y, z, residue_label))
                     except (ValueError, IndexError):
                         continue

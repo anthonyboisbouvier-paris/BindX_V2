@@ -36,13 +36,13 @@ function SummaryBar({ nSteps, confidence, estimatedCost, allReagentsAvailable })
         </span>
       )}
       {confidence !== undefined && confidence !== null && (
-        <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${confColor.bg} ${confColor.text} border ${confColor.border}`}>
+        <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-sm font-semibold ${confColor.bg} ${confColor.text} border ${confColor.border}`}>
           {Math.round(confidence * 100)}% confidence
           <InfoTip text="Confidence that this synthesis route is feasible based on known chemical reactions." />
         </span>
       )}
       {estimatedCost && (
-        <span className={`flex items-center gap-1 text-xs font-medium ${costColor(estimatedCost)}`}>
+        <span className={`flex items-center gap-1 text-sm font-medium ${costColor(estimatedCost)}`}>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -51,7 +51,7 @@ function SummaryBar({ nSteps, confidence, estimatedCost, allReagentsAvailable })
         </span>
       )}
       {allReagentsAvailable !== undefined && (
-        <span className={`flex items-center gap-1 text-xs font-medium ${allReagentsAvailable ? 'text-green-600' : 'text-orange-500'}`}>
+        <span className={`flex items-center gap-1 text-sm font-medium ${allReagentsAvailable ? 'text-green-600' : 'text-orange-500'}`}>
           {allReagentsAvailable ? (
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -82,7 +82,7 @@ function TreeNode({ node, depth }) {
   const displayName = node.name || (node.smiles ? node.smiles.slice(0, 26) : null)
     || (isTarget ? 'Target Molecule' : isReagent ? 'Reagent' : 'Intermediate')
 
-  let nodeClasses = 'border rounded-lg px-3 py-2 text-xs font-medium shadow-sm max-w-[200px] min-w-[110px] text-center'
+  let nodeClasses = 'border rounded-lg px-3 py-2 text-sm font-medium shadow-sm max-w-[200px] min-w-[110px] text-center'
   if (isTarget) {
     nodeClasses += ' bg-purple-600 text-white border-purple-700 text-sm cursor-default'
   } else if (isReagent) {
@@ -168,7 +168,7 @@ function StepTimeline({ steps }) {
           <div key={i} className="flex gap-3">
             {/* Step number + connector */}
             <div className="flex flex-col items-center flex-shrink-0">
-              <div className="w-7 h-7 rounded-full bg-purple-600 text-white text-xs font-bold flex items-center justify-center shadow-sm">
+              <div className="w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center shadow-sm">
                 {i + 1}
               </div>
               {i < steps.length - 1 && (
@@ -180,11 +180,11 @@ function StepTimeline({ steps }) {
             <div className="flex-1 pb-3">
               <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
                 <div className="flex items-start justify-between gap-2 mb-2">
-                  <span className="text-xs font-semibold text-gray-800 truncate">
+                  <span className="text-sm font-semibold text-gray-800 truncate">
                     {step.reaction || `Step ${i + 1}`}
                   </span>
                   {step.confidence !== undefined && step.confidence !== null && (
-                    <span className={`flex-shrink-0 text-xs px-1.5 py-0.5 rounded-full font-medium ${confColor.bg} ${confColor.text}`}>
+                    <span className={`flex-shrink-0 text-sm px-1.5 py-0.5 rounded-full font-medium ${confColor.bg} ${confColor.text}`}>
                       {Math.round(step.confidence * 100)}%
                     </span>
                   )}
@@ -247,9 +247,9 @@ export default function SynthesisTree({ synthesisRoute }) {
   return (
     <div className="card overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 bg-dockit-blue flex items-center justify-between">
+      <div className="px-4 py-3 bg-bx-surface flex items-center justify-between">
         <h3 className="text-white font-semibold text-sm flex items-center gap-2">
-          <svg className="w-4 h-4 text-dockit-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
           </svg>
@@ -264,9 +264,9 @@ export default function SynthesisTree({ synthesisRoute }) {
               <button
                 key={key}
                 onClick={() => setViewMode(key)}
-                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                className={`px-3 py-1 text-sm font-medium transition-colors ${
                   viewMode === key
-                    ? 'bg-white text-dockit-blue'
+                    ? 'bg-white text-bx-light-text'
                     : 'text-white/70 hover:text-white hover:bg-white/10'
                 }`}
               >
@@ -303,7 +303,7 @@ export default function SynthesisTree({ synthesisRoute }) {
       {/* All reagents list */}
       {synthesisRoute.all_reagents && synthesisRoute.all_reagents.length > 0 && (
         <div className="px-4 pb-4">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2 flex items-center">
+          <p className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-2 flex items-center">
             All Reagents
             <InfoTip text="Complete list of starting materials and reagents needed for the synthesis." />
           </p>
@@ -311,7 +311,7 @@ export default function SynthesisTree({ synthesisRoute }) {
             {synthesisRoute.all_reagents.map((r, i) => (
               <span
                 key={i}
-                className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded text-xs text-gray-600 font-mono truncate max-w-[160px]"
+                className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded text-sm text-gray-600 font-mono truncate max-w-[160px]"
                 title={r}
               >
                 {r}
@@ -324,31 +324,31 @@ export default function SynthesisTree({ synthesisRoute }) {
       {/* Cost breakdown section */}
       {synthesisRoute.cost_estimate && (
         <div className="px-4 pb-4">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2 flex items-center">
+          <p className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-2 flex items-center">
             Cost Estimate
             <InfoTip text="Estimated synthesis cost in USD, broken down by reagent and labor costs." />
           </p>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1.5">
             {synthesisRoute.cost_estimate.total_cost_usd !== undefined && (
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-700">Total Cost</span>
-                <span className="text-sm font-bold text-dockit-blue font-mono">
+                <span className="text-sm font-semibold text-gray-700">Total Cost</span>
+                <span className="text-sm font-bold text-bx-light-text font-mono">
                   ${Number(synthesisRoute.cost_estimate.total_cost_usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             )}
             {synthesisRoute.cost_estimate.reagent_cost !== undefined && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">Reagents</span>
-                <span className="text-xs font-medium text-gray-700 font-mono">
+                <span className="text-sm text-gray-500">Reagents</span>
+                <span className="text-sm font-medium text-gray-700 font-mono">
                   ${Number(synthesisRoute.cost_estimate.reagent_cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             )}
             {synthesisRoute.cost_estimate.labor_cost !== undefined && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">Labor</span>
-                <span className="text-xs font-medium text-gray-700 font-mono">
+                <span className="text-sm text-gray-500">Labor</span>
+                <span className="text-sm font-medium text-gray-700 font-mono">
                   ${Number(synthesisRoute.cost_estimate.labor_cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
@@ -360,12 +360,12 @@ export default function SynthesisTree({ synthesisRoute }) {
       {/* Reagent availability table */}
       {Array.isArray(synthesisRoute.reagent_availability) && synthesisRoute.reagent_availability.length > 0 && (
         <div className="px-4 pb-4">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2 flex items-center">
+          <p className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-2 flex items-center">
             Reagent Availability
             <InfoTip text="Commercial availability and supplier information for each required reagent." />
           </p>
           <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide text-[10px]">Reagent</th>
@@ -416,7 +416,7 @@ export default function SynthesisTree({ synthesisRoute }) {
       )}
 
       {/* Legend */}
-      <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-4 text-xs text-gray-400">
+      <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-4 text-sm text-gray-400">
         <span className="flex items-center gap-1">
           <span className="w-3 h-3 rounded bg-purple-600 inline-block" />
           Target Molecule

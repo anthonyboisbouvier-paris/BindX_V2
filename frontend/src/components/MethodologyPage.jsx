@@ -252,19 +252,19 @@ const INTEGRITY_RULES = [
 // --------------------------------------------------
 function SectionCard({ section, isOpen, onToggle }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="card overflow-hidden">
       {/* Header — always visible */}
       <button
         type="button"
         onClick={onToggle}
         className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-gray-50 transition-colors"
       >
-        <div className="w-10 h-10 rounded-lg bg-dockit-blue flex items-center justify-center text-dockit-green flex-shrink-0">
+        <div className="w-10 h-10 rounded-lg bg-bx-surface flex items-center justify-center text-bx-mint flex-shrink-0">
           {ICONS[section.icon]}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-bold text-dockit-blue text-base">{section.title}</h3>
+            <h3 className="font-bold text-bx-light-text text-base">{section.title}</h3>
             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${section.badgeColor}`}>
               {section.badge}
             </span>
@@ -285,7 +285,7 @@ function SectionCard({ section, isOpen, onToggle }) {
           {/* Tool name */}
           <div className="mt-4 mb-3">
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Tool</span>
-            <p className="text-sm font-medium text-dockit-blue mt-0.5">{section.tool}</p>
+            <p className="text-sm font-medium text-bx-light-text mt-0.5">{section.tool}</p>
           </div>
 
           {/* Description */}
@@ -358,7 +358,7 @@ export default function MethodologyPage({ onBack }) {
           Back
         </button>
         <div>
-          <h1 className="text-2xl font-extrabold text-dockit-blue">Methodology</h1>
+          <h1 className="text-2xl font-extrabold text-bx-light-text">Methodology</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Scientific description of each tool and algorithm used in the DockIt pipeline
           </p>
@@ -369,21 +369,21 @@ export default function MethodologyPage({ onBack }) {
       <div className="flex justify-end gap-2">
         <button
           onClick={() => setOpenSection('all')}
-          className="text-xs text-dockit-blue hover:underline"
+          className="text-xs text-bx-light-text hover:underline"
         >
           Expand all
         </button>
         <span className="text-gray-300">|</span>
         <button
           onClick={() => setOpenSection(null)}
-          className="text-xs text-dockit-blue hover:underline"
+          className="text-xs text-bx-light-text hover:underline"
         >
           Collapse all
         </button>
       </div>
 
       {/* Pipeline overview */}
-      <div className="bg-dockit-blue rounded-xl p-5 text-white">
+      <div className="bg-bx-surface rounded-xl p-5 text-white">
         <h2 className="font-bold text-lg mb-2">DockIt Computational Pipeline</h2>
         <p className="text-white/70 text-sm leading-relaxed mb-4">
           DockIt automates a complete structure-based virtual screening and hit-to-lead workflow.
@@ -415,8 +415,8 @@ export default function MethodologyPage({ onBack }) {
       </div>
 
       {/* Docking Integrity & Validation */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-5 py-4 bg-dockit-blue">
+      <div className="card overflow-hidden">
+        <div className="px-5 py-4 bg-bx-surface">
           <h2 className="font-bold text-lg text-white">Docking Integrity & Validation Rules</h2>
           <p className="text-white/70 text-sm mt-1">
             Principles ensuring scientific rigor and transparency in all docking results
@@ -425,11 +425,11 @@ export default function MethodologyPage({ onBack }) {
         <div className="p-5 space-y-4">
           {INTEGRITY_RULES.map((item, idx) => (
             <div key={idx} className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-dockit-blue flex-shrink-0 mt-0.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-bx-light-text flex-shrink-0 mt-0.5">
                 {item.icon}
               </div>
               <div>
-                <p className="text-sm font-semibold text-dockit-blue">{item.rule}</p>
+                <p className="text-sm font-semibold text-bx-light-text">{item.rule}</p>
                 <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{item.detail}</p>
               </div>
             </div>
@@ -439,7 +439,7 @@ export default function MethodologyPage({ onBack }) {
         {/* Summary statement */}
         <div className="px-5 pb-5">
           <div className="bg-blue-50 rounded-lg p-4">
-            <p className="text-sm text-dockit-blue font-medium italic leading-relaxed">
+            <p className="text-sm text-bx-light-text font-medium italic leading-relaxed">
               "DockIt performs structure-based virtual screening using GNINA/Vina.
               Protein structures are prepared from experimental PDB or predicted AlphaFold data,
               binding pockets are defined prior to docking, and ligands are docked within a fixed search box.
@@ -453,7 +453,7 @@ export default function MethodologyPage({ onBack }) {
       </div>
 
       {/* Benchmark Validation Results */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="card overflow-hidden">
         <div className="px-5 py-4 bg-green-700">
           <h2 className="font-bold text-lg text-white">Benchmark Validation Results</h2>
           <p className="text-white/70 text-sm mt-1">
@@ -481,7 +481,7 @@ export default function MethodologyPage({ onBack }) {
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead>
-                  <tr className="bg-dockit-blue text-white">
+                  <tr className="bg-bx-surface text-white">
                     <th className="px-3 py-2 text-left font-semibold rounded-tl-lg">Target</th>
                     <th className="px-3 py-2 text-center font-semibold">Actives</th>
                     <th className="px-3 py-2 text-center font-semibold">Decoys</th>
@@ -494,7 +494,7 @@ export default function MethodologyPage({ onBack }) {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   <tr className="hover:bg-gray-50">
-                    <td className="px-3 py-2 font-semibold text-dockit-blue">EGFR (P00533)</td>
+                    <td className="px-3 py-2 font-semibold text-bx-light-text">EGFR (P00533)</td>
                     <td className="px-3 py-2 text-center text-gray-600">13</td>
                     <td className="px-3 py-2 text-center text-gray-600">10</td>
                     <td className="px-3 py-2 text-center"><span className="text-green-700 font-bold">1.05x</span></td>
@@ -504,7 +504,7 @@ export default function MethodologyPage({ onBack }) {
                     <td className="px-3 py-2 text-center"><span className="text-green-600 font-bold">100%</span></td>
                   </tr>
                   <tr className="bg-gray-50/40 hover:bg-gray-50">
-                    <td className="px-3 py-2 font-semibold text-dockit-blue">CDK2 (P24941)</td>
+                    <td className="px-3 py-2 font-semibold text-bx-light-text">CDK2 (P24941)</td>
                     <td className="px-3 py-2 text-center text-gray-600">11</td>
                     <td className="px-3 py-2 text-center text-gray-600">10</td>
                     <td className="px-3 py-2 text-center"><span className="text-green-700 font-bold">1.30x</span></td>
@@ -514,7 +514,7 @@ export default function MethodologyPage({ onBack }) {
                     <td className="px-3 py-2 text-center"><span className="text-green-600 font-bold">100%</span></td>
                   </tr>
                   <tr className="hover:bg-gray-50">
-                    <td className="px-3 py-2 font-semibold text-dockit-blue">BRAF V600E (P15056)</td>
+                    <td className="px-3 py-2 font-semibold text-bx-light-text">BRAF V600E (P15056)</td>
                     <td className="px-3 py-2 text-center text-gray-600">11</td>
                     <td className="px-3 py-2 text-center text-gray-600">10</td>
                     <td className="px-3 py-2 text-center"><span className="text-green-700 font-bold">1.61x</span></td>
@@ -524,7 +524,7 @@ export default function MethodologyPage({ onBack }) {
                     <td className="px-3 py-2 text-center"><span className="text-green-600 font-bold">100%</span></td>
                   </tr>
                   <tr className="bg-gray-50/40 hover:bg-gray-50">
-                    <td className="px-3 py-2 font-semibold text-dockit-blue">JAK2 (O60674)</td>
+                    <td className="px-3 py-2 font-semibold text-bx-light-text">JAK2 (O60674)</td>
                     <td className="px-3 py-2 text-center text-gray-600">12</td>
                     <td className="px-3 py-2 text-center text-gray-600">10</td>
                     <td className="px-3 py-2 text-center"><span className="text-green-700 font-bold">1.19x</span></td>
@@ -534,7 +534,7 @@ export default function MethodologyPage({ onBack }) {
                     <td className="px-3 py-2 text-center"><span className="text-green-600 font-bold">100%</span></td>
                   </tr>
                   <tr className="hover:bg-gray-50">
-                    <td className="px-3 py-2 font-semibold text-dockit-blue">KRAS G12C (P01116)</td>
+                    <td className="px-3 py-2 font-semibold text-bx-light-text">KRAS G12C (P01116)</td>
                     <td className="px-3 py-2 text-center text-gray-600">9</td>
                     <td className="px-3 py-2 text-center text-gray-600">10</td>
                     <td className="px-3 py-2 text-center"><span className="text-green-700 font-bold">1.59x</span></td>

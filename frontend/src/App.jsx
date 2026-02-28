@@ -7,6 +7,7 @@ import { useAuth } from './contexts/AuthContext'
 // Layout
 import SidebarLayout from './components/SidebarLayout.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
+import BindXLogo from './components/BindXLogo.jsx'
 
 // Auth pages
 import LoginPage from './pages/LoginPage.jsx'
@@ -26,6 +27,9 @@ import TargetSetup from './pages/TargetSetup.jsx'
 // Static pages
 import MethodologyPage from './components/MethodologyPage.jsx'
 
+// Debug / test
+import SurfaceTest from './pages/SurfaceTest.jsx'
+
 // --------------------------------------------------
 // ProtectedRoute — redirects to /login if not authenticated
 // --------------------------------------------------
@@ -34,8 +38,8 @@ function ProtectedRoute({ children }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-dockit-gray flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-bx-mint border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-bx-surface flex items-center justify-center">
+        <BindXLogo variant="splash" size={120} />
       </div>
     )
   }
@@ -56,6 +60,9 @@ export default function App() {
     <ToastProvider>
     <WorkspaceProvider>
       <Routes>
+        {/* Debug test page (no auth) */}
+        <Route path="/surface-test" element={<SurfaceTest />} />
+
         {/* Public pages (no sidebar, no auth required) */}
         <Route path="/welcome" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />

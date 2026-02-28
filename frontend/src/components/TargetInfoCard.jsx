@@ -11,7 +11,7 @@ function GradientBar({ value, label }) {
 
   return (
     <div className="flex items-center gap-3">
-      <span className="text-xs text-gray-500 w-24 shrink-0">{label}</span>
+      <span className="text-sm text-gray-500 w-24 shrink-0">{label}</span>
       <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-500"
@@ -23,7 +23,7 @@ function GradientBar({ value, label }) {
         />
       </div>
       <span
-        className="text-xs font-semibold w-9 text-right shrink-0"
+        className="text-sm font-semibold w-9 text-right shrink-0"
         style={{ color: barColor }}
       >
         {pct}%
@@ -56,9 +56,9 @@ export default function TargetInfoCard({ assessment, project }) {
   } = assessment
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="card overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#0f131d] to-[#141925] px-5 py-4">
+      <div className="bg-gradient-to-r from-bx-surface to-bx-elevated px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -68,17 +68,17 @@ export default function TargetInfoCard({ assessment, project }) {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {project?.uniprot_id && (
-                <span className="text-xs font-mono bg-white/10 text-blue-100 px-2 py-0.5 rounded">
+                <span className="text-sm font-mono bg-white/10 text-blue-100 px-2 py-0.5 rounded">
                   {project.uniprot_id}
                 </span>
               )}
               {project?.target_pdb_id && (
-                <span className="text-xs font-mono bg-white/10 text-blue-100 px-2 py-0.5 rounded">
+                <span className="text-sm font-mono bg-white/10 text-blue-100 px-2 py-0.5 rounded">
                   PDB: {project.target_pdb_id}
                 </span>
               )}
               {organism && (
-                <span className="text-xs text-blue-300 italic">{organism}</span>
+                <span className="text-sm text-blue-300 italic">{organism}</span>
               )}
             </div>
           </div>
@@ -86,11 +86,11 @@ export default function TargetInfoCard({ assessment, project }) {
           {/* Druggability score circle */}
           <div className="shrink-0 text-center">
             <div className="w-14 h-14 rounded-full bg-white/10 border-2 border-[#00e6a0] flex items-center justify-center">
-              <span className="text-[#00e6a0] font-bold text-base">
+              <span className="text-bx-mint font-bold text-base">
                 {Math.round((druggability_score || 0) * 100)}
               </span>
             </div>
-            <p className="text-blue-300 text-xs mt-1">Drug.</p>
+            <p className="text-blue-300 text-sm mt-1">Drug.</p>
           </div>
         </div>
       </div>
@@ -109,16 +109,16 @@ export default function TargetInfoCard({ assessment, project }) {
         {/* Quick stats */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-            <p className="text-base font-bold text-[#0f131d]">{sequence_length?.toLocaleString()}</p>
-            <p className="text-xs text-gray-400 mt-0.5">Amino acids</p>
+            <p className="text-base font-bold text-bx-light-text">{sequence_length?.toLocaleString()}</p>
+            <p className="text-sm text-gray-400 mt-0.5">Amino acids</p>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-            <p className="text-base font-bold text-[#0f131d]">{pdb_structures}</p>
-            <p className="text-xs text-gray-400 mt-0.5">PDB structures</p>
+            <p className="text-base font-bold text-bx-light-text">{pdb_structures}</p>
+            <p className="text-sm text-gray-400 mt-0.5">PDB structures</p>
           </div>
           <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-            <p className="text-base font-bold text-[#0f131d]">{chembl_compounds?.toLocaleString()}</p>
-            <p className="text-xs text-gray-400 mt-0.5">ChEMBL cpds</p>
+            <p className="text-base font-bold text-bx-light-text">{chembl_compounds?.toLocaleString()}</p>
+            <p className="text-sm text-gray-400 mt-0.5">ChEMBL cpds</p>
           </div>
         </div>
 
@@ -128,16 +128,16 @@ export default function TargetInfoCard({ assessment, project }) {
         <div className="space-y-1.5">
           {disease_context && (
             <div className="flex items-start gap-2">
-              <span className="text-xs font-medium text-gray-400 w-20 shrink-0 pt-0.5">Disease</span>
+              <span className="text-sm font-medium text-gray-400 w-20 shrink-0 pt-0.5">Disease</span>
               <span className="text-sm text-gray-700">{disease_context}</span>
             </div>
           )}
           {known_drugs && known_drugs.length > 0 && (
             <div className="flex items-start gap-2">
-              <span className="text-xs font-medium text-gray-400 w-20 shrink-0 pt-0.5">Known drugs</span>
+              <span className="text-sm font-medium text-gray-400 w-20 shrink-0 pt-0.5">Known drugs</span>
               <div className="flex flex-wrap gap-1">
                 {known_drugs.map(d => (
-                  <span key={d} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium">
+                  <span key={d} className="text-sm bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium">
                     {d}
                   </span>
                 ))}
@@ -151,12 +151,12 @@ export default function TargetInfoCard({ assessment, project }) {
           <>
             <div className="border-t border-gray-50" />
             <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Binding Site</p>
+              <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Binding Site</p>
               <div className="flex items-start gap-2 mb-2">
-                <span className="text-xs font-medium text-gray-400 w-20 shrink-0 pt-0.5">Residues</span>
+                <span className="text-sm font-medium text-gray-400 w-20 shrink-0 pt-0.5">Residues</span>
                 <div className="flex flex-wrap gap-1">
                   {(binding_site.residues || []).map(r => (
-                    <span key={r} className="text-xs font-mono bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                    <span key={r} className="text-sm font-mono bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
                       {r}
                     </span>
                   ))}
@@ -164,13 +164,13 @@ export default function TargetInfoCard({ assessment, project }) {
               </div>
               <div className="flex items-center gap-4">
                 {binding_site.volume && (
-                  <span className="text-xs text-gray-500">
+                  <span className="text-sm text-gray-500">
                     Volume: <span className="font-semibold text-gray-700">{binding_site.volume} A3</span>
                   </span>
                 )}
                 {binding_site.druggability_probability && (
-                  <span className="text-xs text-gray-500">
-                    Pocket drug.: <span className="font-semibold text-[#00e6a0]">
+                  <span className="text-sm text-gray-500">
+                    Pocket drug.: <span className="font-semibold text-bx-mint">
                       {Math.round(binding_site.druggability_probability * 100)}%
                     </span>
                   </span>

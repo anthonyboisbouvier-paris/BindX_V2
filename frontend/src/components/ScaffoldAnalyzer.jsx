@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { analyzeScaffold } from '../api.js'
+import BindXLogo from './BindXLogo.jsx'
 
 // ---------------------------------------------------------------------------
 // Strategy labels
@@ -31,14 +32,14 @@ function PositionCard({ position, state, onToggleFreeze, onStrategyChange, onTog
     }`}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${
             isFrozen ? 'bg-gray-200 text-gray-500' : 'bg-green-100 text-green-700'
           }`}>
             {position.label}
           </span>
           <div>
             <span className="text-sm font-semibold text-gray-700">{position.atom_symbol}</span>
-            <span className="text-xs text-gray-400 ml-1.5 font-mono">{position.current_group}</span>
+            <span className="text-sm text-gray-400 ml-1.5 font-mono">{position.current_group}</span>
           </div>
           {position.is_brics_site && (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-50 text-red-600 uppercase">BRICS</span>
@@ -46,7 +47,7 @@ function PositionCard({ position, state, onToggleFreeze, onStrategyChange, onTog
         </div>
         <button
           onClick={() => onToggleFreeze(position.position_idx)}
-          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-sm font-semibold transition-colors ${
             isFrozen
               ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
               : 'bg-green-100 text-green-700 hover:bg-green-200'
@@ -79,7 +80,7 @@ function PositionCard({ position, state, onToggleFreeze, onStrategyChange, onTog
             <select
               value={state.strategy}
               onChange={(e) => onStrategyChange(position.position_idx, e.target.value)}
-              className="mt-0.5 w-full text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white text-gray-700 focus:ring-1 focus:ring-green-400 focus:border-green-400"
+              className="mt-0.5 w-full text-sm border border-gray-200 rounded-md px-2 py-1.5 bg-white text-gray-700 focus:ring-1 focus:ring-green-400 focus:border-green-400"
             >
               {STRATEGY_OPTIONS
                 .filter(opt => opt.value === 'any' || position.applicable_strategies.includes(opt.value))
@@ -101,7 +102,7 @@ function PositionCard({ position, state, onToggleFreeze, onStrategyChange, onTog
                       onClick={() => onToggleGroup(position.position_idx, group)}
                       className={`px-2 py-0.5 rounded text-[11px] font-mono font-semibold transition-colors ${
                         isActive
-                          ? 'bg-[#0f131d] text-white'
+                          ? 'bg-bx-surface text-white'
                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                       }`}
                     >
@@ -131,8 +132,8 @@ function GlobalControls({ preserveScaffold, setPreserveScaffold, similarity, set
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" checked={preserveScaffold} onChange={(e) => setPreserveScaffold(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300 text-[#00e6a0] focus:ring-[#00e6a0]" />
-          <span className="text-xs font-semibold text-gray-600">Preserve scaffold</span>
+            className="w-4 h-4 rounded border-gray-300 text-bx-mint focus:ring-[#00e6a0]" />
+          <span className="text-sm font-semibold text-gray-600">Preserve scaffold</span>
         </label>
       </div>
 
@@ -140,7 +141,7 @@ function GlobalControls({ preserveScaffold, setPreserveScaffold, similarity, set
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="text-[10px] font-semibold text-gray-400 uppercase">Min similarity</label>
-            <span className="text-xs font-bold text-[#0f131d] tabular-nums">{similarity.toFixed(2)}</span>
+            <span className="text-sm font-bold text-bx-light-text tabular-nums">{similarity.toFixed(2)}</span>
           </div>
           <input type="range" min={0.1} max={0.9} step={0.05} value={similarity}
             onChange={(e) => setSimilarity(parseFloat(e.target.value))}
@@ -149,7 +150,7 @@ function GlobalControls({ preserveScaffold, setPreserveScaffold, similarity, set
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="text-[10px] font-semibold text-gray-400 uppercase">Max MW change</label>
-            <span className="text-xs font-bold text-[#0f131d] tabular-nums">{maxMwChange} Da</span>
+            <span className="text-sm font-bold text-bx-light-text tabular-nums">{maxMwChange} Da</span>
           </div>
           <input type="range" min={10} max={500} step={10} value={maxMwChange}
             onChange={(e) => setMaxMwChange(parseInt(e.target.value))}
@@ -186,9 +187,9 @@ function GlobalControls({ preserveScaffold, setPreserveScaffold, similarity, set
                       }
                     }
                   }}
-                  className="w-3.5 h-3.5 rounded border-gray-300 text-[#00e6a0] focus:ring-[#00e6a0]"
+                  className="w-3.5 h-3.5 rounded border-gray-300 text-bx-mint focus:ring-[#00e6a0]"
                 />
-                <span className="text-xs text-gray-600">{label}</span>
+                <span className="text-sm text-gray-600">{label}</span>
               </label>
             )
           })}
@@ -311,12 +312,9 @@ export default function ScaffoldAnalyzer({ smiles, onRulesChange }) {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+      <div className="card p-5">
         <div className="flex items-center gap-3 text-gray-400">
-          <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
+          <BindXLogo variant="loading" size={20} />
           <span className="text-sm">Analyzing scaffold...</span>
         </div>
       </div>
@@ -326,7 +324,7 @@ export default function ScaffoldAnalyzer({ smiles, onRulesChange }) {
   if (error) {
     return (
       <div className="bg-white rounded-xl border border-red-100 shadow-sm p-5">
-        <p className="text-xs text-red-600">{error}</p>
+        <p className="text-sm text-red-600">{error}</p>
       </div>
     )
   }
@@ -337,14 +335,14 @@ export default function ScaffoldAnalyzer({ smiles, onRulesChange }) {
   const nBrics = analysis.brics_bond_count || 0
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="card overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Structural Analysis</h2>
+        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Structural Analysis</h2>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[#0f131d]">{nPositions} position{nPositions !== 1 ? 's' : ''}</span>
-          <span className="text-xs text-gray-300">|</span>
-          <span className="text-xs font-semibold text-red-500">{nBrics} BRICS</span>
+          <span className="text-sm font-semibold text-bx-light-text">{nPositions} position{nPositions !== 1 ? 's' : ''}</span>
+          <span className="text-sm text-gray-300">|</span>
+          <span className="text-sm font-semibold text-red-500">{nBrics} BRICS</span>
         </div>
       </div>
 

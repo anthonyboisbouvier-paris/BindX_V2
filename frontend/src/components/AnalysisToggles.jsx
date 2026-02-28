@@ -44,7 +44,7 @@ export default function AnalysisToggles({ values = DEFAULT_VALUES, onChange }) {
           className="w-4 h-4 rounded accent-[#00e6a0]"
         />
         <div>
-          <span className="font-medium text-[#0f131d] text-sm">All analyses</span>
+          <span className="font-medium text-bx-light-text text-sm">All analyses</span>
           <span className="text-xs text-gray-400 ml-2">(recommended)</span>
         </div>
       </label>
@@ -61,7 +61,7 @@ export default function AnalysisToggles({ values = DEFAULT_VALUES, onChange }) {
               className="w-3.5 h-3.5 mt-0.5 rounded accent-[#00e6a0]"
             />
             <div className="leading-tight">
-              <span className="text-sm font-medium text-[#0f131d]">{t.label}</span>
+              <span className="text-sm font-medium text-bx-light-text">{t.label}</span>
               <span className="text-xs text-gray-400 ml-1.5">{t.desc}</span>
             </div>
           </label>
