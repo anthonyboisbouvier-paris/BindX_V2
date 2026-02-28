@@ -192,6 +192,14 @@ function ScissorsIcon() {
   )
 }
 
+// Common solvent/ion residue names to exclude from ligand display
+const SOLVENT_RESNAMES = new Set([
+  'HOH','WAT','SO4','PO4','GOL','EDO','ACE','NAG','MAN','GAL',
+  'PEG','DMS','BME','CL','NA','MG','ZN','CA','K','MN','FE',
+  'CU','CO','NI','IOD','BR','FMT','ACT','TRS','MPD','PG4',
+  'EPE','MES','CIT','TAR','SUC','MLI','NH4','DOD','UNL',
+])
+
 // Props: pdbUrl, pdbData, selectedPocket, uniprotFeatures, height
 export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480 }) {
   const wrapperRef = useRef(null)
@@ -207,6 +215,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
   const [customColor, setCustomColor] = useState('#4a9eff')
   const [bgColor, setBgColor] = useState('#0f1923')
   const [pocketColor, setPocketColor] = useState('#f59e0b')
+  const [showLigand, setShowLigand] = useState(true)
   const [pocketRadius, setPocketRadius] = useState(5)
   const [pocketOpacity, setPocketOpacity] = useState(0.25)
   const [pocketStyle, setPocketStyle] = useState('sphere+stick')
@@ -541,6 +550,23 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       }
     }
 
+    // Ligand display — show co-crystallized small molecules as colored sticks
+    if (showLigand) {
+      viewer.addStyle(
+        { hetflag: true, not: { resn: [...SOLVENT_RESNAMES] }, model: protein },
+        {
+          stick: { colorscheme: 'default', radius: 0.2, opacity: 1.0 },
+          sphere: { colorscheme: 'default', radius: 0.4, opacity: 0.8 },
+        }
+      )
+    } else {
+      // Hide ligands explicitly
+      viewer.setStyle(
+        { hetflag: true, model: protein },
+        {}
+      )
+    }
+
     // Pocket overlay — harmonized sphere+stick vs surface
     if (selectedPocket) {
       const residues = selectedPocket.residues || []
@@ -653,7 +679,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     }
 
     viewer.render()
-  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites])
+  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, showLigand])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -1224,6 +1250,15 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pocketColor }} /> Pocket
           </span>
         )}
+        <button
+          onClick={() => setShowLigand(v => !v)}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
+            showLigand ? 'bg-emerald-900/30 border-emerald-500/50 text-emerald-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
+          }`}
+        >
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" style={{ opacity: showLigand ? 1 : 0.3 }} />
+          Ligand
+        </button>
         {selectedResidues.length > 0 && (
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" /> Selected
