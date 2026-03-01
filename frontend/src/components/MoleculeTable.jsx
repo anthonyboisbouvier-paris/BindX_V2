@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import InfoTip, { TIPS } from './InfoTip.jsx'
 
 // ---------------------------------------------------------------------------
@@ -369,6 +370,8 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation }) {
 //   onToggleBookmark — (molId) => void — undefined means disabled
 //   activeRowId      — id of molecule in detail panel (highlighted differently)
 // ---------------------------------------------------------------------------
+const ROW_HEIGHT = 44
+
 export default function MoleculeTable({
   molecules = [],
   columns = [],
@@ -380,6 +383,9 @@ export default function MoleculeTable({
   onCellPopup,
   onAnnotation,
   activeRowId = null,
+  onLoadMore,
+  hasMore = false,
+  totalCount,
 }) {
   const [sorts, setSorts] = useState([]) // [{key, dir}] max 2
   const [columnFilters, setColumnFilters] = useState({}) // {key: filterValue}
@@ -430,6 +436,43 @@ export default function MoleculeTable({
       return 0
     })
   }, [colFiltered, sorts])
+
+  // Virtual scrolling
+  const rowVirtualizer = useVirtualizer({
+    count: sorted.length,
+    getScrollElement: () => tableRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 15,
+  })
+
+  // Scroll to active row when activeRowId changes (e.g. prev/next in detail panel)
+  useEffect(() => {
+    if (!activeRowId) return
+    const idx = sorted.findIndex(m => m.id === activeRowId)
+    if (idx >= 0) rowVirtualizer.scrollToIndex(idx, { align: 'auto' })
+  }, [activeRowId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Infinite scroll: trigger onLoadMore when approaching bottom
+  useEffect(() => {
+    if (!onLoadMore || !hasMore) return
+    const virtualItems = rowVirtualizer.getVirtualItems()
+    if (!virtualItems.length) return
+    const lastItem = virtualItems[virtualItems.length - 1]
+    if (lastItem && lastItem.index >= sorted.length - 20) {
+      onLoadMore()
+    }
+  }, [rowVirtualizer.getVirtualItems(), onLoadMore, hasMore, sorted.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Grid template: checkbox(40px) + bookmark(32px) + data columns
+  const gridTemplate = useMemo(() => {
+    const colWidths = columns.map(col => col.type === 'action' ? '36px' : `${col.width || 80}px`)
+    return `40px 32px ${colWidths.join(' ')}`
+  }, [columns])
+
+  const minTableWidth = useMemo(
+    () => Math.max(600, columns.reduce((sum, c) => sum + (c.width || 80), 0) + 90),
+    [columns]
+  )
 
   // Header click: shift for multi-sort (max 2 levels)
   const handleHeaderClick = useCallback((col, e) => {
@@ -486,9 +529,12 @@ export default function MoleculeTable({
     )
   }
 
+  // Effective total for footer display
+  const displayTotal = totalCount != null ? totalCount : molecules.length
+
   return (
     <div className="flex flex-col card overflow-hidden">
-      {/* Scrollable table */}
+      {/* Scrollable virtual table */}
       <div
         ref={tableRef}
         className="overflow-auto"
@@ -499,124 +545,129 @@ export default function MoleculeTable({
           scrollbarColor: '#e5e7eb transparent',
         }}
       >
-        <table
-          className="w-full text-sm border-collapse"
-          style={{ minWidth: Math.max(600, columns.reduce((sum, c) => sum + (c.width || 80), 0) + 90) }}
-        >
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-gray-50 border-b border-gray-200">
-              {/* Checkbox column */}
-              <th className="w-9 px-2 py-2.5 text-left border-b border-gray-200" style={{ width: 40 }}>
-                <input
-                  type="checkbox"
-                  checked={allVisible}
-                  ref={el => { if (el) el.indeterminate = someVisible }}
-                  onChange={onSelectAll}
-                  className="accent-bx-mint cursor-pointer w-3.5 h-3.5"
-                  aria-label="Select all"
-                />
-              </th>
+        <div style={{ minWidth: minTableWidth }}>
+          {/* Header row — sticky */}
+          <div
+            className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200"
+            style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
+          >
+            {/* Checkbox column */}
+            <div className="px-2 py-2.5 flex items-center">
+              <input
+                type="checkbox"
+                checked={allVisible}
+                ref={el => { if (el) el.indeterminate = someVisible }}
+                onChange={onSelectAll}
+                className="accent-bx-mint cursor-pointer w-3.5 h-3.5"
+                aria-label="Select all"
+              />
+            </div>
 
-              {/* Bookmark column — click to toggle bookmark on all selected */}
-              <th className="px-1 py-2.5 border-b border-gray-200" style={{ width: 32 }}>
-                <button
-                  onClick={() => {
-                    if (!onToggleBookmark) return
-                    // Bookmark all selected, or all visible if none selected
-                    const targets = selectedIds.size > 0
-                      ? molecules.filter(m => selectedIds.has(m.id))
-                      : molecules
-                    const allBookmarked = targets.every(m => m.bookmarked)
-                    targets.forEach(m => {
-                      if (allBookmarked || !m.bookmarked) onToggleBookmark(m.id)
-                    })
-                  }}
-                  disabled={!onToggleBookmark}
-                  className={`p-0.5 rounded transition-colors mx-auto block ${onToggleBookmark ? 'hover:bg-yellow-50 cursor-pointer' : 'cursor-default opacity-50'}`}
-                  title={selectedIds.size > 0 ? `Toggle bookmark on ${selectedIds.size} selected` : 'Toggle bookmark on all'}
+            {/* Bookmark column header */}
+            <div className="px-1 py-2.5 flex items-center justify-center">
+              <button
+                onClick={() => {
+                  if (!onToggleBookmark) return
+                  const targets = selectedIds.size > 0
+                    ? molecules.filter(m => selectedIds.has(m.id))
+                    : molecules
+                  const allBookmarked = targets.every(m => m.bookmarked)
+                  targets.forEach(m => {
+                    if (allBookmarked || !m.bookmarked) onToggleBookmark(m.id)
+                  })
+                }}
+                disabled={!onToggleBookmark}
+                className={`p-0.5 rounded transition-colors ${onToggleBookmark ? 'hover:bg-yellow-50 cursor-pointer' : 'cursor-default opacity-50'}`}
+                title={selectedIds.size > 0 ? `Toggle bookmark on ${selectedIds.size} selected` : 'Toggle bookmark on all'}
+              >
+                <svg className="w-3.5 h-3.5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Data column headers */}
+            {columns.map(col => {
+              const dir = getSortDir(col.key)
+              const rank = getSortRank(col.key)
+              const isActive = dir !== null
+              const hasFilter = columnFilters[col.key] && columnFilters[col.key] !== ''
+              const isFilterable = col.type === 'number' || col.type === 'text' || col.type === 'boolean' || col.type === 'smiles'
+
+              if (col.type === 'action') {
+                return <div key={col.key} className="px-1 py-2.5" />
+              }
+
+              return (
+                <div
+                  key={col.key}
+                  className={`px-3 py-2.5 font-semibold uppercase tracking-wide text-[10px] whitespace-nowrap select-none relative flex items-center ${
+                    col.type === 'number' ? 'justify-end' : 'justify-start'
+                  } ${col.sortable ? 'cursor-pointer transition-colors' : ''} ${
+                    isActive ? 'text-bx-light-text bg-blue-50/50' : 'text-gray-500 hover:text-bx-light-text hover:bg-gray-100'
+                  }`}
+                  onClick={e => handleHeaderClick(col, e)}
+                  title={col.sortable ? 'Click to sort · Shift+click to add sort level' : col.label}
                 >
-                  <svg className="w-3.5 h-3.5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                      d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                  </svg>
-                </button>
-              </th>
-
-              {/* Data columns */}
-              {columns.map(col => {
-                const dir = getSortDir(col.key)
-                const rank = getSortRank(col.key)
-                const isActive = dir !== null
-                const hasFilter = columnFilters[col.key] && columnFilters[col.key] !== ''
-                const isFilterable = col.type === 'number' || col.type === 'text' || col.type === 'boolean' || col.type === 'smiles'
-
-                // Action column has no header label
-                if (col.type === 'action') {
-                  return <th key={col.key} className="w-9 px-1 py-2.5 border-b border-gray-200" style={{ width: 36 }} />
-                }
-
-                return (
-                  <th
-                    key={col.key}
-                    className={`px-3 py-2.5 border-b border-gray-200 font-semibold uppercase tracking-wide text-[10px] whitespace-nowrap select-none relative ${
-                      col.type === 'number' ? 'text-right' : 'text-left'
-                    } ${col.sortable ? 'cursor-pointer transition-colors' : ''} ${
-                      isActive ? 'text-bx-light-text bg-blue-50/50' : 'text-gray-500 hover:text-bx-light-text hover:bg-gray-100'
-                    }`}
-                    style={{ minWidth: col.width || 80 }}
-                    onClick={e => handleHeaderClick(col, e)}
-                    title={col.sortable ? 'Click to sort · Shift+click to add sort level' : col.label}
-                  >
-                    <span className={`inline-flex items-center gap-1 ${col.type === 'number' ? 'flex-row-reverse' : ''}`}>
-                      {col.label}
-                      {col.unit && (
-                        <span className="font-normal text-gray-300 text-[9px]">({col.unit})</span>
-                      )}
-                      {TIPS[col.key] && <InfoTip text={TIPS[col.key]} size="xs" />}
-                      {col.sortable && <SortIcon direction={dir} rank={rank} />}
-                      {isFilterable && (
-                        <button
-                          onClick={e => { e.stopPropagation(); setShowFilterCol(prev => prev === col.key ? null : col.key) }}
-                          className={`ml-0.5 p-0.5 rounded transition-colors ${hasFilter ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500'}`}
-                          title="Filter column"
-                        >
-                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                          </svg>
-                        </button>
-                      )}
-                    </span>
-                    {/* Column filter dropdown */}
-                    {showFilterCol === col.key && (
-                      <div
-                        className="absolute top-full left-0 z-20 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5"
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <input
-                          type="text"
-                          autoFocus
-                          value={columnFilters[col.key] || ''}
-                          onChange={e => setColumnFilters(prev => ({ ...prev, [col.key]: e.target.value }))}
-                          onKeyDown={e => { if (e.key === 'Escape') setShowFilterCol(null) }}
-                          placeholder={`Filter ${col.label}…`}
-                          className="text-xs px-2 py-1 border border-gray-200 rounded w-28 outline-none focus:border-blue-300"
-                        />
-                        {hasFilter && (
-                          <button
-                            onClick={() => setColumnFilters(prev => { const n = { ...prev }; delete n[col.key]; return n })}
-                            className="text-[10px] text-red-400 hover:text-red-600 mt-0.5 block"
-                          >Clear</button>
-                        )}
-                      </div>
+                  <span className={`inline-flex items-center gap-1 ${col.type === 'number' ? 'flex-row-reverse' : ''}`}>
+                    {col.label}
+                    {col.unit && (
+                      <span className="font-normal text-gray-300 text-[9px]">({col.unit})</span>
                     )}
-                  </th>
-                )
-              })}
-            </tr>
-          </thead>
+                    {TIPS[col.key] && <InfoTip text={TIPS[col.key]} size="xs" />}
+                    {col.sortable && <SortIcon direction={dir} rank={rank} />}
+                    {isFilterable && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setShowFilterCol(prev => prev === col.key ? null : col.key) }}
+                        className={`ml-0.5 p-0.5 rounded transition-colors ${hasFilter ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500'}`}
+                        title="Filter column"
+                      >
+                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                        </svg>
+                      </button>
+                    )}
+                  </span>
+                  {/* Column filter dropdown */}
+                  {showFilterCol === col.key && (
+                    <div
+                      className="absolute top-full left-0 z-20 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        value={columnFilters[col.key] || ''}
+                        onChange={e => setColumnFilters(prev => ({ ...prev, [col.key]: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Escape') setShowFilterCol(null) }}
+                        placeholder={`Filter ${col.label}…`}
+                        className="text-xs px-2 py-1 border border-gray-200 rounded w-28 outline-none focus:border-blue-300"
+                      />
+                      {hasFilter && (
+                        <button
+                          onClick={() => setColumnFilters(prev => { const n = { ...prev }; delete n[col.key]; return n })}
+                          className="text-[10px] text-red-400 hover:text-red-600 mt-0.5 block"
+                        >Clear</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
 
-          <tbody className="divide-y divide-gray-50">
-            {sorted.map((mol, idx) => {
+          {/* Virtualized body */}
+          <div
+            style={{
+              height: `${rowVirtualizer.getTotalSize()}px`,
+              width: '100%',
+              position: 'relative',
+            }}
+          >
+            {rowVirtualizer.getVirtualItems().map(virtualRow => {
+              const mol = sorted[virtualRow.index]
+              const idx = virtualRow.index
               const isSelected = selectedIds.has(mol.id)
               const isActive = activeRowId === mol.id
               const isBookmarked = mol.bookmarked
@@ -628,19 +679,29 @@ export default function MoleculeTable({
               const isInvalidated = !!mol.invalidated
 
               return (
-                <tr
+                <div
                   key={mol.id}
-                  className={`cursor-pointer transition-colors duration-100 group ${rowBg} hover:bg-blue-50/60 ${
-                    isInvalidated ? 'border-l-[3px] border-red-300' :
-                    isSelected ? 'border-l-[3px] border-bx-surface' :
-                    isBookmarked ? 'border-l-2 border-yellow-300' :
-                    'border-l-2 border-transparent'
+                  className={`cursor-pointer transition-colors duration-100 group ${rowBg} hover:bg-blue-50/60 border-b border-gray-50 ${
+                    isInvalidated ? 'border-l-[3px] border-l-red-300' :
+                    isSelected ? 'border-l-[3px] border-l-bx-surface' :
+                    isBookmarked ? 'border-l-2 border-l-yellow-300' :
+                    'border-l-2 border-l-transparent'
                   }`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: gridTemplate,
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
                   onClick={() => onRowClick && onRowClick(mol)}
                 >
                   {/* Checkbox */}
-                  <td
-                    className="px-2 py-2 w-9"
+                  <div
+                    className="px-2 flex items-center"
                     onClick={e => e.stopPropagation()}
                   >
                     <input
@@ -650,11 +711,11 @@ export default function MoleculeTable({
                       className="accent-bx-mint cursor-pointer w-3.5 h-3.5"
                       aria-label={`Select ${mol.name || mol.id}`}
                     />
-                  </td>
+                  </div>
 
                   {/* Bookmark star */}
-                  <td
-                    className="px-1 py-2 text-center w-8"
+                  <div
+                    className="px-1 flex items-center justify-center"
                     onClick={e => e.stopPropagation()}
                   >
                     <button
@@ -676,7 +737,7 @@ export default function MoleculeTable({
                           d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
                       </svg>
                     </button>
-                  </td>
+                  </div>
 
                   {/* Data cells */}
                   {columns.map(col => {
@@ -689,7 +750,7 @@ export default function MoleculeTable({
                     // Action column — detail link icon
                     if (col.type === 'action') {
                       return (
-                        <td key={col.key} className="px-1 py-2 text-center w-9">
+                        <div key={col.key} className="px-1 flex items-center justify-center">
                           <button
                             onClick={e => { e.stopPropagation(); onRowClick && onRowClick(mol) }}
                             className="p-0.5 rounded hover:bg-blue-50 text-gray-300 hover:text-blue-500 transition-colors"
@@ -700,28 +761,39 @@ export default function MoleculeTable({
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                             </svg>
                           </button>
-                        </td>
+                        </div>
                       )
                     }
 
                     return (
-                      <td
+                      <div
                         key={col.key}
-                        className={`px-3 py-2 ${col.type === 'number' ? 'text-right tabular-nums' : 'text-left'} ${colorClasses.cell} ${hasPopup ? 'cursor-pointer hover:bg-blue-50/80 transition-colors' : ''} ${mol.invalidated && col.key !== 'invalidated' ? 'opacity-40' : ''}`}
+                        className={`px-3 flex items-center max-h-[${ROW_HEIGHT}px] overflow-hidden ${col.type === 'number' ? 'justify-end tabular-nums' : 'justify-start'} ${colorClasses.cell} ${hasPopup ? 'cursor-pointer hover:bg-blue-50/80 transition-colors' : ''} ${mol.invalidated && col.key !== 'invalidated' ? 'opacity-40' : ''}`}
                         onClick={hasPopup ? (e) => { e.stopPropagation(); onCellPopup(col.popup, mol) } : undefined}
                         title={hasPopup ? `Click for ${col.label} details` : undefined}
                       >
-                        <span className={hasPopup ? 'underline decoration-dotted underline-offset-2 decoration-gray-300' : ''}>
+                        <span className={`text-sm ${hasPopup ? 'underline decoration-dotted underline-offset-2 decoration-gray-300' : ''}`}>
                           <CellValue col={col} value={value} colorClasses={colorClasses} mol={mol} onAnnotation={onAnnotation} />
                         </span>
-                      </td>
+                      </div>
                     )
                   })}
-                </tr>
+                </div>
               )
             })}
-          </tbody>
-        </table>
+          </div>
+
+          {/* Loading spinner for infinite scroll */}
+          {hasMore && (
+            <div className="flex items-center justify-center py-3 gap-2">
+              <svg className="animate-spin h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span className="text-xs text-gray-400">Loading more...</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Footer */}
@@ -729,8 +801,8 @@ export default function MoleculeTable({
         <span className="text-sm text-gray-400">
           Showing{' '}
           <strong className="text-gray-600 tabular-nums">{sorted.length}</strong>
-          {sorted.length !== molecules.length && (
-            <>{' '}of{' '}<strong className="text-gray-600 tabular-nums">{molecules.length}</strong></>
+          {sorted.length !== displayTotal && (
+            <>{' '}of{' '}<strong className="text-gray-600 tabular-nums">{displayTotal.toLocaleString()}</strong></>
           )}
           {' '}molecules
           {Object.keys(columnFilters).filter(k => columnFilters[k]).length > 0 && (

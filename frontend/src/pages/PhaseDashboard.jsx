@@ -825,6 +825,12 @@ export default function PhaseDashboard() {
     archiveRun,
     importFile,
     importDatabase,
+    moleculeTotal,
+    moleculeHasMore,
+    moleculeStats,
+    loadMoreMolecules,
+    updateServerSort,
+    updateServerFilters,
   } = useWorkspace()
 
   const { addToast } = useToast()
@@ -945,24 +951,27 @@ export default function PhaseDashboard() {
     [visibleKeys]
   )
 
-  // Bookmarked count (live)
+  // Server mode threshold: use server-side filtering when total > 5000
+  const useServerFilters = moleculeTotal > 5000
+
+  // Bookmarked count — use server stats if in server mode, else compute locally
   const bookmarkedCount = useMemo(
-    () => flatMolecules.filter(m => m.bookmarked).length,
-    [flatMolecules]
+    () => useServerFilters ? (moleculeStats.bookmarked || 0) : flatMolecules.filter(m => m.bookmarked).length,
+    [useServerFilters, moleculeStats.bookmarked, flatMolecules]
   )
 
-  // Live stats
+  // Live stats — use server stats for totals when in server mode
   const liveStats = useMemo(() => {
     if (!currentPhase) return { total_molecules: 0, bookmarked: 0, runs_completed: 0, runs_running: 0 }
     const completedRuns = currentPhaseRuns.filter(r => r.status === 'completed').length
     const runningRuns = currentPhaseRuns.filter(r => r.status === 'running' || r.status === 'created').length
     return {
-      total_molecules: flatMolecules.length,
+      total_molecules: useServerFilters ? moleculeTotal : flatMolecules.length,
       bookmarked: bookmarkedCount,
       runs_completed: completedRuns,
       runs_running: runningRuns,
     }
-  }, [currentPhase, currentPhaseRuns, flatMolecules, bookmarkedCount])
+  }, [currentPhase, currentPhaseRuns, flatMolecules, bookmarkedCount, useServerFilters, moleculeTotal])
 
   // Number of active filters
   const [activeFilterCount, setActiveFilterCount] = useState(0)
@@ -1261,6 +1270,9 @@ export default function PhaseDashboard() {
         columns={availableColumns}
         onFilteredChange={handleFilteredChange}
         onFilterCountChange={setActiveFilterCount}
+        serverMode={useServerFilters}
+        onServerFilterChange={updateServerFilters}
+        totalFromServer={useServerFilters ? moleculeTotal : undefined}
       />
 
       {/* Table + Detail panel split layout */}
@@ -1277,9 +1289,10 @@ export default function PhaseDashboard() {
               />
               <span className="text-sm text-gray-400 tabular-nums flex items-center gap-1.5">
                 {moleculesLoading && <BindXLogo variant="loading" size={20} />}
-                {filteredMolecules.length !== flatMolecules.length
-                  ? `${filteredMolecules.length} of ${flatMolecules.length} molecules`
-                  : `${flatMolecules.length} molecules`}
+                {filteredMolecules.length !== moleculeTotal
+                  ? `${filteredMolecules.length} of ${moleculeTotal.toLocaleString()} molecules`
+                  : `${moleculeTotal.toLocaleString()} molecules`}
+                {moleculeHasMore && <span className="text-[10px] text-gray-300">(scroll for more)</span>}
               </span>
             </div>
           </div>
@@ -1295,6 +1308,9 @@ export default function PhaseDashboard() {
             onCellPopup={handleCellPopup}
             onAnnotation={isFrozen ? undefined : handleAnnotation}
             activeRowId={selectedMolecule?.id || null}
+            onLoadMore={moleculeHasMore ? loadMoreMolecules : undefined}
+            hasMore={moleculeHasMore}
+            totalCount={moleculeTotal}
           />
         </div>
 
@@ -1476,9 +1492,7 @@ export default function PhaseDashboard() {
 // ---------------------------------------------------------------------------
 // FilterBar wrapper that also tracks active filter count
 // ---------------------------------------------------------------------------
-function FilterBarWithCount({ molecules, columns, onFilteredChange, onFilterCountChange }) {
-  const [activeQuickFilters] = useState(new Set())
-
+function FilterBarWithCount({ molecules, columns, onFilteredChange, onFilterCountChange, serverMode, onServerFilterChange, totalFromServer }) {
   const handleFilteredChange = useCallback((filtered) => {
     onFilteredChange(filtered)
     // Estimate filter count via difference (rough heuristic)
@@ -1490,6 +1504,9 @@ function FilterBarWithCount({ molecules, columns, onFilteredChange, onFilterCoun
       molecules={molecules}
       columns={columns}
       onFilteredChange={handleFilteredChange}
+      serverMode={serverMode}
+      onServerFilterChange={onServerFilterChange}
+      totalFromServer={totalFromServer}
     />
   )
 }

@@ -1,16 +1,19 @@
 """
 BindX V9 — Molecule router.
 
-4 endpoints: list molecules (paginated), get molecule, bookmark, bookmark batch.
+Endpoints: list (cursor+offset), stats, get, bookmark, bookmark batch.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, func, literal, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,15 +26,46 @@ from models_v9 import (
     PhaseORM_V9,
     ProjectORM_V9,
 )
-from schemas_v9 import BookmarkRequest, MoleculeListResponse, MoleculeResponse
+from schemas_v9 import (
+    BookmarkRequest,
+    MoleculeListResponse,
+    MoleculeResponse,
+    MoleculeStatsResponse,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Direct columns on the molecules table that can be sorted
 VALID_SORT_FIELDS = {
     "created_at", "smiles", "name", "bookmarked", "canonical_smiles",
 }
+
+# Property-based sort fields — resolved via lateral join on molecule_properties
+PROPERTY_SORT_FIELDS = {
+    "docking_score", "QED", "logP", "MW", "TPSA", "HBD", "HBA",
+    "cnn_score", "cnn_affinity", "composite_score",
+}
+
+
+# ---------------------------------------------------------------------------
+# Cursor helpers
+# ---------------------------------------------------------------------------
+
+def _encode_cursor(sort_value, mol_id: UUID) -> str:
+    """Encode (sort_value, id) into an opaque base64 cursor."""
+    payload = json.dumps({"v": sort_value, "id": str(mol_id)})
+    return base64.urlsafe_b64encode(payload.encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple:
+    """Decode cursor → (sort_value, UUID)."""
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(cursor))
+        return payload["v"], UUID(payload["id"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
 
 
 # ---------------------------------------------------------------------------
@@ -123,50 +157,166 @@ async def list_molecules(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
     bookmarked_only: bool = Query(False),
+    ai_generated_only: bool = Query(False),
+    search: Optional[str] = Query(None, description="Search name or SMILES"),
+    cursor: Optional[str] = Query(None, description="Keyset pagination cursor"),
     user_id: str = Depends(require_v9_user),
     db: AsyncSession = Depends(get_v9_db),
 ):
-    """List molecules for a phase with properties, sorted and paginated."""
+    """List molecules for a phase with properties, sorted and paginated.
+
+    Supports keyset cursor pagination (preferred for large datasets) and
+    offset-based pagination (fallback).
+    """
     await _verify_phase_ownership(phase_id, user_id, db)
 
-    # Sanitize sort field
-    if sort_by not in VALID_SORT_FIELDS:
-        sort_by = "created_at"
+    # --- Base filter ---
+    base_where = [MoleculeORM_V9.phase_id == phase_id]
+    if bookmarked_only:
+        base_where.append(MoleculeORM_V9.bookmarked == True)  # noqa: E712
+    if ai_generated_only:
+        base_where.append(MoleculeORM_V9.ai_generated == True)  # noqa: E712
+    if search:
+        pattern = f"%{search}%"
+        base_where.append(
+            or_(
+                MoleculeORM_V9.name.ilike(pattern),
+                MoleculeORM_V9.canonical_smiles.ilike(pattern),
+            )
+        )
 
-    # Total count
+    # --- Total count (with filters applied) ---
     count_stmt = (
         select(func.count())
         .select_from(MoleculeORM_V9)
-        .where(MoleculeORM_V9.phase_id == phase_id)
+        .where(*base_where)
     )
-    if bookmarked_only:
-        count_stmt = count_stmt.where(MoleculeORM_V9.bookmarked == True)  # noqa: E712
     total_result = await db.execute(count_stmt)
     total = total_result.scalar() or 0
 
-    # Query with properties
-    sort_col = getattr(MoleculeORM_V9, sort_by, MoleculeORM_V9.created_at)
-    order = sort_col.desc() if sort_dir == "desc" else sort_col.asc()
+    # --- Determine sort column ---
+    is_property_sort = sort_by in PROPERTY_SORT_FIELDS
+    if not is_property_sort and sort_by not in VALID_SORT_FIELDS:
+        sort_by = "created_at"
 
-    stmt = (
-        select(MoleculeORM_V9)
-        .where(MoleculeORM_V9.phase_id == phase_id)
-        .options(selectinload(MoleculeORM_V9.properties))
-        .order_by(order)
-        .offset(offset)
-        .limit(limit)
-    )
-    if bookmarked_only:
-        stmt = stmt.where(MoleculeORM_V9.bookmarked == True)  # noqa: E712
+    if is_property_sort:
+        # Lateral join to get the property value for sorting
+        prop_sub = (
+            select(
+                MoleculePropertyORM_V9.property_value["value"].as_float().label("prop_val")
+            )
+            .where(
+                MoleculePropertyORM_V9.molecule_id == MoleculeORM_V9.id,
+                MoleculePropertyORM_V9.property_name == sort_by,
+            )
+            .limit(1)
+            .correlate(MoleculeORM_V9)
+            .scalar_subquery()
+        )
+        sort_expr = prop_sub
+        if sort_dir == "desc":
+            order = sort_expr.desc().nullslast()
+        else:
+            order = sort_expr.asc().nullslast()
+
+        # For property sorts, fall back to offset pagination (cursor is complex with subquery)
+        stmt = (
+            select(MoleculeORM_V9)
+            .where(*base_where)
+            .options(selectinload(MoleculeORM_V9.properties))
+            .order_by(order, MoleculeORM_V9.id)
+            .offset(offset)
+            .limit(limit + 1)  # fetch one extra to detect has_more
+        )
+    else:
+        # Direct column sort — supports cursor pagination
+        sort_col = getattr(MoleculeORM_V9, sort_by, MoleculeORM_V9.created_at)
+
+        if sort_dir == "desc":
+            order = sort_col.desc()
+        else:
+            order = sort_col.asc()
+
+        stmt = (
+            select(MoleculeORM_V9)
+            .where(*base_where)
+            .options(selectinload(MoleculeORM_V9.properties))
+        )
+
+        # Apply cursor if provided
+        if cursor:
+            cursor_val, cursor_id = _decode_cursor(cursor)
+            if sort_dir == "desc":
+                stmt = stmt.where(
+                    or_(
+                        sort_col < cursor_val,
+                        (sort_col == cursor_val) & (MoleculeORM_V9.id < cursor_id),
+                    )
+                )
+            else:
+                stmt = stmt.where(
+                    or_(
+                        sort_col > cursor_val,
+                        (sort_col == cursor_val) & (MoleculeORM_V9.id > cursor_id),
+                    )
+                )
+        else:
+            stmt = stmt.offset(offset)
+
+        stmt = stmt.order_by(order, MoleculeORM_V9.id).limit(limit + 1)
 
     result = await db.execute(stmt)
-    mols = result.scalars().all()
+    mols = list(result.scalars().all())
+
+    # Detect has_more and compute next_cursor
+    has_more = len(mols) > limit
+    if has_more:
+        mols = mols[:limit]
+
+    next_cursor = None
+    if has_more and mols and not is_property_sort:
+        last = mols[-1]
+        last_val = getattr(last, sort_by, last.created_at)
+        # Convert datetime to ISO string for JSON serialization
+        if hasattr(last_val, 'isoformat'):
+            last_val = last_val.isoformat()
+        next_cursor = _encode_cursor(last_val, last.id)
 
     return MoleculeListResponse(
         molecules=[_mol_to_response(m) for m in mols],
         total=total,
         offset=offset,
         limit=limit,
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.get(
+    "/phases/{phase_id}/molecules/stats",
+    response_model=MoleculeStatsResponse,
+)
+async def molecule_stats(
+    phase_id: UUID,
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """Lightweight stats for a phase: total, bookmarked, ai_generated."""
+    await _verify_phase_ownership(phase_id, user_id, db)
+
+    stmt = select(
+        func.count().label("total"),
+        func.count().filter(MoleculeORM_V9.bookmarked == True).label("bookmarked"),  # noqa: E712
+        func.count().filter(MoleculeORM_V9.ai_generated == True).label("ai_generated"),  # noqa: E712
+    ).where(MoleculeORM_V9.phase_id == phase_id)
+
+    result = await db.execute(stmt)
+    row = result.one()
+
+    return MoleculeStatsResponse(
+        total=row.total,
+        bookmarked=row.bookmarked,
+        ai_generated=row.ai_generated,
     )
 
 

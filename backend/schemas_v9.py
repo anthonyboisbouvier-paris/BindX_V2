@@ -283,6 +283,14 @@ class MoleculeListResponse(BaseModel):
     total: int
     offset: int = 0
     limit: int = 50
+    next_cursor: Optional[str] = None
+    has_more: bool = False
+
+
+class MoleculeStatsResponse(BaseModel):
+    total: int = 0
+    bookmarked: int = 0
+    ai_generated: int = 0
 
 
 class BookmarkRequest(BaseModel):

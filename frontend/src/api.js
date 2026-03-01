@@ -446,6 +446,11 @@ export async function v9ListMolecules(phaseId, params = {}) {
   return response.data
 }
 
+export async function v9MoleculeStats(phaseId) {
+  const response = await apiClient.get(`/v9/phases/${phaseId}/molecules/stats`)
+  return response.data
+}
+
 export async function v9GetMolecule(moleculeId) {
   const response = await apiClient.get(`/v9/molecules/${moleculeId}`)
   return response.data

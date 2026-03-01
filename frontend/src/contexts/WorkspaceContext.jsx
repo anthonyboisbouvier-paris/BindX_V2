@@ -18,6 +18,7 @@ import {
   v9ImportFile,
   v9ImportDatabase,
   v9ListMolecules,
+  v9MoleculeStats,
   v9BookmarkMolecule,
   v9BookmarkBatch,
 } from '../api'
@@ -47,11 +48,20 @@ export function WorkspaceProvider({ children }) {
   // --- Phase status overrides (local until API-backed) ---
   const [phaseStatusOverrides, setPhaseStatusOverrides] = useState({})
 
-  // --- Runs & Molecules from API ---
+  // --- Runs from API ---
   const [phaseRuns, setPhaseRuns] = useState([])
-  const [apiMolecules, setApiMolecules] = useState([])
   const [runsLoading, setRunsLoading] = useState(false)
+
+  // --- Paginated molecule store ---
+  const [moleculePages, setMoleculePages] = useState([])   // [[...], [...]]
+  const [moleculeTotal, setMoleculeTotal] = useState(0)
+  const [moleculeNextCursor, setMoleculeNextCursor] = useState(null)
+  const [moleculeHasMore, setMoleculeHasMore] = useState(false)
+  const [moleculeStats, setMoleculeStats] = useState({ total: 0, bookmarked: 0, ai_generated: 0 })
   const [moleculesLoading, setMoleculesLoading] = useState(false)
+  const [serverSort, setServerSort] = useState({ sort_by: 'created_at', sort_dir: 'desc' })
+  const [serverFilters, setServerFilters] = useState({ search: '', bookmarked_only: false })
+  const loadMoreLockRef = useRef(false)
 
   // --- Fetch projects from API ---
   const refreshProjects = useCallback(async () => {
@@ -148,7 +158,7 @@ export function WorkspaceProvider({ children }) {
     return result
   }, [isAuthenticated, refreshProjects])
 
-  // --- Runs & Molecules API actions ---
+  // --- Runs API actions ---
   const refreshRuns = useCallback(async (pId) => {
     const id = pId || currentPhaseId
     if (!id || !isAuthenticated) return
@@ -163,19 +173,78 @@ export function WorkspaceProvider({ children }) {
     }
   }, [currentPhaseId, isAuthenticated])
 
-  const refreshMolecules = useCallback(async (pId) => {
+  // --- Molecules: paginated fetch ---
+  const refreshMolecules = useCallback(async (pId, { append = false, cursor: cursorArg } = {}) => {
     const id = pId || currentPhaseId
     if (!id || !isAuthenticated) return
     try {
-      setMoleculesLoading(true)
-      const data = await v9ListMolecules(id)
-      setApiMolecules(Array.isArray(data) ? data : data.molecules || [])
+      if (!append) setMoleculesLoading(true)
+
+      const params = {
+        sort_by: serverSort.sort_by,
+        sort_dir: serverSort.sort_dir,
+        limit: 200,
+      }
+      if (serverFilters.search) params.search = serverFilters.search
+      if (serverFilters.bookmarked_only) params.bookmarked_only = true
+      if (append && cursorArg) {
+        params.cursor = cursorArg
+      }
+
+      const data = await v9ListMolecules(id, params)
+      const mols = Array.isArray(data) ? data : data.molecules || []
+
+      if (append) {
+        setMoleculePages(prev => [...prev, mols])
+      } else {
+        setMoleculePages([mols])
+      }
+
+      setMoleculeTotal(data.total || mols.length)
+      setMoleculeNextCursor(data.next_cursor || null)
+      setMoleculeHasMore(data.has_more || false)
     } catch (err) {
       console.warn('[WorkspaceContext] Failed to fetch molecules:', err.message)
     } finally {
       setMoleculesLoading(false)
+      loadMoreLockRef.current = false
+    }
+  }, [currentPhaseId, isAuthenticated, serverSort, serverFilters])
+
+  // --- Stats fetch (lightweight) ---
+  const refreshStats = useCallback(async (pId) => {
+    const id = pId || currentPhaseId
+    if (!id || !isAuthenticated) return
+    try {
+      const stats = await v9MoleculeStats(id)
+      setMoleculeStats(stats)
+    } catch (err) {
+      console.warn('[WorkspaceContext] Failed to fetch stats:', err.message)
     }
   }, [currentPhaseId, isAuthenticated])
+
+  // --- Load more (infinite scroll trigger) ---
+  const loadMoreMolecules = useCallback(() => {
+    if (loadMoreLockRef.current || !moleculeHasMore || !moleculeNextCursor) return
+    loadMoreLockRef.current = true
+    refreshMolecules(currentPhaseId, { append: true, cursor: moleculeNextCursor })
+  }, [moleculeHasMore, moleculeNextCursor, currentPhaseId, refreshMolecules])
+
+  // --- Server sort/filter updates (trigger fresh page 1) ---
+  const updateServerSort = useCallback((sort_by, sort_dir) => {
+    setServerSort({ sort_by, sort_dir })
+  }, [])
+
+  const updateServerFilters = useCallback((filters) => {
+    setServerFilters(prev => ({ ...prev, ...filters }))
+  }, [])
+
+  // Re-fetch page 1 when sort or filters change
+  useEffect(() => {
+    if (currentPhaseId && isAuthenticated) {
+      refreshMolecules(currentPhaseId)
+    }
+  }, [serverSort, serverFilters]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const createRun = useCallback(async (phaseId, data) => {
     if (!isAuthenticated) return null
@@ -218,21 +287,28 @@ export function WorkspaceProvider({ children }) {
 
     const interval = setInterval(() => {
       refreshRuns()
-      refreshMolecules()
+      // During active runs: refresh stats (lightweight) + page 1 only
+      refreshStats()
+      refreshMolecules(currentPhaseId)
     }, 5000)
     return () => clearInterval(interval)
-  }, [isAuthenticated, currentPhaseId, phaseRuns, refreshRuns, refreshMolecules])
+  }, [isAuthenticated, currentPhaseId, phaseRuns, refreshRuns, refreshMolecules, refreshStats])
 
   // --- Fetch runs & molecules when phase changes ---
   useEffect(() => {
     if (currentPhaseId && isAuthenticated) {
       refreshRuns(currentPhaseId)
       refreshMolecules(currentPhaseId)
+      refreshStats(currentPhaseId)
     } else {
       setPhaseRuns([])
-      setApiMolecules([])
+      setMoleculePages([])
+      setMoleculeTotal(0)
+      setMoleculeNextCursor(null)
+      setMoleculeHasMore(false)
+      setMoleculeStats({ total: 0, bookmarked: 0, ai_generated: 0 })
     }
-  }, [currentPhaseId, isAuthenticated])
+  }, [currentPhaseId, isAuthenticated]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Derived data ---
   const currentProject = useMemo(
@@ -251,14 +327,15 @@ export function WorkspaceProvider({ children }) {
     return currentCampaign.phases?.find(p => p.id === currentPhaseId) || null
   }, [currentCampaign, currentPhaseId])
 
-  // Molecules from API
+  // Flatten all pages into a single array, applying bookmark overrides
   const phaseMolecules = useMemo(() => {
     if (!currentPhase) return []
-    return apiMolecules.map(m => ({
+    const allMols = moleculePages.flat()
+    return allMols.map(m => ({
       ...m,
       bookmarked: bookmarkOverrides[m.id] !== undefined ? bookmarkOverrides[m.id] : m.bookmarked,
     }))
-  }, [currentPhase, apiMolecules, bookmarkOverrides])
+  }, [currentPhase, moleculePages, bookmarkOverrides])
 
   // Runs from API
   const currentPhaseRuns = useMemo(() => {
@@ -284,6 +361,9 @@ export function WorkspaceProvider({ children }) {
     setCurrentPhaseId(phaseId)
     setSelectedMoleculeIds(new Set())
     setBookmarkOverrides({})
+    // Reset server state for new phase
+    setServerSort({ sort_by: 'created_at', sort_dir: 'desc' })
+    setServerFilters({ search: '', bookmarked_only: false })
   }, [])
 
   // --- Selection actions ---
@@ -367,6 +447,13 @@ export function WorkspaceProvider({ children }) {
     runsLoading,
     moleculesLoading,
 
+    // Paginated molecule metadata
+    moleculeTotal,
+    moleculeHasMore,
+    moleculeStats,
+    serverSort,
+    serverFilters,
+
     // CRUD
     createProject,
     updateProject,
@@ -405,15 +492,21 @@ export function WorkspaceProvider({ children }) {
     importDatabase,
     refreshRuns,
     refreshMolecules,
+    loadMoreMolecules,
+    updateServerSort,
+    updateServerFilters,
+    refreshStats,
   }), [
     projects, currentProject, currentCampaign, currentPhase, phaseMolecules, currentPhaseRuns,
     loading, error, runsLoading, moleculesLoading,
+    moleculeTotal, moleculeHasMore, moleculeStats, serverSort, serverFilters,
     createProject, updateProject, deleteProject, createCampaign, updateCampaign, createPhase, refreshProjects,
     selectProject, selectCampaign, selectPhase,
     selectedMoleculeIds, toggleSelection, selectAll, selectNone, selectBookmarked,
     toggleBookmark, bookmarkSelected,
     freezePhase, unfreezePhase, getPhaseStatus,
     createRun, cancelRun, archiveRun, importFile, importDatabase, refreshRuns, refreshMolecules,
+    loadMoreMolecules, updateServerSort, updateServerFilters, refreshStats,
   ])
 
   return (

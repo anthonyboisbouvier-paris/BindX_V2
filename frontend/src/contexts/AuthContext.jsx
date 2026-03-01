@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import apiClient from '../api'
 
@@ -9,17 +9,23 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Axios interceptor: inject Supabase access_token as Bearer header
+  // Ref updated synchronously during render — always has the latest session
+  // This avoids the race condition where child effects fire before parent effects,
+  // causing API calls to go out without the Bearer token.
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+
+  // Axios interceptor: reads from ref (always current), registered once
   useEffect(() => {
     const interceptorId = apiClient.interceptors.request.use((config) => {
-      const token = session?.access_token
+      const token = sessionRef.current?.access_token
       if (token) {
         config.headers.Authorization = `Bearer ${token}`
       }
       return config
     })
     return () => apiClient.interceptors.request.eject(interceptorId)
-  }, [session])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initialize session and listen for auth changes
   useEffect(() => {

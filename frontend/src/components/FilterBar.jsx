@@ -164,12 +164,20 @@ function InlineFilterConfig({ col, molecules, onApply, onCancel }) {
 // ---------------------------------------------------------------------------
 // Main FilterBar
 // ---------------------------------------------------------------------------
-export default function FilterBar({ molecules = [], columns = [], onFilteredChange }) {
+export default function FilterBar({
+  molecules = [],
+  columns = [],
+  onFilteredChange,
+  serverMode = false,
+  onServerFilterChange,
+  totalFromServer,
+}) {
   const [activeQuickFilters, setActiveQuickFilters] = useState(new Set())
   const [customFilters, setCustomFilters] = useState([])
   const [searchText, setSearchText] = useState('')
   const [configCol, setConfigCol] = useState(null) // column being configured
   const addBtnRef = useRef(null)
+  const debounceRef = useRef(null)
 
   // Filterable columns for the dropdown
   const filterableCols = useMemo(
@@ -209,6 +217,19 @@ export default function FilterBar({ molecules = [], columns = [], onFilteredChan
   useEffect(() => {
     onFilteredChange && onFilteredChange(filteredMolecules)
   }, [filteredMolecules, onFilteredChange])
+
+  // Server-mode: debounce search changes to the server
+  useEffect(() => {
+    if (!serverMode || !onServerFilterChange) return
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      onServerFilterChange({
+        search: searchText.trim(),
+        bookmarked_only: activeQuickFilters.has('bookmarked'),
+      })
+    }, 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [searchText, activeQuickFilters, serverMode, onServerFilterChange])
 
   const hasAnyFilter = activeQuickFilters.size > 0 || customFilters.length > 0 || searchText.trim() !== ''
   const filterCount = activeQuickFilters.size + customFilters.length + (searchText.trim() ? 1 : 0)
@@ -321,7 +342,7 @@ export default function FilterBar({ molecules = [], columns = [], onFilteredChan
 
         {/* Status + clear */}
         <span className={`text-xs tabular-nums ${hasAnyFilter ? 'text-bx-light-text font-medium' : 'text-gray-400'}`}>
-          {filteredMolecules.length}/{molecules.length}
+          {filteredMolecules.length}/{totalFromServer != null ? totalFromServer.toLocaleString() : molecules.length}
         </span>
         {hasAnyFilter && (
           <button onClick={clearAll} className="text-xs text-gray-400 hover:text-red-500 transition-colors">
