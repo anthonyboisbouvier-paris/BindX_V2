@@ -259,4 +259,13 @@ export async function v9BookmarkBatch(phaseId, moleculeIds, bookmarked) {
   return response.data
 }
 
+// ---------------------------------------------------------------------------
+// V9: Utilities
+// ---------------------------------------------------------------------------
+
+export async function v9SmilesToMolblock(smiles) {
+  const response = await apiClient.post('/v9/molecule/smiles-to-3d', { smiles })
+  return response.data
+}
+
 export default apiClient

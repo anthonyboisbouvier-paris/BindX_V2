@@ -283,7 +283,7 @@ export default function ADMETRadar({ admet }) {
                 <text
                   x={lp.x} y={lp.y - 5}
                   fontSize="9" fontWeight="600"
-                  fill="#0f131d"
+                  fill="#0b1120"
                   textAnchor={anchor}
                   dominantBaseline="central"
                 >

@@ -15,6 +15,7 @@ import React, { useState, useRef, useEffect } from 'react'
 export default function InfoTip({ text, variant = 'dark', size = 'sm', className = '' }) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState('bottom')
+  const [hAlign, setHAlign] = useState('center') // 'center' | 'left' | 'right'
   const tipRef = useRef(null)
   const popupRef = useRef(null)
 
@@ -30,15 +31,28 @@ export default function InfoTip({ text, variant = 'dark', size = 'sm', className
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  // Auto-position: check if popup would overflow viewport
+  // Auto-position: check if popup would overflow viewport (vertical + horizontal)
   useEffect(() => {
     if (!open || !popupRef.current || !tipRef.current) return
     const rect = tipRef.current.getBoundingClientRect()
-    const popupHeight = popupRef.current.offsetHeight
-    if (rect.bottom + popupHeight + 8 > window.innerHeight) {
+    const popupRect = popupRef.current.getBoundingClientRect()
+
+    // Vertical
+    if (rect.bottom + popupRect.height + 8 > window.innerHeight) {
       setPosition('top')
     } else {
       setPosition('bottom')
+    }
+
+    // Horizontal — check if centered popup overflows
+    const centerLeft = rect.left + rect.width / 2 - popupRect.width / 2
+    const centerRight = rect.left + rect.width / 2 + popupRect.width / 2
+    if (centerLeft < 8) {
+      setHAlign('left')
+    } else if (centerRight > window.innerWidth - 8) {
+      setHAlign('right')
+    } else {
+      setHAlign('center')
     }
   }, [open])
 
@@ -75,16 +89,18 @@ export default function InfoTip({ text, variant = 'dark', size = 'sm', className
       {open && (
         <div
           ref={popupRef}
-          className={`absolute z-[60] w-64 px-3 py-2.5 rounded-lg border
-                     text-xs leading-relaxed
+          className={`absolute z-[60] max-w-[280px] w-max px-3 py-2.5 rounded-lg border
+                     text-xs leading-relaxed max-h-[200px] overflow-y-auto
                      ${popupClasses}
                      ${position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'}
-                     left-1/2 -translate-x-1/2`}
+                     ${hAlign === 'left' ? 'left-0' : hAlign === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
           style={{ pointerEvents: 'none' }}
           role="tooltip"
         >
           <div
-            className={`absolute w-2 h-2 rotate-45 left-1/2 -translate-x-1/2 ${arrowBg} ${
+            className={`absolute w-2 h-2 rotate-45 ${arrowBg} ${
+              hAlign === 'left' ? 'left-3' : hAlign === 'right' ? 'right-3' : 'left-1/2 -translate-x-1/2'
+            } ${
               position === 'top'
                 ? 'bottom-[-5px] border-r border-b'
                 : 'top-[-5px] border-l border-t'

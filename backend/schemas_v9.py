@@ -26,6 +26,7 @@ class PhaseSummary(BaseModel):
     status: str
     frozen_at: Optional[datetime] = None
     created_at: datetime
+    stats: Optional[dict] = None
 
 
 class CampaignSummary(BaseModel):
@@ -215,6 +216,15 @@ class GenerationRunConfig(BaseModel):
 # Run schemas
 # ---------------------------------------------------------------------------
 
+class RunLogEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    level: str = "info"
+    message: str
+    created_at: datetime
+
+
 class RunCreate(BaseModel):
     type: str  # "import" | "calculation" | "generation"
     config: Optional[dict] = {}
@@ -242,6 +252,7 @@ class RunResponse(BaseModel):
     error_message: Optional[str] = None
     archived: bool = False
     created_at: datetime
+    logs: List[RunLogEntryOut] = []
 
 
 class RunListItem(BaseModel):

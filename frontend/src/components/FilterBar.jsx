@@ -356,7 +356,7 @@ export default function FilterBar({
         <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-gray-100">
           {customFilters.map(cf => (
             <span key={cf.id}
-              className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-full text-[11px] font-medium"
+              className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-full text-xs font-medium"
             >
               {cf.label}
               <button onClick={() => removeCustomFilter(cf.id)}

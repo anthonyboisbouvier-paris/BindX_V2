@@ -75,14 +75,14 @@ function PhaseProgress({ campaigns }) {
         return (
           <React.Fragment key={type}>
             <div className="flex flex-col items-center gap-0.5">
-              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-[.55rem] font-bold ${nodeClass}`}>
+              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold ${nodeClass}`}>
                 {status === 'done' ? (
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                   </svg>
                 ) : labels[i]}
               </div>
-              <span className="text-bx-sub" style={{ fontSize: '.55rem', fontWeight: 500 }}>{labels[i]}</span>
+              <span className="text-bx-sub" style={{ fontSize: '0.7rem', fontWeight: 500 }}>{labels[i]}</span>
             </div>
             {!isLast && (
               <div className={`h-0.5 w-5 mb-3.5 mx-0.5 rounded ${
@@ -117,7 +117,9 @@ function StatusBadge({ project }) {
 // Project card
 // ---------------------------------------------------------------------------
 
-function ProjectCard({ project, onClick, onDelete, searchQuery }) {
+const BRAND_COLORS = ['#00e6a0', '#06b6d4', '#3b82f6', '#8b5cf6']
+
+function ProjectCard({ project, onClick, onDelete, searchQuery, colorIndex = 0 }) {
   const allPhases = (project.campaigns || []).flatMap(c => c.phases || [])
   const totalMolecules = allPhases.reduce((s, p) => s + (p.stats?.total_molecules || 0), 0)
   const totalRuns = allPhases.reduce((s, p) => s + (p.stats?.runs_completed || 0) + (p.stats?.runs_running || 0), 0)
@@ -134,24 +136,25 @@ function ProjectCard({ project, onClick, onDelete, searchQuery }) {
           : 'bg-transparent group-hover:bg-bx-mint/30'
       }`} />
 
-      {/* 3D protein preview */}
-      {project.target_preview?.structures?.[0]?.download_url && (
-        <div className="border-b border-bx-light-border-s">
-          <MiniProteinViewer
-            pdbUrl={project.target_preview.structures[0].download_url}
-            height={110}
-          />
-        </div>
-      )}
-
       <div className="p-5">
-        {/* Header */}
+        {/* Header — name FIRST (above 3D) */}
         <div className="flex items-start justify-between gap-2 mb-3">
           <h3 className="font-bold text-bx-light-text text-base leading-tight group-hover:text-bx-mint-dim transition-colors font-serif">
             {highlight(project.name, searchQuery)}
           </h3>
           <StatusBadge project={project} />
         </div>
+
+        {/* 3D protein preview — below name, with per-project color */}
+        {project.target_preview?.structures?.[0]?.download_url && (
+          <div className="border border-bx-light-border-s rounded-lg overflow-hidden mb-3">
+            <MiniProteinViewer
+              pdbUrl={project.target_preview.structures[0].download_url}
+              height={110}
+              proteinColor={BRAND_COLORS[colorIndex % BRAND_COLORS.length]}
+            />
+          </div>
+        )}
 
         {/* Target row — design system tags */}
         <div className="flex items-center gap-1.5 mb-3 flex-wrap">
@@ -175,17 +178,17 @@ function ProjectCard({ project, onClick, onDelete, searchQuery }) {
         <div className="grid grid-cols-3 gap-2 mb-3 pt-3 border-t border-bx-light-border-s">
           <div className="text-center">
             <p className="text-base font-extrabold text-bx-light-text">{totalMolecules}</p>
-            <p className="text-[.55rem] text-bx-light-muted">molecules</p>
+            <p className="text-xs text-bx-light-muted">molecules</p>
           </div>
           <div className="text-center">
             <p className="text-base font-extrabold text-bx-light-text2">{totalRuns}</p>
-            <p className="text-[.55rem] text-bx-light-muted">runs</p>
+            <p className="text-xs text-bx-light-muted">runs</p>
           </div>
           <div className="text-center">
             <p className="text-sm font-mono font-medium text-bx-light-muted truncate">
               {project.updated_at ? relativeTime(project.updated_at) : '—'}
             </p>
-            <p className="text-[.55rem] text-bx-light-muted">last update</p>
+            <p className="text-xs text-bx-light-muted">last update</p>
           </div>
         </div>
 
@@ -198,7 +201,7 @@ function ProjectCard({ project, onClick, onDelete, searchQuery }) {
 
         {/* Footer: campaign count + delete + chevron */}
         <div className="flex items-center justify-between mt-1">
-          <span className="text-[.55rem] text-bx-light-muted font-mono">
+          <span className="text-xs text-bx-light-muted font-mono">
             {project.campaigns.length} campaign{project.campaigns.length !== 1 ? 's' : ''}
           </span>
           <div className="flex items-center gap-2">
@@ -471,13 +474,14 @@ export default function ProjectListPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(project => (
+          {filtered.map((project, idx) => (
             <ProjectCard
               key={project.id}
               project={project}
               onClick={(id) => navigate(`/project/${id}`)}
               onDelete={(id) => deleteProject(id)}
               searchQuery={searchQuery}
+              colorIndex={idx}
             />
           ))}
         </div>

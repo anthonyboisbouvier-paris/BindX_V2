@@ -163,6 +163,33 @@ async def _get_molecules_by_ids(molecule_ids):
 
 
 # ---------------------------------------------------------------------------
+# Run log helper
+# ---------------------------------------------------------------------------
+
+async def _write_log_async(run_id: str, level: str, message: str):
+    """Write a log entry for a run."""
+    from database_v9 import AsyncSessionV9
+    from models_v9 import RunLogORM_V9
+
+    async with AsyncSessionV9() as session:
+        log = RunLogORM_V9(
+            run_id=uuid.UUID(run_id),
+            level=level,
+            message=message,
+        )
+        session.add(log)
+        await session.commit()
+
+
+def _write_log(run_id: str, level: str, message: str):
+    """Write a run log entry (sync wrapper)."""
+    try:
+        _db_sync(_write_log_async(run_id, level, message))
+    except Exception:
+        logger.warning("Failed to write run log: %s", message)
+
+
+# ---------------------------------------------------------------------------
 # Main Celery task
 # ---------------------------------------------------------------------------
 
@@ -188,6 +215,7 @@ def execute_run(self, run_id: str):
         progress=0,
         current_step="Starting...",
     ))
+    _write_log(run_id, "info", f"Run started — type: {run_data['type']}")
 
     try:
         run_type = run_data["type"]
@@ -207,11 +235,13 @@ def execute_run(self, run_id: str):
             current_step=None,
             completed_at=datetime.now(timezone.utc),
         ))
+        _write_log(run_id, "success", f"Run completed — {result}")
         logger.info("Run %s completed successfully", run_id)
         return result
 
     except Exception as e:
         logger.exception("Run %s failed: %s", run_id, e)
+        _write_log(run_id, "error", f"Run failed: {str(e)[:500]}")
         _db_sync(_update_run(
             run_id,
             status="failed",
@@ -262,12 +292,37 @@ def _run_import(run_id: str, run_data: dict) -> dict:
                         smiles_list.append(Chem.MolToSmiles(mol))
             except ImportError:
                 raise ImportError("RDKit required for SDF file parsing")
+    elif config.get("source") == "phase_selection":
+        # Import bookmarked molecules from another phase
+        source_phase_id = config.get("source_phase_id")
+        if not source_phase_id:
+            raise ValueError("source_phase_id required for phase_selection import")
+
+        _db_sync(_update_run(run_id, current_step="Fetching bookmarked molecules from source phase", progress=5))
+
+        async def _fetch_bookmarked_smiles(src_phase_id):
+            from database_v9 import AsyncSessionV9
+            from models_v9 import MoleculeORM_V9
+            from sqlalchemy import select as sa_select
+            async with AsyncSessionV9() as session:
+                result = await session.execute(
+                    sa_select(MoleculeORM_V9.smiles, MoleculeORM_V9.name).where(
+                        MoleculeORM_V9.phase_id == uuid.UUID(src_phase_id),
+                        MoleculeORM_V9.bookmarked == True,
+                    )
+                )
+                return [{"smiles": row.smiles, "name": row.name} for row in result.all()]
+
+        bookmarked = _db_sync(_fetch_bookmarked_smiles(source_phase_id))
+        smiles_list = [m["smiles"] for m in bookmarked if m.get("smiles")]
+        logger.info("Phase selection import: %d bookmarked molecules from phase %s", len(smiles_list), source_phase_id)
     else:
         smiles_list = config.get("smiles_list", [])
 
     if not smiles_list:
         raise ValueError("No SMILES to import")
 
+    _write_log(run_id, "info", f"Loaded {len(smiles_list)} SMILES — validating...")
     _db_sync(_update_run(run_id, current_step="Validating SMILES", progress=10))
 
     # Validate and canonicalize using pipeline
@@ -323,6 +378,7 @@ def _run_import(run_id: str, run_data: dict) -> dict:
             pct = 30 + int(70 * (i + 1) / total)
             _db_sync(_update_run(run_id, progress=pct))
 
+    _write_log(run_id, "success", f"Import done: {created} created, {skipped} duplicates skipped")
     logger.info("Import run %s: %d created, %d duplicates skipped", run_id, created, skipped)
     return {"created": created, "skipped": skipped}
 

@@ -399,7 +399,7 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
           const px = toX(xv), py = toY(yv)
           return px >= bx && px <= bx + bw && py >= by && py <= by + bh
         })
-        setSelected(brushed.slice(0, 3))
+        setSelected(brushed)
       }
       setBrushing(false)
       setBrushRect(null)
@@ -605,7 +605,7 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
               return (
                 <circle key={`np-${idx}`} cx={cx} cy={cy} r={isHov ? r + 2 : isSel ? r + 1 : r}
                   fill={fill} fillOpacity={isHov ? 0.9 : isSel ? 0.8 : 0.5}
-                  stroke={isSel ? '#0f131d' : isHov ? '#4b5563' : 'none'} strokeWidth={isSel ? 2 : 1.5}
+                  stroke={isSel ? '#0b1120' : isHov ? '#4b5563' : 'none'} strokeWidth={isSel ? 2 : 1.5}
                   style={{ cursor: 'pointer', transition: 'r 0.1s' }}
                   onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
                   onMouseLeave={() => setHovered(null)}
@@ -626,7 +626,7 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
                 <g key={`p-${idx}`}>
                   <circle cx={cx} cy={cy} r={isHov ? r + 6 : r + 3} fill="#00e6a0" fillOpacity={0.15} />
                   <circle cx={cx} cy={cy} r={isHov ? r + 3 : isSel ? r + 1 : r + 1}
-                    fill="#00e6a0" stroke={isSel ? '#0f131d' : '#fff'} strokeWidth={isSel ? 2 : 1.5}
+                    fill="#00e6a0" stroke={isSel ? '#0b1120' : '#fff'} strokeWidth={isSel ? 2 : 1.5}
                     style={{ cursor: 'pointer', transition: 'r 0.1s' }}
                     onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
                     onMouseLeave={() => setHovered(null)}
@@ -674,7 +674,7 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
             return (
               <foreignObject x={tx} y={ty} width={W} height={H} style={{ overflow: 'visible', pointerEvents: 'none' }}>
                 <div xmlns="http://www.w3.org/1999/xhtml" style={{
-                  background: '#0f131d', color: '#fff', borderRadius: '8px', padding: '8px 10px',
+                  background: '#0b1120', color: '#fff', borderRadius: '8px', padding: '8px 10px',
                   fontSize: '11px', lineHeight: '1.5', boxShadow: '0 4px 16px rgba(0,0,0,0.25)', width: `${W}px`,
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>

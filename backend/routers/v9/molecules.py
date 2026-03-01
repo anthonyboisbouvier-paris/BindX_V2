@@ -12,7 +12,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import case, func, literal, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -319,3 +319,50 @@ async def bookmark_batch(
 
     await db.flush()
     return {"updated": updated, "bookmarked": body.bookmarked}
+
+
+# ---------------------------------------------------------------------------
+# SMILES → 3D molblock
+# ---------------------------------------------------------------------------
+
+@router.post("/molecule/smiles-to-3d")
+async def smiles_to_3d(
+    body: dict = Body(...),
+    user_id: str = Depends(require_v9_user),
+):
+    """Convert a SMILES string to a 3D molblock using RDKit."""
+    smiles = body.get("smiles")
+    if not smiles or not isinstance(smiles, str):
+        raise HTTPException(status_code=422, detail="Missing or invalid 'smiles' field")
+
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+    except ImportError:
+        raise HTTPException(
+            status_code=422,
+            detail="RDKit is not available on this server",
+        )
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise HTTPException(status_code=422, detail="Invalid SMILES string")
+
+    try:
+        mol = Chem.AddHs(mol)
+        params = AllChem.ETKDGv3()
+        params.randomSeed = 42
+        result = AllChem.EmbedMolecule(mol, params)
+        if result != 0:
+            raise ValueError("Embedding failed")
+        AllChem.MMFFOptimizeMolecule(mol)
+        mol = Chem.RemoveHs(mol)
+        molblock = Chem.MolToMolBlock(mol)
+    except Exception as exc:
+        logger.warning("SMILES→3D failed for %s: %s", smiles, exc)
+        raise HTTPException(
+            status_code=422,
+            detail=f"3D coordinate generation failed: {exc}",
+        )
+
+    return {"molblock": molblock}

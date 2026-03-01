@@ -134,7 +134,7 @@ function SmilesImage({ smiles, width = 120, height = 60 }) {
   if (failed || !svgHtml) {
     if (failed) {
       const truncated = smiles.length > 20 ? smiles.slice(0, 20) + '…' : smiles
-      return <span className="font-mono text-[11px] text-gray-500" title={smiles}>{truncated}</span>
+      return <span className="font-mono text-xs text-gray-500" title={smiles}>{truncated}</span>
     }
     return <span className="text-gray-300 text-[10px]">loading...</span>
   }
@@ -388,7 +388,7 @@ export default function MoleculeTable({
   totalCount,
 }) {
   const [sorts, setSorts] = useState([]) // [{key, dir}] max 2
-  const [columnFilters, setColumnFilters] = useState({}) // {key: filterValue}
+  const [columnFilters, setColumnFilters] = useState({}) // {key: {type:'text',value} | {type:'number',min,max} | {type:'boolean',value}}
   const [showFilterCol, setShowFilterCol] = useState(null) // key of column with open filter
   const tableRef = useRef(null)
 
@@ -407,16 +407,46 @@ export default function MoleculeTable({
 
   // Column-filtered molecules
   const colFiltered = useMemo(() => {
-    const filterKeys = Object.keys(columnFilters).filter(k => columnFilters[k] !== '')
+    const filterKeys = Object.keys(columnFilters).filter(k => {
+      const f = columnFilters[k]
+      if (f == null) return false
+      // Backward compat: plain string (old format)
+      if (typeof f === 'string') return f !== ''
+      // Typed filter objects
+      if (f.type === 'text') return f.value && f.value !== ''
+      if (f.type === 'number') return f.min != null || f.max != null
+      if (f.type === 'boolean') return f.value !== null && f.value !== undefined
+      return false
+    })
     if (!filterKeys.length) return molecules
     return molecules.filter(mol => {
       return filterKeys.every(key => {
         const val = mol[key]
-        const filterVal = columnFilters[key].toLowerCase()
-        if (val == null) return false
-        if (typeof val === 'number') return String(val).includes(filterVal)
-        if (typeof val === 'boolean') return (val ? 'yes' : 'no').includes(filterVal)
-        return String(val).toLowerCase().includes(filterVal)
+        const f = columnFilters[key]
+        // Backward compat: plain string (old format) → text search
+        if (typeof f === 'string') {
+          if (val == null) return false
+          const filterVal = f.toLowerCase()
+          if (typeof val === 'number') return String(val).includes(filterVal)
+          if (typeof val === 'boolean') return (val ? 'yes' : 'no').includes(filterVal)
+          return String(val).toLowerCase().includes(filterVal)
+        }
+        // Typed filters
+        if (f.type === 'text') {
+          if (val == null) return false
+          return String(val).toLowerCase().includes(f.value.toLowerCase())
+        }
+        if (f.type === 'number') {
+          if (val == null || typeof val !== 'number') return false
+          if (f.min != null && val < f.min) return false
+          if (f.max != null && val > f.max) return false
+          return true
+        }
+        if (f.type === 'boolean') {
+          if (f.value === null) return true // "All" selected
+          return val === f.value
+        }
+        return true
       })
     })
   }, [molecules, columnFilters])
@@ -592,7 +622,15 @@ export default function MoleculeTable({
               const dir = getSortDir(col.key)
               const rank = getSortRank(col.key)
               const isActive = dir !== null
-              const hasFilter = columnFilters[col.key] && columnFilters[col.key] !== ''
+              const hasFilter = (() => {
+                const f = columnFilters[col.key]
+                if (f == null) return false
+                if (typeof f === 'string') return f !== ''
+                if (f.type === 'text') return f.value && f.value !== ''
+                if (f.type === 'number') return f.min != null || f.max != null
+                if (f.type === 'boolean') return f.value !== null && f.value !== undefined
+                return false
+              })()
               const isFilterable = col.type === 'number' || col.type === 'text' || col.type === 'boolean' || col.type === 'smiles'
 
               if (col.type === 'action') {
@@ -602,7 +640,7 @@ export default function MoleculeTable({
               return (
                 <div
                   key={col.key}
-                  className={`px-3 py-2.5 font-semibold uppercase tracking-wide text-[10px] whitespace-nowrap select-none relative flex items-center ${
+                  className={`px-3 py-2.5 font-semibold uppercase tracking-wide text-xs whitespace-nowrap select-none relative flex items-center ${
                     col.type === 'number' ? 'justify-end' : 'justify-start'
                   } ${col.sortable ? 'cursor-pointer transition-colors' : ''} ${
                     isActive ? 'text-bx-light-text bg-blue-50/50' : 'text-gray-500 hover:text-bx-light-text hover:bg-gray-100'
@@ -635,19 +673,94 @@ export default function MoleculeTable({
                       className="absolute top-full left-0 z-20 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5"
                       onClick={e => e.stopPropagation()}
                     >
-                      <input
-                        type="text"
-                        autoFocus
-                        value={columnFilters[col.key] || ''}
-                        onChange={e => setColumnFilters(prev => ({ ...prev, [col.key]: e.target.value }))}
-                        onKeyDown={e => { if (e.key === 'Escape') setShowFilterCol(null) }}
-                        placeholder={`Filter ${col.label}…`}
-                        className="text-xs px-2 py-1 border border-gray-200 rounded w-28 outline-none focus:border-blue-300"
-                      />
+                      {/* Number filter: min/max inputs */}
+                      {col.type === 'number' && (() => {
+                        const f = columnFilters[col.key]
+                        const minVal = (f && typeof f === 'object' && f.type === 'number') ? (f.min ?? '') : ''
+                        const maxVal = (f && typeof f === 'object' && f.type === 'number') ? (f.max ?? '') : ''
+                        return (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              autoFocus
+                              value={minVal}
+                              onChange={e => {
+                                const v = e.target.value === '' ? null : Number(e.target.value)
+                                setColumnFilters(prev => ({
+                                  ...prev,
+                                  [col.key]: { type: 'number', min: v, max: (prev[col.key]?.type === 'number' ? prev[col.key]?.max : null) ?? null }
+                                }))
+                              }}
+                              onKeyDown={e => { if (e.key === 'Escape') setShowFilterCol(null) }}
+                              placeholder="Min"
+                              className="text-xs px-1.5 py-1 border border-gray-200 rounded w-16 outline-none focus:border-blue-300 tabular-nums"
+                            />
+                            <span className="text-gray-300 text-xs">–</span>
+                            <input
+                              type="number"
+                              value={maxVal}
+                              onChange={e => {
+                                const v = e.target.value === '' ? null : Number(e.target.value)
+                                setColumnFilters(prev => ({
+                                  ...prev,
+                                  [col.key]: { type: 'number', min: (prev[col.key]?.type === 'number' ? prev[col.key]?.min : null) ?? null, max: v }
+                                }))
+                              }}
+                              onKeyDown={e => { if (e.key === 'Escape') setShowFilterCol(null) }}
+                              placeholder="Max"
+                              className="text-xs px-1.5 py-1 border border-gray-200 rounded w-16 outline-none focus:border-blue-300 tabular-nums"
+                            />
+                          </div>
+                        )
+                      })()}
+
+                      {/* Boolean filter: All / Yes / No buttons */}
+                      {col.type === 'boolean' && (() => {
+                        const f = columnFilters[col.key]
+                        const currentVal = (f && typeof f === 'object' && f.type === 'boolean') ? f.value : null
+                        const btnBase = 'text-xs px-2 py-1 rounded transition-colors'
+                        const btnActive = 'bg-blue-100 text-blue-700 font-medium'
+                        const btnInactive = 'text-gray-500 hover:bg-gray-100'
+                        return (
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              className={`${btnBase} ${currentVal === null || currentVal === undefined ? btnActive : btnInactive}`}
+                              onClick={() => setColumnFilters(prev => { const n = { ...prev }; delete n[col.key]; return n })}
+                            >All</button>
+                            <button
+                              className={`${btnBase} ${currentVal === true ? btnActive : btnInactive}`}
+                              onClick={() => setColumnFilters(prev => ({ ...prev, [col.key]: { type: 'boolean', value: true } }))}
+                            >Yes</button>
+                            <button
+                              className={`${btnBase} ${currentVal === false ? btnActive : btnInactive}`}
+                              onClick={() => setColumnFilters(prev => ({ ...prev, [col.key]: { type: 'boolean', value: false } }))}
+                            >No</button>
+                          </div>
+                        )
+                      })()}
+
+                      {/* Text / SMILES filter: text input */}
+                      {(col.type === 'text' || col.type === 'smiles') && (() => {
+                        const f = columnFilters[col.key]
+                        // Backward compat: plain string → extract value
+                        const textVal = typeof f === 'string' ? f : (f && f.type === 'text' ? f.value : '')
+                        return (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={textVal}
+                            onChange={e => setColumnFilters(prev => ({ ...prev, [col.key]: { type: 'text', value: e.target.value } }))}
+                            onKeyDown={e => { if (e.key === 'Escape') setShowFilterCol(null) }}
+                            placeholder={`Filter ${col.label}…`}
+                            className="text-xs px-2 py-1 border border-gray-200 rounded w-28 outline-none focus:border-blue-300"
+                          />
+                        )
+                      })()}
+
                       {hasFilter && (
                         <button
                           onClick={() => setColumnFilters(prev => { const n = { ...prev }; delete n[col.key]; return n })}
-                          className="text-[10px] text-red-400 hover:text-red-600 mt-0.5 block"
+                          className="text-xs text-red-400 hover:text-red-600 mt-0.5 block"
                         >Clear</button>
                       )}
                     </div>
@@ -805,10 +918,18 @@ export default function MoleculeTable({
             <>{' '}of{' '}<strong className="text-gray-600 tabular-nums">{displayTotal.toLocaleString()}</strong></>
           )}
           {' '}molecules
-          {Object.keys(columnFilters).filter(k => columnFilters[k]).length > 0 && (
+          {Object.keys(columnFilters).filter(k => {
+            const f = columnFilters[k]
+            if (f == null) return false
+            if (typeof f === 'string') return f !== ''
+            if (f.type === 'text') return f.value && f.value !== ''
+            if (f.type === 'number') return f.min != null || f.max != null
+            if (f.type === 'boolean') return f.value !== null && f.value !== undefined
+            return false
+          }).length > 0 && (
             <button
               onClick={() => setColumnFilters({})}
-              className="ml-2 text-[10px] text-blue-500 hover:text-blue-700 underline"
+              className="ml-2 text-xs text-blue-500 hover:text-blue-700 underline"
             >Clear column filters</button>
           )}
         </span>
@@ -827,7 +948,7 @@ export default function MoleculeTable({
               ))}
               <button
                 onClick={() => setSorts([])}
-                className="ml-1 text-gray-400 hover:text-red-500 transition-colors text-[10px] underline underline-offset-2"
+                className="ml-1 text-gray-400 hover:text-red-500 transition-colors text-xs underline underline-offset-2"
               >
                 Clear
               </button>

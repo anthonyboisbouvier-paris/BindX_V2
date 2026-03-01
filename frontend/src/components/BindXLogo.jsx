@@ -21,7 +21,7 @@ import React, { useEffect, useRef, useCallback } from 'react'
 // ---------------------------------------------------------------------------
 
 const V = {
-  bg: '#0f131d', s2: '#141925',
+  bg: '#0b1120', s2: '#182338',
   mint: '#00e6a0', cyan: '#06b6d4', blue: '#3b82f6', violet: '#8b5cf6', red: '#f43f5e',
 }
 
@@ -265,7 +265,7 @@ function SuccessLogo({ size }) {
           <circle cx="38" cy="28" r="9" stroke={V.blue} strokeWidth="2.5" fill="none" />
         </g>
         <circle className="bx-ok-dot" cx="38" cy="28" fill={V.mint} r="0" />
-        <path className="bx-ok-chk" d="M34.5 28.5L37 31L42 25.5" stroke="#0f131d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        <path className="bx-ok-chk" d="M34.5 28.5L37 31L42 25.5" stroke="#0b1120" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
       </svg>
       <style>{`
         .bx-spark{position:absolute;border-radius:50%;pointer-events:none;opacity:0}
@@ -320,8 +320,8 @@ function ErrorLogo({ size }) {
           <circle cx="38" cy="28" r="9" stroke={V.red} strokeWidth="2.5" fill="none" />
         </g>
         <circle className="bx-er-dot" cx="38" cy="28" fill={V.red} r="0" />
-        <line className="bx-er-x1" x1="35.5" y1="25.5" x2="40.5" y2="30.5" stroke="#0f131d" strokeWidth="2" strokeLinecap="round" />
-        <line className="bx-er-x2" x1="40.5" y1="25.5" x2="35.5" y2="30.5" stroke="#0f131d" strokeWidth="2" strokeLinecap="round" />
+        <line className="bx-er-x1" x1="35.5" y1="25.5" x2="40.5" y2="30.5" stroke="#0b1120" strokeWidth="2" strokeLinecap="round" />
+        <line className="bx-er-x2" x1="40.5" y1="25.5" x2="35.5" y2="30.5" stroke="#0b1120" strokeWidth="2" strokeLinecap="round" />
       </svg>
       <style>{`
         .bx-spark-err{position:absolute;border-radius:50%;pointer-events:none;opacity:0}

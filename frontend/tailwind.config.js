@@ -8,13 +8,13 @@ export default {
     extend: {
       colors: {
         // ═══ BindX Design System V9 ═══
-        // Dark surfaces
-        'bx-bg':       '#04060b',
-        'bx-surface':  '#0f131d',
-        'bx-elevated': '#161b2a',
-        'bx-s1':       '#0a0d15',  // legacy alias
-        'bx-s2':       '#0f131d',  // legacy alias
-        'bx-s3':       '#141925',  // legacy alias
+        // Dark surfaces (deep blue palette)
+        'bx-bg':       '#0b1120',
+        'bx-surface':  '#121c30',
+        'bx-elevated': '#1a2440',
+        'bx-s1':       '#0e1628',  // legacy alias
+        'bx-s2':       '#121c30',  // legacy alias
+        'bx-s3':       '#182338',  // legacy alias
         // Dark text
         'bx-text':     '#eaedf4',
         'bx-sub':      '#8a93a8',

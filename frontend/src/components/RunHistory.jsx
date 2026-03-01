@@ -291,12 +291,12 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
 
                     {/* Run label */}
                     <div className="text-center">
-                      <p className="text-[10px] text-gray-400 tabular-nums">#{i + 1}</p>
+                      <p className="text-xs text-gray-400 tabular-nums">#{i + 1}</p>
                       <p className="text-sm font-semibold text-gray-700 leading-tight">{typeLabel}</p>
                     </div>
 
                     {/* Status */}
-                    <span className={`text-[10px] font-semibold ${sc.labelColor}`}>
+                    <span className={`text-xs font-semibold ${sc.labelColor}`}>
                       {run.status === 'running' && run.progress != null
                         ? `${run.progress}%`
                         : sc.label}
@@ -307,10 +307,10 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
                   {isActive && (
                     <div className="w-full mt-1 px-2 py-2 bg-blue-50 rounded-xl border border-blue-100 space-y-1.5">
                       {summary && (
-                        <p className="text-[10px] text-gray-500 text-center">{summary}</p>
+                        <p className="text-xs text-gray-500 text-center">{summary}</p>
                       )}
                       {duration && (
-                        <p className="text-[10px] text-gray-400 text-center flex items-center justify-center gap-1">
+                        <p className="text-xs text-gray-400 text-center flex items-center justify-center gap-1">
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                               d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -327,13 +327,13 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
                         </div>
                       )}
                       {run.error_message && (
-                        <p className="text-[10px] text-red-500 text-center truncate" title={run.error_message}>
+                        <p className="text-xs text-red-500 text-center truncate" title={run.error_message}>
                           {run.error_message}
                         </p>
                       )}
                       {/* Run logs */}
                       {run.logs && run.logs.length > 0 && (
-                        <div className="mt-1 max-h-24 overflow-y-auto bg-gray-900 rounded-md px-2 py-1.5 text-[9px] font-mono text-gray-300 space-y-0.5 scrollbar-thin">
+                        <div className="mt-1 max-h-24 overflow-y-auto bg-gray-900 rounded-md px-2 py-1.5 text-[10px] font-mono text-gray-300 space-y-0.5 scrollbar-thin">
                           {run.logs.map((log, li) => (
                             <div key={li} className={`${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-amber-400' : 'text-gray-400'}`}>
                               {log.timestamp && <span className="text-gray-600 mr-1">{new Date(log.timestamp).toLocaleTimeString()}</span>}
@@ -343,14 +343,14 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
                         </div>
                       )}
                       {run.current_step && !run.logs?.length && (
-                        <p className="text-[9px] text-gray-500 text-center italic">Step: {run.current_step}</p>
+                        <p className="text-[10px] text-gray-500 text-center italic">Step: {run.current_step}</p>
                       )}
                       {/* Action buttons */}
                       <div className="flex items-center justify-center gap-1.5 pt-1">
                         {(run.status === 'created' || run.status === 'running') && onCancel && (
                           <button
                             onClick={(e) => { e.stopPropagation(); onCancel(run.id) }}
-                            className="text-[10px] font-medium text-red-500 hover:text-red-700 px-2 py-0.5 rounded hover:bg-red-50 transition-colors"
+                            className="text-xs font-medium text-red-500 hover:text-red-700 px-2 py-0.5 rounded hover:bg-red-50 transition-colors"
                           >
                             Cancel
                           </button>
@@ -358,7 +358,7 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
                         {run.status !== 'created' && run.status !== 'running' && !run.archived && onArchive && (
                           <button
                             onClick={(e) => { e.stopPropagation(); onArchive(run.id) }}
-                            className="text-[10px] font-medium text-gray-400 hover:text-gray-600 px-2 py-0.5 rounded hover:bg-gray-100 transition-colors"
+                            className="text-xs font-medium text-gray-400 hover:text-gray-600 px-2 py-0.5 rounded hover:bg-gray-100 transition-colors"
                           >
                             Archive
                           </button>
@@ -369,12 +369,12 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
 
                   {/* Summary always shown below */}
                   {!isActive && summary && (
-                    <p className="text-[9px] text-gray-400 text-center px-1 mt-1 leading-snug">
+                    <p className="text-[10px] text-gray-400 text-center px-1 mt-1 leading-snug">
                       {summary}
                     </p>
                   )}
                   {!isActive && duration && (
-                    <p className="text-[9px] text-gray-400 text-center tabular-nums">{duration}</p>
+                    <p className="text-[10px] text-gray-400 text-center tabular-nums">{duration}</p>
                   )}
 
                   {/* Progress bar always visible for running */}

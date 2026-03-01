@@ -275,7 +275,7 @@ export default function InteractionDiagram({ interactions }) {
           <circle
             cx={CX} cy={CY}
             r={LIGAND_R}
-            fill="#0f131d"
+            fill="#0b1120"
             stroke="#fff"
             strokeWidth={2}
           />

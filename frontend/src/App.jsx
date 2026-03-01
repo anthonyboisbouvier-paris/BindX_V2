@@ -7,6 +7,7 @@ import { useAuth } from './contexts/AuthContext'
 // Layout — always loaded (shell)
 import SidebarLayout from './components/SidebarLayout.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
+import NavigationProgress from './components/NavigationProgress.jsx'
 import BindXLogo from './components/BindXLogo.jsx'
 
 // Lazy-loaded pages (code-split per route)
@@ -49,6 +50,7 @@ export default function App() {
     <ErrorBoundary>
     <ToastProvider>
     <WorkspaceProvider>
+    <NavigationProgress />
     <Suspense fallback={
       <div className="min-h-screen bg-bx-bg flex items-center justify-center">
         <BindXLogo variant="loading" size={48} />

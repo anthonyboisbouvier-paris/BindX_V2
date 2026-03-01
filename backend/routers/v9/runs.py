@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_v9 import require_v9_user
 from database_v9 import get_v9_db
-from models_v9 import RunORM_V9
+from models_v9 import RunORM_V9, RunLogORM_V9
+from sqlalchemy.orm import selectinload
 from routers.v9.deps import get_phase_owned, get_run_owned
 from schemas_v9 import RunCreate, RunListItem, RunResponse
 
@@ -81,10 +82,12 @@ async def create_run(
     # Validate import has data
     if body.type == "import":
         config = body.config or {}
-        if not config.get("smiles_list"):
+        has_smiles = bool(config.get("smiles_list"))
+        has_phase_source = config.get("source") == "phase_selection" and config.get("source_phase_id")
+        if not has_smiles and not has_phase_source:
             raise HTTPException(
                 status_code=422,
-                detail="config.smiles_list required for import runs (or use import-file endpoint)",
+                detail="config.smiles_list or config.source='phase_selection' required for import runs",
             )
 
     run = RunORM_V9(
@@ -110,7 +113,10 @@ async def create_run(
         run.error_message = f"Failed to dispatch task: {e}"
         await db.flush()
 
-    return run
+    # Reload with logs eagerly loaded (avoid lazy-load crash in async)
+    stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))
+    result = await db.execute(stmt)
+    return result.scalar_one()
 
 
 @router.get(
@@ -128,6 +134,7 @@ async def list_runs(
     stmt = (
         select(RunORM_V9)
         .where(RunORM_V9.phase_id == phase_id)
+        .options(selectinload(RunORM_V9.logs))
         .order_by(RunORM_V9.created_at.desc())
     )
     result = await db.execute(stmt)
@@ -166,7 +173,7 @@ async def cancel_run(
     except Exception as e:
         logger.warning("Failed to revoke Celery task for run %s: %s", run.id, e)
 
-    return run
+    return run  # logs already eager-loaded by get_run_owned
 
 
 @router.post("/runs/{run_id}/archive", response_model=RunResponse)
@@ -243,7 +250,10 @@ async def import_file(
         run.error_message = f"Failed to dispatch task: {e}"
         await db.flush()
 
-    return run
+    # Reload with logs eagerly loaded
+    stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))
+    result = await db.execute(stmt)
+    return result.scalar_one()
 
 
 # ---------------------------------------------------------------------------
@@ -379,4 +389,7 @@ async def import_from_database(
         run.error_message = f"Failed to dispatch task: {e}"
         await db.flush()
 
-    return run
+    # Reload with logs eagerly loaded
+    stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))
+    result = await db.execute(stmt)
+    return result.scalar_one()

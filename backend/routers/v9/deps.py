@@ -109,9 +109,10 @@ async def get_run_owned(
         select(RunORM_V9)
         .where(RunORM_V9.id == run_id)
         .options(
+            selectinload(RunORM_V9.logs),
             selectinload(RunORM_V9.phase)
             .selectinload(PhaseORM_V9.campaign)
-            .selectinload(CampaignORM_V9.project)
+            .selectinload(CampaignORM_V9.project),
         )
     )
     result = await db.execute(stmt)

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import Badge from '../../components/Badge.jsx'
 import ProteinViewer from '../../components/ProteinViewer.jsx'
+import LigandViewer3D from '../../components/LigandViewer3D.jsx'
 import SafetyReport from '../../components/SafetyReport.jsx'
 import SynthesisTree from '../../components/SynthesisTree.jsx'
 import ConfidenceBreakdown from '../../components/ConfidenceBreakdown.jsx'
@@ -516,6 +517,7 @@ const TABS = [
 function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, onRowClick, isFrozen, project }) {
   const [activeTab, setActiveTab] = useState('scores')
   const [copied, setCopied] = useState(false)
+  const [viewerMode, setViewerMode] = useState(null) // null = auto-detect on render
 
   // Extract target structure info from project
   const targetPreview = project?.target_preview || {}
@@ -599,32 +601,85 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
       <div className="overflow-y-auto flex-1 p-4 space-y-4"
         style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
 
-        {/* 3D Viewer */}
-        {pdbUrl ? (
-          <ProteinViewer
-            pdbUrl={pdbUrl}
-            selectedPocket={selectedPocket}
-            height={280}
-          />
-        ) : (
-          <div className="rounded-xl bg-[#0a0d15] border border-bx-surface/30 overflow-hidden">
-            <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-red-500" />
-                <div className="w-2 h-2 rounded-full bg-amber-400" />
-                <div className="w-2 h-2 rounded-full bg-green-400" />
-                <span className="ml-1 text-[10px] font-semibold text-white/50 uppercase tracking-wide">3D Structure</span>
-              </div>
+        {/* 3D Viewer with Protein / Ligand toggle */}
+        {(() => {
+          const hasProtein = !!pdbUrl
+          const hasLigand = !!molecule.smiles
+          // Auto-detect default mode
+          const effectiveMode = viewerMode || (hasProtein ? 'protein' : hasLigand ? 'ligand' : null)
+
+          return (
+            <div>
+              {/* Toggle buttons — show only if both views are available */}
+              {hasProtein && hasLigand && (
+                <div className="flex gap-1 mb-2">
+                  <button
+                    onClick={() => setViewerMode('protein')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                      effectiveMode === 'protein'
+                        ? 'bg-bx-surface text-white shadow-sm'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                        d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
+                    </svg>
+                    Protein
+                  </button>
+                  <button
+                    onClick={() => setViewerMode('ligand')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                      effectiveMode === 'ligand'
+                        ? 'bg-bx-surface text-white shadow-sm'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                        d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-2.47 2.47a3.749 3.749 0 01-5.06 0L9 14.5m10 0a4.5 4.5 0 01-9 0" />
+                    </svg>
+                    Ligand
+                  </button>
+                </div>
+              )}
+
+              {/* Viewer content */}
+              {effectiveMode === 'protein' && hasProtein && (
+                <ProteinViewer
+                  pdbUrl={pdbUrl}
+                  selectedPocket={selectedPocket}
+                  height={280}
+                />
+              )}
+
+              {effectiveMode === 'ligand' && hasLigand && (
+                <LigandViewer3D smiles={molecule.smiles} height={280} />
+              )}
+
+              {/* Fallback: no protein AND no ligand */}
+              {!effectiveMode && (
+                <div className="rounded-xl bg-[#0e1628] border border-bx-surface/30 overflow-hidden">
+                  <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-red-500" />
+                      <div className="w-2 h-2 rounded-full bg-amber-400" />
+                      <div className="w-2 h-2 rounded-full bg-green-400" />
+                      <span className="ml-1 text-[10px] font-semibold text-white/50 uppercase tracking-wide">3D Structure</span>
+                    </div>
+                  </div>
+                  <div className="h-28 flex flex-col items-center justify-center gap-2">
+                    <svg className="w-10 h-10 text-bx-light-text/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
+                        d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
+                    </svg>
+                    <p className="text-[10px] text-white/25">Configure target in Target Setup to view structure</p>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="h-28 flex flex-col items-center justify-center gap-2">
-              <svg className="w-10 h-10 text-bx-light-text/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
-                  d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
-              </svg>
-              <p className="text-[10px] text-white/25">Configure target in Target Setup to view structure</p>
-            </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Tabs */}
         <div>

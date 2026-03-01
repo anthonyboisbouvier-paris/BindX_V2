@@ -161,7 +161,7 @@ export default function OptimizationChart({ iterations = [] }) {
           <path
             d={linePath}
             fill="none"
-            stroke="#0f131d"
+            stroke="#0b1120"
             strokeWidth={2}
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -174,7 +174,7 @@ export default function OptimizationChart({ iterations = [] }) {
               cx={p.x}
               cy={p.y}
               r={tooltip && tooltip.iteration === p.iteration ? 5 : 3}
-              fill={tooltip && tooltip.iteration === p.iteration ? '#00e6a0' : '#0f131d'}
+              fill={tooltip && tooltip.iteration === p.iteration ? '#00e6a0' : '#0b1120'}
               stroke="white"
               strokeWidth={1.5}
               style={{ transition: 'r 0.1s, fill 0.1s' }}

@@ -11,13 +11,13 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from auth_v9 import require_v9_user
 from database_v9 import get_v9_db
-from models_v9 import CampaignORM_V9, ProjectORM_V9
+from models_v9 import CampaignORM_V9, MoleculeORM_V9, PhaseORM_V9, ProjectORM_V9, RunORM_V9
 from routers.v9.deps import get_project_owned
 from schemas_v9 import (
     ProjectCreate,
@@ -83,7 +83,56 @@ async def list_projects(
         .order_by(ProjectORM_V9.updated_at.desc())
     )
     result = await db.execute(stmt)
-    return result.scalars().all()
+    projects = result.scalars().all()
+
+    # Compute per-phase stats (molecules count, bookmarked, runs)
+    all_phase_ids = []
+    for p in projects:
+        for c in p.campaigns:
+            for ph in c.phases:
+                all_phase_ids.append(ph.id)
+
+    if all_phase_ids:
+        # Molecule counts per phase
+        mol_stats_stmt = (
+            select(
+                MoleculeORM_V9.phase_id,
+                func.count().label("total"),
+                func.count().filter(MoleculeORM_V9.bookmarked == True).label("bookmarked"),  # noqa: E712
+            )
+            .where(MoleculeORM_V9.phase_id.in_(all_phase_ids))
+            .group_by(MoleculeORM_V9.phase_id)
+        )
+        mol_result = await db.execute(mol_stats_stmt)
+        mol_stats = {row.phase_id: {"total_molecules": row.total, "bookmarked": row.bookmarked} for row in mol_result.all()}
+
+        # Run counts per phase
+        run_stats_stmt = (
+            select(
+                RunORM_V9.phase_id,
+                func.count().filter(RunORM_V9.status == "completed").label("runs_completed"),
+                func.count().filter(RunORM_V9.status.in_(["running", "created"])).label("runs_running"),
+            )
+            .where(RunORM_V9.phase_id.in_(all_phase_ids))
+            .group_by(RunORM_V9.phase_id)
+        )
+        run_result = await db.execute(run_stats_stmt)
+        run_stats = {row.phase_id: {"runs_completed": row.runs_completed, "runs_running": row.runs_running} for row in run_result.all()}
+
+        # Inject stats into phases
+        for p in projects:
+            for c in p.campaigns:
+                for ph in c.phases:
+                    ms = mol_stats.get(ph.id, {})
+                    rs = run_stats.get(ph.id, {})
+                    ph.stats = {
+                        "total_molecules": ms.get("total_molecules", 0),
+                        "bookmarked": ms.get("bookmarked", 0),
+                        "runs_completed": rs.get("runs_completed", 0),
+                        "runs_running": rs.get("runs_running", 0),
+                    }
+
+    return projects
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)

@@ -129,6 +129,7 @@ class RunORM_V9(BaseV9):
     # Relationships
     phase: Mapped[PhaseORM_V9] = relationship(back_populates="runs")
     artifacts: Mapped[List[ArtifactORM_V9]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    logs: Mapped[List[RunLogORM_V9]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="RunLogORM_V9.created_at")
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +194,24 @@ class CalculationCacheORM_V9(BaseV9):
 
 
 # ---------------------------------------------------------------------------
-# 8. artifacts
+# 8. run_logs
+# ---------------------------------------------------------------------------
+
+class RunLogORM_V9(BaseV9):
+    __tablename__ = "run_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    level: Mapped[str] = mapped_column(Text, default="info")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+
+    # Relationships
+    run: Mapped[RunORM_V9] = relationship(back_populates="logs")
+
+
+# ---------------------------------------------------------------------------
+# 9. artifacts
 # ---------------------------------------------------------------------------
 
 class ArtifactORM_V9(BaseV9):

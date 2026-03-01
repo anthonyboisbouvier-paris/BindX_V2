@@ -26,7 +26,7 @@ function load3Dmol() {
 //   width     — viewer width (default 100%)
 //   height    — viewer height (default 120)
 // ---------------------------------------------------------------------------
-export default function MiniProteinViewer({ pdbUrl, width = '100%', height = 120 }) {
+export default function MiniProteinViewer({ pdbUrl, width = '100%', height = 120, proteinColor = 'spectrum' }) {
   const containerRef = useRef(null)
   const viewerRef = useRef(null)
   const animRef = useRef(null)
@@ -60,7 +60,7 @@ export default function MiniProteinViewer({ pdbUrl, width = '100%', height = 120
         viewer.addModel(pdbData, 'pdb')
         viewer.setStyle({}, {
           cartoon: {
-            color: 'spectrum',
+            color: proteinColor || 'spectrum',
             opacity: 0.95,
           },
         })
@@ -97,7 +97,7 @@ export default function MiniProteinViewer({ pdbUrl, width = '100%', height = 120
         viewerRef.current = null
       }
     }
-  }, [pdbUrl])
+  }, [pdbUrl, proteinColor])
 
   if (!pdbUrl) return null
   if (error) return null
