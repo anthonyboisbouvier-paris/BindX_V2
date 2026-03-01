@@ -17,51 +17,12 @@ from sqlalchemy.orm import selectinload
 from auth_v9 import require_v9_user
 from database_v9 import get_v9_db
 from models_v9 import CampaignORM_V9, PhaseORM_V9, ProjectORM_V9
+from routers.v9.deps import get_campaign_owned, verify_project_ownership
 from schemas_v9 import CampaignCreate, CampaignResponse, CampaignUpdate
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-async def _verify_project_ownership(
-    project_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> ProjectORM_V9:
-    """Verify that the project exists and belongs to the user."""
-    stmt = select(ProjectORM_V9).where(ProjectORM_V9.id == project_id)
-    result = await db.execute(stmt)
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if str(project.user_id) != user_id:
-        raise HTTPException(status_code=403, detail="Not your project")
-    return project
-
-
-async def _get_campaign_owned(
-    campaign_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> CampaignORM_V9:
-    """Fetch campaign with phases, verify ownership via parent project."""
-    stmt = (
-        select(CampaignORM_V9)
-        .where(CampaignORM_V9.id == campaign_id)
-        .options(selectinload(CampaignORM_V9.phases))
-    )
-    result = await db.execute(stmt)
-    campaign = result.scalar_one_or_none()
-    if not campaign:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-    # Check project ownership
-    await _verify_project_ownership(campaign.project_id, user_id, db)
-    return campaign
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +41,7 @@ async def create_campaign(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Create a new campaign under a project."""
-    await _verify_project_ownership(project_id, user_id, db)
+    await verify_project_ownership(project_id, user_id, db)
 
     campaign = CampaignORM_V9(
         project_id=project_id,
@@ -90,7 +51,7 @@ async def create_campaign(
     db.add(campaign)
     await db.flush()
 
-    return await _get_campaign_owned(campaign.id, user_id, db)
+    return await get_campaign_owned(campaign.id, user_id, db)
 
 
 @router.get(
@@ -103,7 +64,7 @@ async def list_campaigns(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """List all campaigns for a project."""
-    await _verify_project_ownership(project_id, user_id, db)
+    await verify_project_ownership(project_id, user_id, db)
 
     stmt = (
         select(CampaignORM_V9)
@@ -122,7 +83,7 @@ async def get_campaign(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Get campaign detail with phases."""
-    return await _get_campaign_owned(campaign_id, user_id, db)
+    return await get_campaign_owned(campaign_id, user_id, db)
 
 
 @router.put("/campaigns/{campaign_id}", response_model=CampaignResponse)
@@ -133,9 +94,9 @@ async def update_campaign(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Update campaign fields (partial update)."""
-    campaign = await _get_campaign_owned(campaign_id, user_id, db)
+    campaign = await get_campaign_owned(campaign_id, user_id, db)
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(campaign, field, value)
     await db.flush()
-    return await _get_campaign_owned(campaign_id, user_id, db)
+    return await get_campaign_owned(campaign_id, user_id, db)

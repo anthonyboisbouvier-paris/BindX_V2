@@ -1,34 +1,24 @@
-import React from 'react'
+import React, { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { WorkspaceProvider } from './contexts/WorkspaceContext.jsx'
 import { ToastProvider } from './contexts/ToastContext.jsx'
 import { useAuth } from './contexts/AuthContext'
 
-// Layout
+// Layout — always loaded (shell)
 import SidebarLayout from './components/SidebarLayout.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import BindXLogo from './components/BindXLogo.jsx'
 
-// Auth pages
-import LoginPage from './pages/LoginPage.jsx'
-import RegisterPage from './pages/RegisterPage.jsx'
-import LandingPage from './pages/LandingPage.jsx'
-
-// Main pages
-import ProjectListPage from './pages/ProjectListPage.jsx'
-import ProjectHome from './pages/ProjectHome.jsx'
-
-// Phase dashboard
-import PhaseDashboard from './pages/PhaseDashboard.jsx'
-
-// Target setup
-import TargetSetup from './pages/TargetSetup.jsx'
-
-// Static pages
-import MethodologyPage from './components/MethodologyPage.jsx'
-
-// Debug / test
-import SurfaceTest from './pages/SurfaceTest.jsx'
+// Lazy-loaded pages (code-split per route)
+const LandingPage = lazy(() => import('./pages/LandingPage.jsx'))
+const LoginPage = lazy(() => import('./pages/LoginPage.jsx'))
+const RegisterPage = lazy(() => import('./pages/RegisterPage.jsx'))
+const ProjectListPage = lazy(() => import('./pages/ProjectListPage.jsx'))
+const ProjectHome = lazy(() => import('./pages/ProjectHome.jsx'))
+const PhaseDashboard = lazy(() => import('./pages/PhaseDashboard/index.jsx'))
+const TargetSetup = lazy(() => import('./pages/TargetSetup.jsx'))
+const MethodologyPage = lazy(() => import('./components/MethodologyPage.jsx'))
+const SurfaceTest = lazy(() => import('./pages/SurfaceTest.jsx'))
 
 // --------------------------------------------------
 // ProtectedRoute — redirects to /login if not authenticated
@@ -59,6 +49,11 @@ export default function App() {
     <ErrorBoundary>
     <ToastProvider>
     <WorkspaceProvider>
+    <Suspense fallback={
+      <div className="min-h-screen bg-bx-bg flex items-center justify-center">
+        <BindXLogo variant="loading" size={48} />
+      </div>
+    }>
       <Routes>
         {/* Debug test page (no auth) */}
         <Route path="/surface-test" element={<SurfaceTest />} />
@@ -96,6 +91,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
+    </Suspense>
     </WorkspaceProvider>
     </ToastProvider>
     </ErrorBoundary>

@@ -11,8 +11,8 @@ Project (1 cible) > Campaign (cible+pocket+regles) > Phase (A/B/C) > Run (unite 
 
 ### Stack
 - Backend : FastAPI + Celery + Redis + Supabase (PostgreSQL)
-- Frontend : React + Vite + Tailwind
-- Auth : Supabase Auth
+- Frontend : React + Vite + Tailwind + Zustand (state management)
+- Auth : Supabase Auth (ES256/JWKS)
 - Storage : Supabase Storage
 - Docking GPU : GNINA via RunPod serverless
 
@@ -29,20 +29,36 @@ Project (1 cible) > Campaign (cible+pocket+regles) > Phase (A/B/C) > Run (unite 
 BindX_V2/
 ├── docs/                    # Specs, CDC, methodes
 ├── backend/                 # FastAPI + pipeline + Celery
-│   ├── main.py             # API endpoints
-│   ├── models.py           # Pydantic + SQLAlchemy
-│   ├── database.py         # DB connection
-│   ├── auth.py             # JWT auth
-│   ├── tasks.py            # Celery tasks
+│   ├── main.py             # App setup + router mounting (~95 lignes)
+│   ├── routers/
+│   │   ├── v9/             # V9 API (CRUD projects/campaigns/phases/runs/molecules)
+│   │   │   ├── deps.py     # Shared ownership verification helpers
+│   │   │   ├── health.py, projects.py, campaigns.py
+│   │   │   ├── phases.py, runs.py, molecules.py
+│   │   └── v8_legacy.py    # 4 legacy endpoints (preview-target, detect-pockets, etc.)
+│   ├── models_v9.py        # SQLAlchemy ORM models
+│   ├── schemas_v9.py       # Pydantic schemas (request/response)
+│   ├── database_v9.py      # DB connection + session
+│   ├── auth_v9.py          # Supabase JWT (ES256/JWKS)
+│   ├── tasks_v9.py         # Celery tasks
 │   ├── celery_app.py       # Celery config
 │   ├── pipeline/           # 27 modules (docking, scoring, ADMET, agents...)
 │   ├── tests/              # Unit tests
 │   └── benchmarks/         # Kinase benchmark suite
-├── frontend/               # React + Vite
+├── frontend/               # React + Vite (code-split par route)
 │   └── src/
-│       ├── pages/          # ProjectListPage, ProjectHome, PhaseDashboard, PharmacoDB
-│       ├── components/     # 30+ composants (V9 + V8 reutilises)
-│       ├── contexts/       # WorkspaceContext, ToastContext, AuthContext
+│       ├── pages/
+│       │   ├── PhaseDashboard/  # Decompose en 3 fichiers
+│       │   │   ├── index.jsx           # Dashboard principal
+│       │   │   ├── MoleculeDetailPanel.jsx  # Panel detail + tabs
+│       │   │   └── PhaseHeader.jsx     # Header + stats + breadcrumb
+│       │   ├── ProjectListPage.jsx, ProjectHome.jsx
+│       │   ├── TargetSetup.jsx, LandingPage.jsx
+│       │   └── LoginPage.jsx, RegisterPage.jsx
+│       ├── components/     # 30+ composants (MoleculeTable virtualise)
+│       ├── stores/         # Zustand store
+│       │   └── workspaceStore.js  # State management central
+│       ├── contexts/       # React contexts (bridge Zustand + Auth + Toast)
 │       ├── mock/           # Mock data (dev)
 │       └── lib/            # Supabase client
 ├── infrastructure/         # Docker, Supabase, deploy

@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from auth_v9 import require_v9_user
 from database_v9 import get_v9_db
 from models_v9 import CampaignORM_V9, ProjectORM_V9
+from routers.v9.deps import get_project_owned
 from schemas_v9 import (
     ProjectCreate,
     ProjectListItem,
@@ -28,33 +29,6 @@ from schemas_v9 import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-async def _get_project_owned(
-    project_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> ProjectORM_V9:
-    """Fetch a project with campaigns→phases, verify ownership."""
-    stmt = (
-        select(ProjectORM_V9)
-        .where(ProjectORM_V9.id == project_id)
-        .options(
-            selectinload(ProjectORM_V9.campaigns)
-            .selectinload(CampaignORM_V9.phases)
-        )
-    )
-    result = await db.execute(stmt)
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if str(project.user_id) != user_id:
-        raise HTTPException(status_code=403, detail="Not your project")
-    return project
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +63,7 @@ async def create_project(
     await db.flush()
 
     # Reload with relationships
-    proj = await _get_project_owned(project.id, user_id, db)
+    proj = await get_project_owned(project.id, user_id, db)
     return proj
 
 
@@ -119,7 +93,7 @@ async def get_project(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Get project detail with campaigns and phases."""
-    return await _get_project_owned(project_id, user_id, db)
+    return await get_project_owned(project_id, user_id, db)
 
 
 @router.put("/projects/{project_id}", response_model=ProjectResponse)
@@ -130,13 +104,13 @@ async def update_project(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Update project fields (partial update)."""
-    project = await _get_project_owned(project_id, user_id, db)
+    project = await get_project_owned(project_id, user_id, db)
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(project, field, value)
     await db.flush()
     # Reload
-    return await _get_project_owned(project_id, user_id, db)
+    return await get_project_owned(project_id, user_id, db)
 
 
 @router.delete("/projects/{project_id}", status_code=204)
@@ -146,5 +120,5 @@ async def delete_project(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Delete a project and all its children (cascade)."""
-    project = await _get_project_owned(project_id, user_id, db)
+    project = await get_project_owned(project_id, user_id, db)
     await db.delete(project)

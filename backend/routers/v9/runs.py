@@ -16,16 +16,11 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from auth_v9 import require_v9_user
 from database_v9 import get_v9_db
-from models_v9 import (
-    CampaignORM_V9,
-    PhaseORM_V9,
-    ProjectORM_V9,
-    RunORM_V9,
-)
+from models_v9 import RunORM_V9
+from routers.v9.deps import get_phase_owned, get_run_owned
 from schemas_v9 import RunCreate, RunListItem, RunResponse
 
 logger = logging.getLogger(__name__)
@@ -37,57 +32,6 @@ VALID_CALCULATION_TYPES = {
     "docking", "admet", "scoring", "enrichment", "clustering",
     "off_target", "confidence", "retrosynthesis", "safety",
 }
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-async def _get_phase_for_run(
-    phase_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> PhaseORM_V9:
-    """Fetch phase and verify ownership via campaign→project."""
-    stmt = (
-        select(PhaseORM_V9)
-        .where(PhaseORM_V9.id == phase_id)
-        .options(
-            selectinload(PhaseORM_V9.campaign)
-            .selectinload(CampaignORM_V9.project)
-        )
-    )
-    result = await db.execute(stmt)
-    phase = result.scalar_one_or_none()
-    if not phase:
-        raise HTTPException(status_code=404, detail="Phase not found")
-    if str(phase.campaign.project.user_id) != user_id:
-        raise HTTPException(status_code=403, detail="Not your phase")
-    return phase
-
-
-async def _get_run_owned(
-    run_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> RunORM_V9:
-    """Fetch run and verify ownership via phase→campaign→project."""
-    stmt = (
-        select(RunORM_V9)
-        .where(RunORM_V9.id == run_id)
-        .options(
-            selectinload(RunORM_V9.phase)
-            .selectinload(PhaseORM_V9.campaign)
-            .selectinload(CampaignORM_V9.project)
-        )
-    )
-    result = await db.execute(stmt)
-    run = result.scalar_one_or_none()
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
-    if str(run.phase.campaign.project.user_id) != user_id:
-        raise HTTPException(status_code=403, detail="Not your run")
-    return run
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +56,7 @@ async def create_run(
             detail=f"Invalid run type. Must be one of: {', '.join(VALID_RUN_TYPES)}",
         )
 
-    phase = await _get_phase_for_run(phase_id, user_id, db)
+    phase = await get_phase_owned(phase_id, user_id, db)
 
     if phase.status == "frozen":
         raise HTTPException(status_code=400, detail="Cannot create runs on a frozen phase")
@@ -179,7 +123,7 @@ async def list_runs(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """List all runs for a phase."""
-    await _get_phase_for_run(phase_id, user_id, db)
+    await get_phase_owned(phase_id, user_id, db)
 
     stmt = (
         select(RunORM_V9)
@@ -197,7 +141,7 @@ async def get_run(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Get run detail with progress."""
-    return await _get_run_owned(run_id, user_id, db)
+    return await get_run_owned(run_id, user_id, db)
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunResponse)
@@ -207,7 +151,7 @@ async def cancel_run(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Cancel a running run."""
-    run = await _get_run_owned(run_id, user_id, db)
+    run = await get_run_owned(run_id, user_id, db)
     if run.status not in ("created", "running"):
         raise HTTPException(
             status_code=400, detail=f"Cannot cancel run with status '{run.status}'"
@@ -232,7 +176,7 @@ async def archive_run(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Archive a run (soft delete)."""
-    run = await _get_run_owned(run_id, user_id, db)
+    run = await get_run_owned(run_id, user_id, db)
     if run.status in ("created", "running"):
         raise HTTPException(
             status_code=400, detail="Cannot archive a run that is still running"
@@ -254,7 +198,7 @@ async def import_file(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Upload an SDF/SMILES/CSV file and create an import run."""
-    phase = await _get_phase_for_run(phase_id, user_id, db)
+    phase = await get_phase_owned(phase_id, user_id, db)
 
     if phase.status == "frozen":
         raise HTTPException(status_code=400, detail="Cannot import to a frozen phase")
@@ -324,7 +268,7 @@ async def import_from_database(
 
     Body: {databases: ["chembl","pubchem",...], uniprot_id, max_per_source}
     """
-    phase = await _get_phase_for_run(phase_id, user_id, db)
+    phase = await get_phase_owned(phase_id, user_id, db)
 
     if phase.status == "frozen":
         raise HTTPException(status_code=400, detail="Cannot import to a frozen phase")

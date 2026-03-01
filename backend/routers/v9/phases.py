@@ -19,17 +19,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
 from auth_v9 import require_v9_user
 from database_v9 import get_v9_db
 from models_v9 import (
-    CampaignORM_V9,
     MoleculeORM_V9,
     PhaseORM_V9,
-    ProjectORM_V9,
     RunORM_V9,
 )
+from routers.v9.deps import get_campaign_owned, get_phase_owned
 from schemas_v9 import (
     FreezeResponse,
     PhaseCreate,
@@ -51,53 +48,6 @@ PHASE_ORDER = {
 }
 
 VALID_PHASE_TYPES = set(PHASE_ORDER.keys())
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-async def _verify_campaign_ownership(
-    campaign_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> CampaignORM_V9:
-    """Fetch campaign and verify ownership via parent project."""
-    stmt = (
-        select(CampaignORM_V9)
-        .where(CampaignORM_V9.id == campaign_id)
-        .options(selectinload(CampaignORM_V9.project))
-    )
-    result = await db.execute(stmt)
-    campaign = result.scalar_one_or_none()
-    if not campaign:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-    if str(campaign.project.user_id) != user_id:
-        raise HTTPException(status_code=403, detail="Not your campaign")
-    return campaign
-
-
-async def _get_phase_owned(
-    phase_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> PhaseORM_V9:
-    """Fetch phase and verify ownership via campaign→project."""
-    stmt = (
-        select(PhaseORM_V9)
-        .where(PhaseORM_V9.id == phase_id)
-        .options(
-            selectinload(PhaseORM_V9.campaign)
-            .selectinload(CampaignORM_V9.project)
-        )
-    )
-    result = await db.execute(stmt)
-    phase = result.scalar_one_or_none()
-    if not phase:
-        raise HTTPException(status_code=404, detail="Phase not found")
-    if str(phase.campaign.project.user_id) != user_id:
-        raise HTTPException(status_code=403, detail="Not your phase")
-    return phase
 
 
 async def _phase_stats(phase_id: UUID, db: AsyncSession) -> dict:
@@ -153,7 +103,7 @@ async def create_phase(
             detail=f"Invalid phase type. Must be one of: {', '.join(VALID_PHASE_TYPES)}",
         )
 
-    campaign = await _verify_campaign_ownership(campaign_id, user_id, db)
+    await get_campaign_owned(campaign_id, user_id, db)
 
     # Check for duplicate type
     dup = await db.execute(
@@ -199,7 +149,7 @@ async def list_phases(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """List all phases for a campaign."""
-    await _verify_campaign_ownership(campaign_id, user_id, db)
+    await get_campaign_owned(campaign_id, user_id, db)
 
     stmt = (
         select(PhaseORM_V9)
@@ -217,7 +167,7 @@ async def get_phase(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Get phase detail with computed stats."""
-    phase = await _get_phase_owned(phase_id, user_id, db)
+    phase = await get_phase_owned(phase_id, user_id, db)
     stats = await _phase_stats(phase_id, db)
     return PhaseResponse(
         id=phase.id,
@@ -238,7 +188,7 @@ async def update_phase(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Update phase. Rejects if frozen (400)."""
-    phase = await _get_phase_owned(phase_id, user_id, db)
+    phase = await get_phase_owned(phase_id, user_id, db)
     if phase.status == "frozen":
         raise HTTPException(status_code=400, detail="Cannot update a frozen phase")
 
@@ -256,7 +206,7 @@ async def freeze_phase(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Freeze a phase: set status=frozen, frozen_at=now(). Returns bookmarked count."""
-    phase = await _get_phase_owned(phase_id, user_id, db)
+    phase = await get_phase_owned(phase_id, user_id, db)
     if phase.status == "frozen":
         raise HTTPException(status_code=400, detail="Phase is already frozen")
 
@@ -288,7 +238,7 @@ async def unfreeze_phase(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Unfreeze a phase. Warns if downstream phases have runs."""
-    phase = await _get_phase_owned(phase_id, user_id, db)
+    phase = await get_phase_owned(phase_id, user_id, db)
     if phase.status != "frozen":
         raise HTTPException(status_code=400, detail="Phase is not frozen")
 

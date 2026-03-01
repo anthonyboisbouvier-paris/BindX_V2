@@ -20,12 +20,10 @@ from sqlalchemy.orm import selectinload
 from auth_v9 import require_v9_user
 from database_v9 import get_v9_db
 from models_v9 import (
-    CampaignORM_V9,
     MoleculeORM_V9,
     MoleculePropertyORM_V9,
-    PhaseORM_V9,
-    ProjectORM_V9,
 )
+from routers.v9.deps import get_molecule_owned, get_phase_owned
 from schemas_v9 import (
     BookmarkRequest,
     MoleculeListResponse,
@@ -66,58 +64,6 @@ def _decode_cursor(cursor: str) -> tuple:
         return payload["v"], UUID(payload["id"])
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid cursor")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-async def _verify_phase_ownership(
-    phase_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> PhaseORM_V9:
-    """Fetch phase and verify ownership via campaign→project."""
-    stmt = (
-        select(PhaseORM_V9)
-        .where(PhaseORM_V9.id == phase_id)
-        .options(
-            selectinload(PhaseORM_V9.campaign)
-            .selectinload(CampaignORM_V9.project)
-        )
-    )
-    result = await db.execute(stmt)
-    phase = result.scalar_one_or_none()
-    if not phase:
-        raise HTTPException(status_code=404, detail="Phase not found")
-    if str(phase.campaign.project.user_id) != user_id:
-        raise HTTPException(status_code=403, detail="Not your phase")
-    return phase
-
-
-async def _get_molecule_owned(
-    molecule_id: UUID,
-    user_id: str,
-    db: AsyncSession,
-) -> MoleculeORM_V9:
-    """Fetch molecule and verify ownership via phase→campaign→project."""
-    stmt = (
-        select(MoleculeORM_V9)
-        .where(MoleculeORM_V9.id == molecule_id)
-        .options(
-            selectinload(MoleculeORM_V9.properties),
-            selectinload(MoleculeORM_V9.phase)
-            .selectinload(PhaseORM_V9.campaign)
-            .selectinload(CampaignORM_V9.project),
-        )
-    )
-    result = await db.execute(stmt)
-    mol = result.scalar_one_or_none()
-    if not mol:
-        raise HTTPException(status_code=404, detail="Molecule not found")
-    if str(mol.phase.campaign.project.user_id) != user_id:
-        raise HTTPException(status_code=403, detail="Not your molecule")
-    return mol
 
 
 def _mol_to_response(mol: MoleculeORM_V9) -> MoleculeResponse:
@@ -168,7 +114,7 @@ async def list_molecules(
     Supports keyset cursor pagination (preferred for large datasets) and
     offset-based pagination (fallback).
     """
-    await _verify_phase_ownership(phase_id, user_id, db)
+    await get_phase_owned(phase_id, user_id, db)
 
     # --- Base filter ---
     base_where = [MoleculeORM_V9.phase_id == phase_id]
@@ -302,7 +248,7 @@ async def molecule_stats(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Lightweight stats for a phase: total, bookmarked, ai_generated."""
-    await _verify_phase_ownership(phase_id, user_id, db)
+    await get_phase_owned(phase_id, user_id, db)
 
     stmt = select(
         func.count().label("total"),
@@ -327,7 +273,7 @@ async def get_molecule(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Get molecule detail with all properties."""
-    mol = await _get_molecule_owned(molecule_id, user_id, db)
+    mol = await get_molecule_owned(molecule_id, user_id, db)
     return _mol_to_response(mol)
 
 
@@ -339,7 +285,7 @@ async def bookmark_molecule(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Toggle bookmark on a single molecule."""
-    mol = await _get_molecule_owned(molecule_id, user_id, db)
+    mol = await get_molecule_owned(molecule_id, user_id, db)
     mol.bookmarked = bookmarked
     await db.flush()
     return _mol_to_response(mol)
@@ -353,7 +299,7 @@ async def bookmark_batch(
     db: AsyncSession = Depends(get_v9_db),
 ):
     """Bookmark or unbookmark multiple molecules at once."""
-    await _verify_phase_ownership(phase_id, user_id, db)
+    await get_phase_owned(phase_id, user_id, db)
 
     # Fetch all target molecules in this phase
     stmt = (
