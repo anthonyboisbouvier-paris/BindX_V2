@@ -261,11 +261,17 @@ class RunListItem(BaseModel):
     id: uuid.UUID
     phase_id: uuid.UUID
     type: str
+    calculation_types: Optional[List[str]] = None
     status: str
+    config: dict = {}
     progress: int = 0
     current_step: Optional[str] = None
+    error_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     archived: bool = False
     created_at: datetime
+    logs: List[RunLogEntryOut] = []
 
 
 # ---------------------------------------------------------------------------
