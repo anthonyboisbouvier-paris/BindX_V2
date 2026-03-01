@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
-import { ALL_COLUMNS, COLUMN_PRESETS, PHASE_TYPES, MOLECULE_DETAILS } from '../mock/data.js'
+import { ALL_COLUMNS, COLUMN_PRESETS, PHASE_TYPES, flattenMoleculeProperties, detectAvailableColumns } from '../lib/columns.js'
 
 import MoleculeTable from '../components/MoleculeTable.jsx'
 import SelectionToolbar from '../components/SelectionToolbar.jsx'
@@ -16,27 +16,13 @@ import FreezeDialog from '../components/FreezeDialog.jsx'
 import ParetoFront from '../components/ParetoFront.jsx'
 import Badge from '../components/Badge.jsx'
 import BindXLogo from '../components/BindXLogo.jsx'
-
-// ---------------------------------------------------------------------------
-// CSV export helper
-// ---------------------------------------------------------------------------
-function exportCSV(molecules, columns, filename = 'molecules.csv') {
-  const header = columns.map(c => `"${c.label}"`).join(',')
-  const rows = molecules.map(m =>
-    columns.map(c => {
-      const v = m[c.key]
-      if (v == null) return ''
-      if (typeof v === 'string') return `"${v.replace(/"/g, '""')}"`
-      return v
-    }).join(',')
-  )
-  const csv = [header, ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
+import ProteinViewer from '../components/ProteinViewer.jsx'
+import SafetyReport from '../components/SafetyReport.jsx'
+import SynthesisTree from '../components/SynthesisTree.jsx'
+import ConfidenceBreakdown from '../components/ConfidenceBreakdown.jsx'
+import ExportModal from '../components/ExportModal.jsx'
+import CampaignAgentPanel from '../components/CampaignAgentPanel.jsx'
+import InfoTip, { TIPS } from '../components/InfoTip.jsx'
 
 // ---------------------------------------------------------------------------
 // Freeze Banner
@@ -267,14 +253,35 @@ function PropertiesTab({ mol }) {
 }
 
 function AdmetTab({ mol }) {
-  if (!mol.admet) {
+  // Try mol.admet first (nested), then reconstruct from flat properties
+  const admet = mol.admet || (() => {
+    const keys = ['oral_bioavailability', 'solubility', 'BBB', 'metabolic_stability', 'hERG', 'QED']
+    const found = keys.filter(k => mol[k] != null)
+    if (!found.length) return null
+    const obj = {}
+    found.forEach(k => { obj[k] = mol[k] })
+    return obj
+  })()
+  if (!admet) {
     return <p className="text-sm text-gray-400 text-center py-4">No ADMET data — run the ADMET analysis first.</p>
   }
-  return <AdmetRadar admet={mol.admet} />
+  return <AdmetRadar admet={admet} />
 }
 
 function SafetyTab({ mol, details }) {
-  const safety = details?.safety
+  // Try details.safety first, then reconstruct from flat molecule props
+  const safety = details?.safety || (() => {
+    const hasAny = mol.herg_risk != null || mol.ames_mutagenicity != null || mol.hepatotoxicity != null ||
+                   mol.pains_alert != null || mol.safety_color_code != null
+    if (!hasAny) return null
+    return {
+      herg_risk: mol.herg_risk ?? mol.hERG ?? null,
+      ames_risk: mol.ames_mutagenicity ?? null,
+      hepatotox_risk: mol.hepatotoxicity ?? null,
+      pains_pass: mol.pains_alert != null ? !mol.pains_alert : null,
+      pains_alerts: mol.pains_alert ? [mol.pains_alert] : [],
+    }
+  })()
   if (!safety) {
     return <p className="text-sm text-gray-400 text-center py-4">No safety data available for this molecule.</p>
   }
@@ -484,26 +491,130 @@ function InteractionsTab({ details }) {
 }
 
 // ---------------------------------------------------------------------------
+// Detail Popup Modal — Safety / Synthesis / Confidence
+// ---------------------------------------------------------------------------
+function DetailPopupModal({ type, molecule, onClose }) {
+  if (!molecule) return null
+
+  const props = molecule.properties || {}
+  const flat = molecule // already flattened
+
+  const titleMap = {
+    safety: 'Safety Report',
+    retrosynthesis: 'Retrosynthesis Analysis',
+    confidence: 'Confidence Breakdown',
+  }
+
+  const content = (() => {
+    switch (type) {
+      case 'safety':
+        return (
+          <SafetyReport
+            offTargetResults={props.safety?.off_target || props.off_target || null}
+            moleculeName={molecule.name || molecule.id}
+          />
+        )
+      case 'retrosynthesis':
+        return (
+          <SynthesisTree
+            synthesisRoute={props.retrosynthesis || null}
+          />
+        )
+      case 'confidence':
+        return (
+          <ConfidenceBreakdown
+            confidence={props.confidence || (flat.confidence_score != null ? {
+              overall: flat.confidence_score,
+              components: {
+                structure: { score: flat.structure_confidence, label: 'Structure' },
+                docking: { score: flat.docking_confidence, label: 'Docking' },
+                admet: { score: flat.admet_confidence, label: 'ADMET' },
+              },
+              flags: flat.confidence_flags || [],
+            } : null)}
+            moleculeName={molecule.name || molecule.id}
+            pipeline_summary={props.pipeline_summary || null}
+          />
+        )
+      default:
+        return <p className="text-gray-400 text-sm p-6">Unknown popup type: {type}</p>
+    }
+  })()
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col animate-in"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <h3 className="text-base font-bold text-gray-800">{titleMap[type] || 'Details'}</h3>
+            <span className="text-sm text-gray-400">{molecule.name || molecule.id}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="overflow-y-auto flex-1 p-6" style={{ scrollbarWidth: 'thin' }}>
+          {content}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Molecule Detail Panel (inline drawer)
 // ---------------------------------------------------------------------------
 const TABS = [
-  { id: 'scores',       label: 'Scores' },
-  { id: 'properties',   label: 'Props' },
-  { id: 'admet',        label: 'ADMET' },
-  { id: 'safety',       label: 'Safety' },
-  { id: 'synthesis',    label: 'Synth.' },
-  { id: 'interactions', label: 'Interact.' },
+  { id: 'scores',       label: 'Scores',     tip: 'Docking and composite scores from computational screening' },
+  { id: 'properties',   label: 'Props',      tip: 'Physicochemical properties: MW, logP, TPSA, Lipinski Ro5' },
+  { id: 'admet',        label: 'ADMET',      tip: 'Absorption, Distribution, Metabolism, Excretion, Toxicity predictions' },
+  { id: 'safety',       label: 'Safety',     tip: 'Safety profile: hERG, AMES mutagenicity, hepatotoxicity, PAINS filters' },
+  { id: 'synthesis',    label: 'Synth.',     tip: 'Retrosynthesis feasibility, estimated cost, and synthetic route' },
+  { id: 'interactions', label: 'Interact.',  tip: 'Protein-ligand interaction fingerprints (ProLIF): H-bonds, hydrophobic, ionic contacts' },
 ]
 
-function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, isFrozen }) {
+function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, onRowClick, isFrozen, project }) {
   const [activeTab, setActiveTab] = useState('scores')
   const [copied, setCopied] = useState(false)
+
+  // Extract target structure info from project
+  const targetPreview = project?.target_preview || {}
+  const pdbUrl = targetPreview.structure?.download_url || null
+  const selectedPocket = useMemo(() => {
+    const pockets = targetPreview.pockets || []
+    const idx = targetPreview.selected_pocket_index
+    return idx != null && pockets[idx] ? pockets[idx] : null
+  }, [targetPreview])
 
   const currentIdx = molecules.findIndex(m => m.id === molecule.id)
   const prevMol = currentIdx > 0 ? molecules[currentIdx - 1] : null
   const nextMol = currentIdx < molecules.length - 1 ? molecules[currentIdx + 1] : null
 
-  const details = MOLECULE_DETAILS[molecule.id] || null
+  // Build details from molecule properties (API data, not mock)
+  const details = useMemo(() => {
+    const props = molecule.properties || {}
+    return {
+      interactions: props.enrichment || null,
+      synthesis: props.retrosynthesis ? {
+        feasibility: props.retrosynthesis.synth_confidence,
+        total_cost: props.retrosynthesis.synth_cost_estimate,
+        num_steps: props.retrosynthesis.n_synth_steps,
+        steps: props.retrosynthesis.steps || [],
+      } : null,
+    }
+  }, [molecule])
 
   function copySmiles() {
     if (!molecule.smiles) return
@@ -560,25 +671,32 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
       <div className="overflow-y-auto flex-1 p-4 space-y-4"
         style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
 
-        {/* 3D Viewer placeholder */}
-        <div className="rounded-xl bg-[#0a0d15] border border-bx-surface/30 overflow-hidden">
-          <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-red-500" />
-              <div className="w-2 h-2 rounded-full bg-amber-400" />
-              <div className="w-2 h-2 rounded-full bg-green-400" />
-              <span className="ml-1 text-[10px] font-semibold text-white/50 uppercase tracking-wide">3D Structure</span>
+        {/* 3D Viewer */}
+        {pdbUrl ? (
+          <ProteinViewer
+            pdbUrl={pdbUrl}
+            selectedPocket={selectedPocket}
+            height={280}
+          />
+        ) : (
+          <div className="rounded-xl bg-[#0a0d15] border border-bx-surface/30 overflow-hidden">
+            <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-red-500" />
+                <div className="w-2 h-2 rounded-full bg-amber-400" />
+                <div className="w-2 h-2 rounded-full bg-green-400" />
+                <span className="ml-1 text-[10px] font-semibold text-white/50 uppercase tracking-wide">3D Structure</span>
+              </div>
             </div>
-            <span className="text-[9px] text-white/25 font-mono">backend not connected</span>
+            <div className="h-28 flex flex-col items-center justify-center gap-2">
+              <svg className="w-10 h-10 text-bx-light-text/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
+                  d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
+              </svg>
+              <p className="text-[10px] text-white/25">Configure target in Target Setup to view structure</p>
+            </div>
           </div>
-          <div className="h-28 flex flex-col items-center justify-center gap-2">
-            <svg className="w-10 h-10 text-bx-light-text/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={0.75}
-                d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
-            </svg>
-            <p className="text-[10px] text-white/25">Connect backend to enable 3D visualization</p>
-          </div>
-        </div>
+        )}
 
         {/* Tabs */}
         <div>
@@ -588,13 +706,14 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, i
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-shrink-0 px-2.5 py-2 text-sm font-semibold border-b-2 transition-all duration-150 whitespace-nowrap ${
+                className={`flex-shrink-0 px-2.5 py-2 text-sm font-semibold border-b-2 transition-all duration-150 whitespace-nowrap inline-flex items-center ${
                   activeTab === tab.id
                     ? 'border-bx-surface text-bx-light-text'
                     : 'border-transparent text-gray-400 hover:text-gray-600 hover:border-gray-200'
                 }`}
               >
                 {tab.label}
+                {tab.tip && <InfoTip text={tab.tip} size="xs" />}
               </button>
             ))}
           </div>
@@ -705,6 +824,7 @@ export default function PhaseDashboard() {
     cancelRun,
     archiveRun,
     importFile,
+    importDatabase,
   } = useWorkspace()
 
   const { addToast } = useToast()
@@ -713,19 +833,62 @@ export default function PhaseDashboard() {
   useEffect(() => { if (projectId) selectProject(projectId) }, [projectId, selectProject])
   useEffect(() => { if (phaseId) selectPhase(phaseId) }, [phaseId, selectPhase])
 
+  // --- Flatten molecule properties from API (EAV → flat columns) ---
+  const flatMolecules = useMemo(
+    () => phaseMolecules.map(flattenMoleculeProperties),
+    [phaseMolecules]
+  )
+
+  // --- Detect which columns have data ---
+  const availableColumns = useMemo(
+    () => detectAvailableColumns(flatMolecules),
+    [flatMolecules]
+  )
+
+  // --- User annotations (tags, invalidation, comments) — local state keyed by mol id ---
+  const [annotations, setAnnotations] = useState({}) // { molId: { tags: [...], invalidated: bool, user_comment: '...' } }
+
+  const handleAnnotation = useCallback((molId, key, value) => {
+    setAnnotations(prev => ({
+      ...prev,
+      [molId]: { ...(prev[molId] || {}), [key]: value },
+    }))
+  }, [])
+
+  // Merge annotations into flat molecules
+  const annotatedMolecules = useMemo(
+    () => flatMolecules.map(m => ({ ...m, ...(annotations[m.id] || {}) })),
+    [flatMolecules, annotations]
+  )
+
   // --- Local UI state ---
   const [selectedMolecule, setSelectedMolecule] = useState(null)
   const [showRunCreator, setShowRunCreator] = useState(false)
-  const [showPareto, setShowPareto] = useState(false)
+  const [showPareto, setShowPareto] = useState(true)
   const [showFreezeDialog, setShowFreezeDialog] = useState(false)
-  const [filteredMolecules, setFilteredMolecules] = useState(phaseMolecules)
+  const [filteredMolecules, setFilteredMolecules] = useState(annotatedMolecules)
+  const [popupState, setPopupState] = useState(null) // { type: 'safety'|'retrosynthesis'|'confidence', molecule }
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [showAgentPanel, setShowAgentPanel] = useState(false)
+  const [showRunLogs, setShowRunLogs] = useState(false)
 
   // Update filtered whenever phase molecules change
-  useEffect(() => { setFilteredMolecules(phaseMolecules) }, [phaseMolecules])
+  useEffect(() => { setFilteredMolecules(annotatedMolecules) }, [annotatedMolecules])
 
-  // Active run (first created/running run)
+  // Auto-select first molecule when molecules load and none is selected
+  useEffect(() => {
+    if (flatMolecules.length > 0 && !selectedMolecule) {
+      setSelectedMolecule(flatMolecules[0])
+    }
+  }, [flatMolecules.length])
+
+  // Active run (first created/running run) + queued count
   const activeRun = useMemo(
     () => currentPhaseRuns.find(r => r.status === 'created' || r.status === 'running') || null,
+    [currentPhaseRuns]
+  )
+  const queuedRunCount = useMemo(
+    () => Math.max(0, currentPhaseRuns.filter(r => r.status === 'created' || r.status === 'running').length - 1),
     [currentPhaseRuns]
   )
 
@@ -748,17 +911,25 @@ export default function PhaseDashboard() {
     }
   }, [currentPhaseRuns, addToast])
 
-  // Column visibility — init from phase preset
+  // Column visibility — show all available columns by default (CDC §4.1)
   const [visibleKeys, setVisibleKeys] = useState(() => COLUMN_PRESETS.hit_discovery)
+  const availableKeysStr = useMemo(
+    () => availableColumns.map(c => c.key).join(','),
+    [availableColumns]
+  )
   useEffect(() => {
     if (currentPhase) {
-      const preset = currentPhase.column_presets?.length
-        ? currentPhase.column_presets
-        : COLUMN_PRESETS[currentPhase.type] || COLUMN_PRESETS.hit_discovery
-      setVisibleKeys(preset)
+      // CDC: "all columns with results are shown by default"
+      // Use available columns if we have data, otherwise fall back to phase preset
+      if (availableColumns.length > 1) {
+        setVisibleKeys(availableColumns.map(c => c.key))
+      } else {
+        const preset = COLUMN_PRESETS[currentPhase.type] || COLUMN_PRESETS.hit_discovery
+        setVisibleKeys(preset)
+      }
       setSelectedMolecule(null)
     }
-  }, [currentPhase?.id])
+  }, [currentPhase?.id, availableKeysStr])
 
   // Freeze status
   const freezeOverride = currentPhase ? getPhaseStatus(currentPhase.id) : null
@@ -776,8 +947,8 @@ export default function PhaseDashboard() {
 
   // Bookmarked count (live)
   const bookmarkedCount = useMemo(
-    () => phaseMolecules.filter(m => m.bookmarked).length,
-    [phaseMolecules]
+    () => flatMolecules.filter(m => m.bookmarked).length,
+    [flatMolecules]
   )
 
   // Live stats
@@ -786,12 +957,12 @@ export default function PhaseDashboard() {
     const completedRuns = currentPhaseRuns.filter(r => r.status === 'completed').length
     const runningRuns = currentPhaseRuns.filter(r => r.status === 'running' || r.status === 'created').length
     return {
-      total_molecules: phaseMolecules.length,
+      total_molecules: flatMolecules.length,
       bookmarked: bookmarkedCount,
       runs_completed: completedRuns,
       runs_running: runningRuns,
     }
-  }, [currentPhase, currentPhaseRuns, phaseMolecules, bookmarkedCount])
+  }, [currentPhase, currentPhaseRuns, flatMolecules, bookmarkedCount])
 
   // Number of active filters
   const [activeFilterCount, setActiveFilterCount] = useState(0)
@@ -807,6 +978,12 @@ export default function PhaseDashboard() {
 
   const handleCloseDetail = useCallback(() => setSelectedMolecule(null), [])
 
+  const handleCellPopup = useCallback((type, mol) => {
+    // Find the original molecule with full properties (not flattened)
+    const original = phaseMolecules.find(m => m.id === mol.id)
+    setPopupState({ type, molecule: { ...mol, properties: original?.properties || {} } })
+  }, [phaseMolecules])
+
   const [runSubmitting, setRunSubmitting] = useState(false)
 
   const handleNewRun = useCallback(() => {
@@ -821,15 +998,45 @@ export default function PhaseDashboard() {
     if (!phaseId) return
     try {
       setRunSubmitting(true)
-      await createRun(phaseId, runConfig)
+
+      if (runConfig.type === 'import' && runConfig.config?.sourceMode === 'external' && runConfig.config?._file) {
+        // File upload import
+        await importFile(phaseId, runConfig.config._file)
+        addToast('File uploaded and import started', 'success')
+      } else if (runConfig.type === 'import' && runConfig.config?.sourceMode === 'internal') {
+        // Internal import — bookmarked molecules from another phase
+        await createRun(phaseId, {
+          type: 'import',
+          config: {
+            source: 'phase_selection',
+            selection: 'bookmarked',
+            source_phase_id: runConfig.config.source_phase_id,
+          },
+        })
+        addToast('Importing bookmarked molecules...', 'success')
+      } else if (runConfig.type === 'import' && runConfig.config?.sourceMode === 'database') {
+        // Database import — get uniprot_id from project target
+        const uniprotId = currentProject?.target_input_value || currentProject?.target_preview?.uniprot?.id || ''
+        await importDatabase(phaseId, {
+          databases: runConfig.config.databases,
+          uniprot_id: uniprotId,
+          max_per_source: runConfig.config.maxPerSource || 50,
+          filters: runConfig.config.filters || {},
+        })
+        addToast(`Fetching compounds from ${runConfig.config.databases.join(', ')}...`, 'success')
+      } else {
+        // Standard run (calculation, generation, SMILES import)
+        await createRun(phaseId, runConfig)
+        addToast('Run created and dispatched', 'success')
+      }
+
       setShowRunCreator(false)
-      addToast('Run created and dispatched', 'success')
     } catch (err) {
-      addToast(err.userMessage || 'Failed to create run', 'error')
+      addToast(err.userMessage || err.message || 'Failed to create run', 'error')
     } finally {
       setRunSubmitting(false)
     }
-  }, [phaseId, createRun, addToast])
+  }, [phaseId, createRun, importFile, importDatabase, currentProject, addToast])
 
   const handleCancelRun = useCallback(async (runId) => {
     try {
@@ -849,24 +1056,27 @@ export default function PhaseDashboard() {
     }
   }, [archiveRun, addToast])
 
-  const handleExport = useCallback((type) => {
-    const allCols = ALL_COLUMNS
-    if (type === 'csv_visible') exportCSV(filteredMolecules, visibleColumns, 'molecules_visible.csv')
-    else if (type === 'csv_all') exportCSV(filteredMolecules, allCols, 'molecules_all.csv')
-    else if (type === 'sdf') addToast('SDF export requires backend connection', 'info')
-    else if (type === 'pdf') addToast('PDF export requires backend connection', 'info')
-  }, [filteredMolecules, visibleColumns])
+  const handleExport = useCallback(() => {
+    setShowExportModal(true)
+  }, [])
 
   const handleFreezeToggle = useCallback(() => setShowFreezeDialog(true), [])
   const handleFreezeConfirm = useCallback(() => {
     if (!currentPhase) return
-    isFrozen ? unfreezePhase(currentPhase.id) : freezePhase(currentPhase.id)
-  }, [isFrozen, currentPhase, freezePhase, unfreezePhase])
+    if (isFrozen) {
+      unfreezePhase(currentPhase.id)
+      addToast('Phase unfrozen — you can now modify molecules and run analyses', 'info')
+    } else {
+      const bCount = flatMolecules.filter(m => m.bookmarked).length
+      freezePhase(currentPhase.id)
+      addToast(`Phase frozen — ${bCount} bookmarked molecule${bCount !== 1 ? 's' : ''} locked for next phase`, 'success')
+    }
+  }, [isFrozen, currentPhase, freezePhase, unfreezePhase, addToast, flatMolecules])
 
   const handleSelectAll = useCallback(() => {
-    if (phaseMolecules.every(m => selectedMoleculeIds.has(m.id))) selectNone()
+    if (flatMolecules.every(m => selectedMoleculeIds.has(m.id))) selectNone()
     else selectAll()
-  }, [phaseMolecules, selectedMoleculeIds, selectAll, selectNone])
+  }, [flatMolecules, selectedMoleculeIds, selectAll, selectNone])
 
   const handleSelectFiltered = useCallback(() => {
     filteredMolecules.forEach(m => {
@@ -881,6 +1091,36 @@ export default function PhaseDashboard() {
     if (myIdx < 0) return false
     return phases.slice(myIdx + 1).some(p => (p.runs || []).length > 0)
   }, [currentCampaign, currentPhase])
+
+  // Send bookmarks to next phase
+  const navigate = useNavigate()
+  const handleSendToNextPhase = useCallback(async () => {
+    if (!currentCampaign || !currentPhase) return
+    const phases = currentCampaign.phases || []
+    const myIdx = phases.findIndex(p => p.id === currentPhase.id)
+    if (myIdx < 0) return
+
+    const nextPhase = phases[myIdx + 1]
+    if (!nextPhase) {
+      addToast('No next phase in this campaign. Create a new phase from the project page first.', 'warning')
+      return
+    }
+
+    try {
+      await createRun(nextPhase.id, {
+        type: 'import',
+        config: {
+          source: 'phase_selection',
+          selection: 'bookmarked',
+          source_phase_id: currentPhase.id,
+        },
+      })
+      addToast(`Sending ${bookmarkedCount} bookmarked molecules to ${nextPhase.label || 'next phase'}...`, 'success')
+      navigate(`/project/${projectId}/phase/${nextPhase.id}`)
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to send bookmarks to next phase', 'error')
+    }
+  }, [currentCampaign, currentPhase, createRun, bookmarkedCount, addToast, navigate, projectId])
 
   const showDetail = !!selectedMolecule
 
@@ -902,7 +1142,7 @@ export default function PhaseDashboard() {
   }
 
   // --- Empty phase (no molecules) ---
-  if (phaseMolecules.length === 0) {
+  if (flatMolecules.length === 0) {
     return (
       <div className="space-y-4 pb-8">
         {/* Breadcrumb */}
@@ -917,10 +1157,11 @@ export default function PhaseDashboard() {
           onFreezeToggle={handleFreezeToggle}
           onNewRun={handleNewRun}
           hasActiveRun={!!activeRun}
+          onOpenAgent={() => setShowAgentPanel(true)}
         />
 
         {/* Active run progress */}
-        <RunProgress run={activeRun} onCancel={handleCancelRun} />
+        <RunProgress run={activeRun} onCancel={handleCancelRun} queuedCount={queuedRunCount} />
 
         {/* Empty state */}
         <div className="card p-12 text-center">
@@ -968,6 +1209,7 @@ export default function PhaseDashboard() {
           onConfirm={handleFreezeConfirm}
           action={isFrozen ? 'unfreeze' : 'freeze'}
           phaseName={currentPhase.label}
+          bookmarkedMols={flatMolecules.filter(m => m.bookmarked)}
           hasDownstreamRuns={hasDownstreamRuns}
         />
       </div>
@@ -990,15 +1232,16 @@ export default function PhaseDashboard() {
         onFreezeToggle={handleFreezeToggle}
         onNewRun={handleNewRun}
         hasActiveRun={!!activeRun}
+        onOpenAgent={() => setShowAgentPanel(true)}
       />
 
       {/* Active run progress */}
-      <RunProgress run={activeRun} onCancel={handleCancelRun} />
+      <RunProgress run={activeRun} onCancel={handleCancelRun} queuedCount={queuedRunCount} />
 
       {/* Selection Toolbar */}
       <SelectionToolbar
         selectedCount={selectedMoleculeIds.size}
-        totalCount={phaseMolecules.length}
+        totalCount={flatMolecules.length}
         bookmarkedCount={bookmarkedCount}
         filteredCount={filteredMolecules.length}
         activeFilterCount={activeFilterCount}
@@ -1006,16 +1249,16 @@ export default function PhaseDashboard() {
         onSelectNone={selectNone}
         onSelectBookmarked={selectBookmarked}
         onSelectFiltered={handleSelectFiltered}
-        onNewRun={handleNewRun}
         onExport={handleExport}
         onBookmarkSelected={bookmarkSelected}
+        onSendToNextPhase={!isFrozen && bookmarkedCount > 0 ? handleSendToNextPhase : undefined}
         isFrozen={isFrozen}
       />
 
       {/* Filter bar */}
       <FilterBarWithCount
-        molecules={phaseMolecules}
-        columns={ALL_COLUMNS}
+        molecules={flatMolecules}
+        columns={availableColumns}
         onFilteredChange={handleFilteredChange}
         onFilterCountChange={setActiveFilterCount}
       />
@@ -1033,10 +1276,10 @@ export default function PhaseDashboard() {
                 onChange={setVisibleKeys}
               />
               <span className="text-sm text-gray-400 tabular-nums flex items-center gap-1.5">
-                {moleculesLoading && <BindXLogo variant="loading" size={12} />}
-                {filteredMolecules.length !== phaseMolecules.length
-                  ? `${filteredMolecules.length} of ${phaseMolecules.length} molecules`
-                  : `${phaseMolecules.length} molecules`}
+                {moleculesLoading && <BindXLogo variant="loading" size={20} />}
+                {filteredMolecules.length !== flatMolecules.length
+                  ? `${filteredMolecules.length} of ${flatMolecules.length} molecules`
+                  : `${flatMolecules.length} molecules`}
               </span>
             </div>
           </div>
@@ -1049,6 +1292,8 @@ export default function PhaseDashboard() {
             onSelectAll={handleSelectAll}
             onRowClick={handleRowClick}
             onToggleBookmark={isFrozen ? undefined : toggleBookmark}
+            onCellPopup={handleCellPopup}
+            onAnnotation={isFrozen ? undefined : handleAnnotation}
             activeRowId={selectedMolecule?.id || null}
           />
         </div>
@@ -1057,12 +1302,13 @@ export default function PhaseDashboard() {
         {showDetail && selectedMolecule && (
           <div className="flex-shrink-0 w-[40%] min-w-[300px] max-w-[520px]">
             <MoleculeDetailPanel
-              molecule={phaseMolecules.find(m => m.id === selectedMolecule.id) || selectedMolecule}
+              molecule={flatMolecules.find(m => m.id === selectedMolecule.id) || selectedMolecule}
               molecules={filteredMolecules}
               onClose={handleCloseDetail}
               onToggleBookmark={isFrozen ? undefined : toggleBookmark}
               onRowClick={handleRowClick}
               isFrozen={isFrozen}
+              project={currentProject}
             />
           </div>
         )}
@@ -1083,6 +1329,7 @@ export default function PhaseDashboard() {
                 d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
             <span className="font-semibold text-gray-700 text-sm">Pareto Analysis</span>
+            <InfoTip text={TIPS.pareto} size="xs" />
             <span className="text-sm text-gray-400">2D objective scatter plot</span>
           </div>
           <svg
@@ -1097,7 +1344,78 @@ export default function PhaseDashboard() {
             <ParetoFront
               molecules={filteredMolecules}
               onSelect={mol => mol && handleRowClick(mol)}
+              onToggleBookmark={isFrozen ? undefined : toggleBookmark}
             />
+          </div>
+        )}
+      </div>
+
+      {/* Run Logs (collapsible terminal) */}
+      <div className="card overflow-hidden">
+        <button
+          onClick={() => setShowRunLogs(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors text-left"
+        >
+          <div className="flex items-center gap-2.5">
+            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span className="font-semibold text-gray-700 text-sm">Run Logs</span>
+            {currentPhaseRuns.some(r => r.logs?.length > 0) && (
+              <span className="text-[10px] text-gray-400 tabular-nums">
+                {currentPhaseRuns.reduce((s, r) => s + (r.logs?.length || 0), 0)} entries
+              </span>
+            )}
+          </div>
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform duration-150 ${showRunLogs ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {showRunLogs && (
+          <div className="border-t border-gray-100">
+            <div className="bg-gray-900 rounded-b-lg max-h-64 overflow-y-auto px-4 py-3 font-mono text-xs space-y-0.5 scrollbar-thin">
+              {(() => {
+                const allLogs = currentPhaseRuns
+                  .filter(r => r.logs?.length > 0)
+                  .flatMap(r => (r.logs || []).map(log => ({
+                    ...log,
+                    runType: r.type,
+                    runId: r.id,
+                    ts: log.timestamp ? new Date(log.timestamp).getTime() : 0,
+                  })))
+                  .sort((a, b) => a.ts - b.ts)
+
+                if (allLogs.length === 0) {
+                  return (
+                    <div className="text-gray-500 text-center py-6">
+                      No run logs available yet. Logs will appear here when runs produce output.
+                    </div>
+                  )
+                }
+
+                return allLogs.map((log, i) => {
+                  const levelColor = log.level === 'error' ? 'text-red-400'
+                    : log.level === 'warn' || log.level === 'warning' ? 'text-amber-400'
+                    : log.level === 'success' ? 'text-emerald-400'
+                    : 'text-gray-400'
+                  return (
+                    <div key={i} className={`flex gap-2 ${levelColor}`}>
+                      {log.timestamp && (
+                        <span className="text-gray-600 flex-shrink-0 w-[70px]">
+                          {new Date(log.timestamp).toLocaleTimeString()}
+                        </span>
+                      )}
+                      <span className="text-gray-500 flex-shrink-0 w-[65px] truncate">[{log.runType || 'run'}]</span>
+                      <span className="break-all">{log.message || String(log)}</span>
+                    </div>
+                  )
+                })
+              })()}
+            </div>
           </div>
         )}
       </div>
@@ -1119,8 +1437,38 @@ export default function PhaseDashboard() {
         onConfirm={handleFreezeConfirm}
         action={isFrozen ? 'unfreeze' : 'freeze'}
         phaseName={phase.label}
+        bookmarkedMols={flatMolecules.filter(m => m.bookmarked)}
         hasDownstreamRuns={hasDownstreamRuns}
       />
+
+      {/* AI Agent panel */}
+      <CampaignAgentPanel
+        isOpen={showAgentPanel}
+        onClose={() => setShowAgentPanel(false)}
+        project={currentProject}
+        campaign={currentCampaign}
+        phase={currentPhase}
+        molecules={flatMolecules}
+      />
+
+      {/* Export modal */}
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        molecules={filteredMolecules}
+        selectedIds={selectedMoleculeIds}
+        columns={visibleColumns}
+        onToast={addToast}
+      />
+
+      {/* Detail popups (Safety / Synthesis / Confidence) */}
+      {popupState && (
+        <DetailPopupModal
+          type={popupState.type}
+          molecule={popupState.molecule}
+          onClose={() => setPopupState(null)}
+        />
+      )}
     </div>
   )
 }
@@ -1172,7 +1520,7 @@ function Breadcrumb({ projectId, projectName, phase, phaseTypeMeta }) {
 // ---------------------------------------------------------------------------
 // Phase Header card
 // ---------------------------------------------------------------------------
-function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun }) {
+function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun, onOpenAgent }) {
   return (
     <div className="card overflow-hidden">
       <div className={`h-1.5 ${isFrozen ? 'bg-blue-400' : 'bg-bx-mint'}`} />
@@ -1194,6 +1542,16 @@ function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, on
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenAgent}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all duration-150"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
+              </svg>
+              AI Agent
+            </button>
             <button
               onClick={onFreezeToggle}
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-all duration-150 ${

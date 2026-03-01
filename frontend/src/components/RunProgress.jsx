@@ -4,7 +4,7 @@ import BindXLogo from './BindXLogo.jsx'
 // ---------------------------------------------------------------------------
 // RunProgress — persistent banner showing active run status
 // ---------------------------------------------------------------------------
-export default function RunProgress({ run, onCancel }) {
+export default function RunProgress({ run, onCancel, queuedCount = 0 }) {
   if (!run) return null
 
   const isCreated = run.status === 'created'
@@ -21,7 +21,7 @@ export default function RunProgress({ run, onCancel }) {
         <div className="flex items-center gap-3 min-w-0">
           {/* Animated logo */}
           <div className="flex-shrink-0">
-            <BindXLogo variant="loading" size={28} />
+            <BindXLogo variant="loading" size={48} />
           </div>
 
           <div className="min-w-0">
@@ -50,6 +50,13 @@ export default function RunProgress({ run, onCancel }) {
             </div>
           </div>
         </div>
+
+        {/* Queue indicator */}
+        {queuedCount > 0 && (
+          <div className="flex-shrink-0 text-xs text-blue-500 bg-blue-100 px-2.5 py-1 rounded-full font-medium">
+            +{queuedCount} queued
+          </div>
+        )}
 
         {/* Right: cancel button */}
         {onCancel && (

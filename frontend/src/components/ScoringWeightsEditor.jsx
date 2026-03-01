@@ -6,6 +6,7 @@ import React, { useState, useCallback } from 'react'
 
 const WEIGHT_META = {
   docking_score: { label: 'Docking Score', color: '#3b82f6' },
+  cnn_score: { label: 'CNN Score', color: '#8b5cf6' },
   CNNscore: { label: 'CNN Score', color: '#8b5cf6' },
   logP: { label: 'LogP', color: '#06b6d4' },
   solubility: { label: 'Solubility', color: '#00e6a0' },

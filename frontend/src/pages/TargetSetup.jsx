@@ -622,11 +622,11 @@ export default function TargetSetup() {
           </div>
         )}
 
-        {/* Loading step indicator */}
+        {/* Loading step indicator — prominent centered display */}
         {loading && loadingStep && (
-          <div className="mt-4 flex items-center gap-3 text-sm text-blue-600">
-            <BindXLogo variant="loading" size={24} />
-            <span>{loadingStep}</span>
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 py-12">
+            <BindXLogo variant="loading" size={80} />
+            <p className="text-sm font-medium text-gray-600 animate-pulse">{loadingStep}</p>
           </div>
         )}
 
@@ -752,8 +752,13 @@ export default function TargetSetup() {
               {/* Structure selection — show available structures (hide ESMFold until supported) */}
               {previewData.structures?.filter(s => s.source !== 'esmfold').length > 0 && (
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Available Structures</h3>
-                  <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                    Available Structures
+                    <span className="ml-1.5 text-xs font-normal text-gray-400">
+                      ({previewData.structures.filter(s => s.source !== 'esmfold').length})
+                    </span>
+                  </h3>
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
                     {previewData.structures.filter(s => s.source !== 'esmfold').map((s, i) => {
                       // Find the real index in the full structures array for selection
                       const realIdx = previewData.structures.indexOf(s)

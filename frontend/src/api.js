@@ -428,6 +428,15 @@ export async function v9ImportFile(phaseId, file) {
   return response.data
 }
 
+export async function v9ImportDatabase(phaseId, config) {
+  const response = await apiClient.post(
+    `/v9/phases/${phaseId}/runs/import-database`,
+    config,
+    { timeout: 120000 }
+  )
+  return response.data
+}
+
 // ---------------------------------------------------------------------------
 // V9: Molecules API
 // ---------------------------------------------------------------------------

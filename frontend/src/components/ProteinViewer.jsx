@@ -352,8 +352,8 @@ function ZoneCard({ zone, isDarkBg, isEditing, onUpdate, onToggleVisibility, onT
   )
 }
 
-// Props: pdbUrl, pdbData, selectedPocket, uniprotFeatures, height, onDiagnostic
-export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480, onDiagnostic }) {
+// Props: pdbUrl, pdbData, selectedPocket, uniprotFeatures, height, onDiagnostic, ligandSmiles
+export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480, onDiagnostic, ligandSmiles }) {
   const wrapperRef = useRef(null)
   const containerRef = useRef(null)
   const viewerRef = useRef(null)
@@ -368,10 +368,11 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
   const [bgColor, setBgColor] = useState('#0f1923')
   const [pocketColor, setPocketColor] = useState('#f59e0b')
   const [ligandStyle, setLigandStyle] = useState('ball+stick') // 'ball+stick' | 'stick' | 'sphere' | 'line' | 'off'
+  const [showProtein, setShowProtein] = useState(true)
   const [pocketRadius, setPocketRadius] = useState(5)
   const [pocketOpacity, setPocketOpacity] = useState(0.75)
   const [pocketStyle, setPocketStyle] = useState('surface')
-  const [spinning, setSpinning] = useState(false)
+  const [spinning, setSpinning] = useState(true)
   const [showDomains, setShowDomains] = useState(false)
   const [showActiveSites, setShowActiveSites] = useState(true)
   const [showBindingSites, setShowBindingSites] = useState(true)
@@ -724,8 +725,11 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
 
     const colorSpec = getColorSpec(colorMode, customColor)
 
-    // Per-residue coloring modes (hydrophobicity, charge)
-    if (colorMode === 'hydro' || colorMode === 'charge') {
+    if (!showProtein) {
+      // Hide protein backbone — only ligands will be visible
+      viewer.setStyle({ model: protein, hetflag: false }, {})
+    } else if (colorMode === 'hydro' || colorMode === 'charge') {
+      // Per-residue coloring modes (hydrophobicity, charge)
       const baseColor = '#e2e8f0'
       const baseSpec = { color: baseColor }
       viewer.setStyle({ model: protein }, buildStyleSpec(style, baseSpec))
@@ -774,6 +778,12 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       }
     }
 
+    // Handle 'ligand-only' mode — hide protein entirely
+    const effectiveLigandStyle = ligandStyle === 'ligand-only' ? 'ball+stick' : ligandStyle
+    if (ligandStyle === 'ligand-only') {
+      viewer.setStyle({ model: protein, hetflag: false }, {})
+    }
+
     // Ligand display — show co-crystallized small molecules
     // Step 1: Always clear ALL HETATM atoms first
     viewer.setStyle({ hetflag: true, model: protein }, {})
@@ -786,10 +796,10 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     } catch (_) {}
 
     // Step 2: Re-apply ligand style only for non-solvent HETATM (using setStyle, not addStyle)
-    if (ligandStyle !== 'off') {
+    if (effectiveLigandStyle !== 'off') {
       const ligSel = { hetflag: true, not: { resn: [...SOLVENT_RESNAMES] }, model: protein }
       const ligSpec = (() => {
-        switch (ligandStyle) {
+        switch (effectiveLigandStyle) {
           case 'stick':   return { stick: { colorscheme: 'default', radius: 0.15, opacity: 1.0 } }
           case 'sphere':  return { sphere: { colorscheme: 'default', scale: 1.0, opacity: 0.9 } }
           case 'line':    return { line: { colorscheme: 'default', linewidth: 2 } }
@@ -1057,7 +1067,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     // Report diagnostic to parent
     if (onDiagnosticRef.current) onDiagnosticRef.current(diag)
 
-  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, ligandStyle, customZones])
+  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, ligandStyle, showProtein, customZones])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -1220,7 +1230,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     : labelMode ? 'Label' : distanceMode ? (distanceAtom1 ? 'Distance (click 2nd atom)' : 'Distance (click 1st atom)') : null
 
   return (
-    <div ref={wrapperRef} className={`rounded-xl border border-gray-200 overflow-hidden ${isFullscreen ? 'flex flex-col' : ''}`} style={{ backgroundColor: bgColor }}>
+    <div ref={wrapperRef} className={`rounded-xl border border-gray-200 ${isFullscreen ? 'flex flex-col overflow-hidden' : 'overflow-visible'}`} style={{ backgroundColor: bgColor }}>
       {/* Toolbar — Row 1: Style pills */}
       <div className={`flex items-center gap-2 px-3 py-1.5 border-b ${isDarkBg ? 'bg-[#1a2d42] border-gray-700/50' : 'bg-gray-100 border-gray-200'}`}>
         <div className="flex items-center gap-0.5 bg-black/20 rounded-lg p-0.5">
@@ -1581,9 +1591,14 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       <div className={`flex items-center gap-3 px-3 py-2 border-t text-xs flex-wrap ${
         isDarkBg ? 'bg-[#1a2d42] border-gray-700 text-gray-400' : 'bg-gray-100 border-gray-200 text-gray-500'
       }`}>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-400" /> Protein
-        </span>
+        <button
+          onClick={() => setShowProtein(v => !v)}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
+            showProtein ? 'bg-blue-900/30 border-blue-500/50 text-blue-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
+          }`}
+        >
+          <span className="w-2.5 h-2.5 rounded-full bg-blue-400" style={{ opacity: showProtein ? 1 : 0.3 }} /> Protein
+        </button>
         {selectedPocket && (
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pocketColor }} /> Pocket
@@ -1605,6 +1620,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             <option value="stick" className="bg-gray-800 text-gray-300">Ligand: Stick</option>
             <option value="sphere" className="bg-gray-800 text-gray-300">Ligand: Sphere</option>
             <option value="line" className="bg-gray-800 text-gray-300">Ligand: Line</option>
+            <option value="ligand-only" className="bg-gray-800 text-gray-300">Ligand Only (no protein)</option>
           </select>
         </span>
         {selectedResidues.length > 0 && (

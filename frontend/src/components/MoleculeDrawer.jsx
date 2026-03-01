@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import Badge from './Badge.jsx'
-import { MOLECULE_DETAILS } from '../mock/data.js'
+import { flattenMoleculeProperties } from '../lib/columns.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -860,7 +860,16 @@ export default function MoleculeDrawer({
   const [tab, setTab] = useState('Scores')
   const [copied, setCopied] = useState(false)
 
-  const details = molecule ? MOLECULE_DETAILS[molecule.id] : null
+  // Build details from real molecule.properties (API data)
+  const details = (() => {
+    if (!molecule) return null
+    const props = molecule.properties || {}
+    return {
+      interactions: props.enrichment || props.interactions || null,
+      synthesis: props.retrosynthesis || props.synthesis || null,
+      safety: props.safety || null,
+    }
+  })()
 
   // Index label
   const idx = allMolecules && molecule

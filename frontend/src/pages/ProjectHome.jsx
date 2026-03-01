@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
-import { PHASE_TYPES } from '../mock/data.js'
+import { PHASE_TYPES } from '../lib/columns.js'
 
-import ScoringWeightsEditor from '../components/ScoringWeightsEditor.jsx'
 import PhaseCreator from '../components/PhaseCreator.jsx'
 import ProteinViewer from '../components/ProteinViewer.jsx'
 import BindXLogo from '../components/BindXLogo.jsx'
+import CampaignAgentPanel from '../components/CampaignAgentPanel.jsx'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -192,10 +192,21 @@ function FunnelPhaseCard({ phase, phaseIndex, projectId, navigate, onCreatePhase
                   </p>
                 </div>
 
+                {/* Last run type */}
+                {stats.last_run_type && (
+                  <>
+                    <div className="text-white/[.07] text-lg font-light">|</div>
+                    <div className="text-center px-2">
+                      <p className="text-sm font-semibold text-bx-sub capitalize">{stats.last_run_type}</p>
+                      <p className="stat-label">last run</p>
+                    </div>
+                  </>
+                )}
+
                 {/* Running indicator */}
                 {(stats.runs_running ?? 0) > 0 && (
                   <div className="flex items-center gap-1.5 badge badge-running ml-auto">
-                    <BindXLogo variant="loading" size={12} />
+                    <BindXLogo variant="loading" size={20} />
                     {stats.runs_running} run{stats.runs_running !== 1 ? 's' : ''} in progress
                   </div>
                 )}
@@ -366,100 +377,6 @@ function CampaignStrategyBrief({ campaign, onSave }) {
       <div className="px-5 py-4">
         <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{campaign.strategy_notes}</p>
       </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Campaign Settings (collapsible, wraps ScoringWeightsEditor)
-// ---------------------------------------------------------------------------
-
-function CampaignSettings({ campaign }) {
-  const [open, setOpen] = useState(false)
-
-  if (!campaign) return null
-  const { scoring_weights, docking_defaults, rules } = campaign
-
-  return (
-    <div className="card overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-50 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          <span className="text-sm font-semibold text-gray-700">Campaign Settings</span>
-          <span className="text-sm text-gray-400">Scoring Weights, Docking Defaults, Filter Rules</span>
-        </div>
-        <svg
-          className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="border-t border-gray-50 px-5 py-4 space-y-5">
-          {/* Scoring weights interactive editor */}
-          {scoring_weights && (
-            <div>
-              <ScoringWeightsEditor
-                weights={scoring_weights}
-                onChange={() => {}}
-              />
-            </div>
-          )}
-
-          {/* Docking defaults */}
-          {docking_defaults && (
-            <div>
-              <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Docking Defaults</p>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(docking_defaults).map(([k, v]) => (
-                  <span key={k} className="px-2.5 py-1 bg-blue-50 text-blue-700 text-sm rounded-md font-mono">
-                    {k}: {String(v)}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Filter rules */}
-          {rules && (
-            <div>
-              <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Filter Rules</p>
-              <div className="flex flex-wrap gap-2">
-                {rules.lipinski && (
-                  <span className="px-2.5 py-1 bg-green-50 text-green-700 text-sm rounded-md flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    Lipinski Ro5
-                  </span>
-                )}
-                {rules.pains && (
-                  <span className="px-2.5 py-1 bg-green-50 text-green-700 text-sm rounded-md flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    PAINS Filter
-                  </span>
-                )}
-                {rules.max_MW && (
-                  <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-sm rounded-md font-mono">
-                    MW &lt; {rules.max_MW} Da
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }
@@ -738,13 +655,14 @@ function TargetSummary({ project, onEdit }) {
 export default function ProjectHome() {
   const { projectId } = useParams()
   const navigate = useNavigate()
-  const { projects, selectProject, updateProject, deleteProject, createCampaign, updateCampaign, createPhase } = useWorkspace()
+  const { projects, selectProject, updateProject, deleteProject, createCampaign, updateCampaign, createPhase, createRun } = useWorkspace()
   const { addToast } = useToast()
 
   const [editing, setEditing] = useState(false)
   const [showPhaseCreator, setShowPhaseCreator] = useState(false)
   const [creatingForPhase, setCreatingForPhase] = useState(null)
   const [campaignCreating, setCampaignCreating] = useState(false)
+  const [showAgentPanel, setShowAgentPanel] = useState(false)
 
   useEffect(() => {
     if (projectId) selectProject(projectId)
@@ -764,8 +682,28 @@ export default function ProjectHome() {
   }
 
   const campaign = project.campaigns?.[0] || null
-  const phases = campaign?.phases || []
+  const dbPhases = campaign?.phases || []
   const hasTarget = !!project.target_preview
+
+  // Campaign KPIs aggregated from all phases
+  const campaignKpi = useMemo(() => {
+    if (!dbPhases.length) return null
+    return dbPhases.reduce((acc, p) => {
+      const s = p.stats || {}
+      acc.totalMolecules += s.total_molecules ?? 0
+      acc.totalBookmarked += s.bookmarked ?? 0
+      acc.totalRuns += (s.runs_completed ?? 0) + (s.runs_running ?? 0)
+      return acc
+    }, { totalMolecules: 0, totalBookmarked: 0, totalRuns: 0 })
+  }, [dbPhases])
+
+  // Build funnel: always show 3 slots (A/B/C), merge with existing DB phases
+  const FUNNEL_TEMPLATE = ['hit_discovery', 'hit_to_lead', 'lead_optimization']
+  const phases = FUNNEL_TEMPLATE.map(type => {
+    const existing = dbPhases.find(p => p.type === type)
+    if (existing) return existing
+    return { id: `placeholder-${type}`, type, label: PHASE_TYPES[type]?.label || type, status: 'not_created' }
+  })
 
   return (
     <div className="space-y-5">
@@ -857,7 +795,7 @@ export default function ProjectHome() {
                 try {
                   await updateProject(projectId, data)
                 } catch (err) {
-                  console.error('[ProjectHome] Update failed:', err)
+                  addToast(err.userMessage || 'Failed to update project', 'error')
                 }
                 setEditing(false)
               }}
@@ -902,9 +840,36 @@ export default function ProjectHome() {
               <p className="text-sm text-gray-400 uppercase tracking-wider font-semibold mb-0.5">Campaign</p>
               <h2 className="text-lg font-bold text-gray-800">{campaign.name}</h2>
             </div>
-            <span className="text-sm text-gray-400">
-              {phases.filter(p => p.created_at).length}/{phases.length} phases created
-            </span>
+            <div className="flex items-center gap-4">
+              {campaignKpi && (
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="text-gray-500">
+                    <strong className="text-gray-700">{campaignKpi.totalMolecules}</strong> molecules
+                  </span>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-gray-500">
+                    <strong className="text-yellow-600">{campaignKpi.totalBookmarked}</strong> bookmarked
+                  </span>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-gray-500">
+                    <strong className="text-gray-700">{campaignKpi.totalRuns}</strong> runs
+                  </span>
+                </div>
+              )}
+              <span className="text-sm text-gray-400">
+                {dbPhases.length}/{FUNNEL_TEMPLATE.length} phases
+              </span>
+              <button
+                onClick={() => setShowAgentPanel(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-gradient-to-r from-bx-mint/10 to-emerald-50 text-emerald-700 border border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
+                </svg>
+                AI Agent
+              </button>
+            </div>
           </div>
 
           {/* AI Strategy Brief */}
@@ -941,8 +906,6 @@ export default function ProjectHome() {
             </div>
           </div>
 
-          {/* Campaign settings */}
-          <CampaignSettings campaign={campaign} />
         </>
       ) : (
         /* No campaign yet */
@@ -993,15 +956,49 @@ export default function ProjectHome() {
         </div>
       )}
 
+      {/* AI Agent panel */}
+      <CampaignAgentPanel
+        isOpen={showAgentPanel}
+        onClose={() => setShowAgentPanel(false)}
+        project={project}
+        campaign={campaign}
+      />
+
       {/* Phase creator modal */}
       {showPhaseCreator && (
         <PhaseCreator
           campaignId={campaign?.id}
-          existingPhases={phases}
+          existingPhases={dbPhases}
           onCreatePhase={async (newPhaseConfig) => {
             try {
-              await createPhase(newPhaseConfig.campaign_id, { type: newPhaseConfig.type })
+              const created = await createPhase(newPhaseConfig.campaign_id, { type: newPhaseConfig.type })
               addToast('Phase created', 'success')
+
+              // Auto-import bookmarks from previous phase if available
+              if (created?.id && dbPhases.length > 0) {
+                const prevPhase = dbPhases[dbPhases.length - 1]
+                const prevBookmarked = prevPhase.stats?.bookmarked ?? 0
+                if (prevBookmarked > 0) {
+                  try {
+                    await createRun(created.id, {
+                      type: 'import',
+                      config: {
+                        source: 'phase_selection',
+                        selection: 'bookmarked',
+                        source_phase_id: prevPhase.id,
+                      },
+                    })
+                    addToast(`Importing ${prevBookmarked} bookmarked molecules from ${prevPhase.label || 'previous phase'}...`, 'success')
+                  } catch (_) {
+                    // Non-blocking — phase is created even if auto-import fails
+                  }
+                }
+              }
+
+              // Auto-navigate to the new phase
+              if (created?.id) {
+                navigate(`/project/${projectId}/phase/${created.id}`)
+              }
             } catch (err) {
               addToast(err.userMessage || 'Failed to create phase', 'error')
             }

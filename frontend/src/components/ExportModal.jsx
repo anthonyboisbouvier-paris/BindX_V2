@@ -55,8 +55,8 @@ const FORMATS = [
   },
 ]
 
-function triggerCsvDownload(filename, csvContent) {
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+function triggerDownload(filename, content, mimeType = 'text/csv;charset=utf-8;') {
+  const blob = new Blob([content], { type: mimeType })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -74,7 +74,6 @@ function buildCsv(molecules, columns) {
       const v = mol[c.key]
       if (v == null) return ''
       const s = String(v)
-      // Escape commas and quotes
       if (s.includes(',') || s.includes('"') || s.includes('\n')) {
         return `"${s.replace(/"/g, '""')}"`
       }
@@ -82,6 +81,36 @@ function buildCsv(molecules, columns) {
     }).join(',')
   )
   return [header, ...rows].join('\r\n')
+}
+
+// SD tags to export alongside structure
+const SD_KEYS = [
+  'smiles', 'docking_score', 'cnn_score', 'cnn_affinity', 'composite_score',
+  'MW', 'logP', 'HBD', 'HBA', 'TPSA', 'QED', 'solubility',
+  'lipinski_pass', 'cluster_id', 'scaffold', 'bookmarked',
+]
+
+function buildSdf(molecules) {
+  const blocks = molecules.map(mol => {
+    const name = mol.name || mol.id || 'unknown'
+    // V2000 molfile with no atoms (SMILES stored as SD tag for downstream tools)
+    const molBlock = [
+      name,
+      '     BindX_V2  2D',
+      '',
+      '  0  0  0  0  0  0  0  0  0  0  0 V2000',
+      'M  END',
+    ].join('\n')
+
+    // SD tags
+    const tags = SD_KEYS
+      .filter(k => mol[k] != null && mol[k] !== '')
+      .map(k => `> <${k}>\n${mol[k]}\n`)
+      .join('\n')
+
+    return `${molBlock}\n${tags}\n$$$$`
+  })
+  return blocks.join('\n')
 }
 
 export default function ExportModal({
@@ -155,13 +184,19 @@ export default function ExportModal({
   const exportColumns = csvColumns === 'visible' ? visibleColumns : allAvailableColumns
 
   function handleExport() {
+    const ts = Date.now()
     if (format === 'csv') {
       const csv = buildCsv(exportMols, exportColumns)
-      triggerCsvDownload(`dockit_export_${scope}_${Date.now()}.csv`, csv)
+      triggerDownload(`bindx_export_${scope}_${ts}.csv`, csv, 'text/csv;charset=utf-8;')
       onToast?.(`Exported ${exportMols.length} molecules as CSV`, 'success')
       onClose()
-    } else {
-      onToast?.(`Export queued — ${format.toUpperCase()} download will start when ready`, 'info')
+    } else if (format === 'sdf') {
+      const sdf = buildSdf(exportMols)
+      triggerDownload(`bindx_export_${scope}_${ts}.sdf`, sdf, 'chemical/x-mdl-sdfile')
+      onToast?.(`Exported ${exportMols.length} molecules as SDF`, 'success')
+      onClose()
+    } else if (format === 'pdf') {
+      onToast?.('PDF export requires backend — coming soon', 'info')
       onClose()
     }
   }

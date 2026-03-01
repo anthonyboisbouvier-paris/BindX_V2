@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react'
-import { PHASE_TYPES } from '../mock/data.js'
+import { PHASE_TYPES } from '../lib/columns.js'
 
 // ---------------------------------------------------------------------------
 // Phase type details for the modal

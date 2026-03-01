@@ -1,7 +1,10 @@
-import React, { useState, useRef } from 'react'
-import { RUN_TYPES, CALCULATION_SUBTYPES } from '../mock/data.js'
+import React, { useState, useRef, lazy, Suspense } from 'react'
+import { RUN_TYPES, CALCULATION_SUBTYPES } from '../lib/columns.js'
+import ScoringWeightsEditor from './ScoringWeightsEditor.jsx'
 import Badge from './Badge.jsx'
 import BindXLogo from './BindXLogo.jsx'
+
+const ScaffoldAnalyzer = lazy(() => import('./ScaffoldAnalyzer.jsx'))
 
 // ---------------------------------------------------------------------------
 // Run type icon map
@@ -136,7 +139,22 @@ function Stepper({ value, min, max, onChange }) {
 // Default configs
 // ---------------------------------------------------------------------------
 const DEFAULT_CONFIGS = {
-  import:      { sourceMode: 'external', format: 'sdf', sourceName: '' },
+  import:      {
+    sourceMode: 'external', format: 'sdf', sourceName: '', databases: [], maxPerSource: 50,
+    filters: {
+      mw_min: 200, mw_max: 500, logp_min: -1, logp_max: 5,
+      hbd_max: 5, hba_max: 10, tpsa_min: 0, tpsa_max: 140,
+      rotatable_max: 10, qed_min: 0.3, lipinski: true, pains: true,
+      // ChEMBL-specific
+      activity_types: ['IC50', 'Ki'], activity_cutoff: 10000, pchembl_min: 5.0,
+      // PubChem-specific
+      pubchem_activity_type: 'IC50', pubchem_active_only: true,
+      // Enamine-specific
+      scaffold_complexity: 'mixed',
+      // Fragment-specific
+      ro3_strict: true,
+    },
+  },
   calculation: {
     calculation_types: [],
     // Per-subtype configs
@@ -150,7 +168,7 @@ const DEFAULT_CONFIGS = {
     retrosynthesis: {},
     safety: {},
   },
-  generation:  { method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5, include_docking: true, include_admet: true, include_scoring: true },
+  generation:  { mode: 'batch', method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5, qed_min: 0.4, lipinski: true, pains_filter: true, include_docking: true, include_admet: true, include_scoring: true },
 }
 
 // Keep legacy keys for ConfigForm compatibility
@@ -208,7 +226,263 @@ function EngineCard({ id, label, badges = [], selected, onClick }) {
   )
 }
 
-function ConfigForm({ runType, config, onChange, phase }) {
+// ---------------------------------------------------------------------------
+// Range slider helper
+// ---------------------------------------------------------------------------
+function RangeInput({ label, min, max, step = 1, value, onChange, unit = '' }) {
+  return (
+    <div>
+      <div className="flex justify-between text-[10px] mb-1">
+        <span className="text-gray-500 font-medium">{label}</span>
+        <span className="font-semibold text-gray-700 tabular-nums">{value}{unit}</span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(parseFloat(e.target.value))}
+        className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-bx-mint"
+      />
+    </div>
+  )
+}
+
+function RangeInputDual({ label, min, max, step = 1, valueMin, valueMax, onChangeMin, onChangeMax, unit = '' }) {
+  return (
+    <div>
+      <div className="flex justify-between text-[10px] mb-1">
+        <span className="text-gray-500 font-medium">{label}</span>
+        <span className="font-semibold text-gray-700 tabular-nums">{valueMin}–{valueMax}{unit}</span>
+      </div>
+      <div className="flex gap-2 items-center">
+        <input
+          type="number" min={min} max={valueMax} step={step} value={valueMin}
+          onChange={e => onChangeMin(parseFloat(e.target.value))}
+          className="w-20 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white tabular-nums
+                     focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint"
+        />
+        <span className="text-gray-300 text-xs">to</span>
+        <input
+          type="number" min={valueMin} max={max} step={step} value={valueMax}
+          onChange={e => onChangeMax(parseFloat(e.target.value))}
+          className="w-20 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white tabular-nums
+                     focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint"
+        />
+      </div>
+    </div>
+  )
+}
+
+function FilterToggle({ label, checked, onChange, description }) {
+  return (
+    <label className={`flex items-center gap-2.5 p-2 rounded-lg cursor-pointer transition-colors ${
+      checked ? 'bg-emerald-50' : 'hover:bg-gray-50'
+    }`}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="accent-bx-mint" />
+      <div>
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        {description && <p className="text-[10px] text-gray-400">{description}</p>}
+      </div>
+    </label>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Import Filters — Accordion sections
+// ---------------------------------------------------------------------------
+function ImportFilters({ filters, onChange, selectedDBs }) {
+  const [showCommon, setShowCommon] = useState(true)
+  const [showSpecific, setShowSpecific] = useState(false)
+  const f = filters
+  const set = (key, val) => onChange({ ...f, [key]: val })
+
+  const hasChembl = selectedDBs.includes('chembl')
+  const hasPubchem = selectedDBs.includes('pubchem')
+  const hasEnamine = selectedDBs.includes('enamine')
+  const hasFragments = selectedDBs.includes('fragments')
+  const hasSpecificFilters = hasChembl || hasPubchem || hasEnamine || hasFragments
+
+  return (
+    <div className="space-y-2">
+      {/* Common Filters Accordion */}
+      <button
+        onClick={() => setShowCommon(v => !v)}
+        className="w-full flex items-center justify-between p-3 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z" />
+          </svg>
+          <span className="text-sm font-semibold text-gray-700">Drug-likeness Filters</span>
+          <span className="text-[10px] px-1.5 py-0.5 bg-bx-mint/10 text-bx-mint rounded font-semibold">
+            {(f.lipinski ? 1 : 0) + (f.pains ? 1 : 0) + 6} active
+          </span>
+        </div>
+        <svg className={`w-4 h-4 text-gray-400 transition-transform ${showCommon ? 'rotate-180' : ''}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {showCommon && (
+        <div className="border border-gray-200 rounded-xl p-4 space-y-3 bg-white">
+          <div className="grid grid-cols-2 gap-3">
+            <RangeInputDual label="MW (Da)" min={0} max={1000} step={10}
+              valueMin={f.mw_min ?? 200} valueMax={f.mw_max ?? 500}
+              onChangeMin={v => set('mw_min', v)} onChangeMax={v => set('mw_max', v)} unit=" Da" />
+            <RangeInputDual label="LogP" min={-5} max={10} step={0.5}
+              valueMin={f.logp_min ?? -1} valueMax={f.logp_max ?? 5}
+              onChangeMin={v => set('logp_min', v)} onChangeMax={v => set('logp_max', v)} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <RangeInput label="HBD max" min={0} max={15} value={f.hbd_max ?? 5} onChange={v => set('hbd_max', v)} />
+            <RangeInput label="HBA max" min={0} max={20} value={f.hba_max ?? 10} onChange={v => set('hba_max', v)} />
+            <RangeInput label="RotBonds max" min={0} max={20} value={f.rotatable_max ?? 10} onChange={v => set('rotatable_max', v)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <RangeInputDual label="TPSA (A²)" min={0} max={300} step={5}
+              valueMin={f.tpsa_min ?? 0} valueMax={f.tpsa_max ?? 140}
+              onChangeMin={v => set('tpsa_min', v)} onChangeMax={v => set('tpsa_max', v)} unit=" A²" />
+            <RangeInput label="QED min" min={0} max={1} step={0.05}
+              value={f.qed_min ?? 0.3} onChange={v => set('qed_min', v)} />
+          </div>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <FilterToggle label="Lipinski Ro5" checked={f.lipinski ?? true} onChange={v => set('lipinski', v)}
+              description="Max 1 violation allowed" />
+            <FilterToggle label="PAINS Filter" checked={f.pains ?? true} onChange={v => set('pains', v)}
+              description="Reject reactive/false positive motifs" />
+          </div>
+        </div>
+      )}
+
+      {/* Database-specific Filters */}
+      {hasSpecificFilters && (
+        <>
+          <button
+            onClick={() => setShowSpecific(v => !v)}
+            className="w-full flex items-center justify-between p-3 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+              </svg>
+              <span className="text-sm font-semibold text-gray-700">Database-Specific Filters</span>
+            </div>
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${showSpecific ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {showSpecific && (
+            <div className="border border-gray-200 rounded-xl p-4 space-y-4 bg-white">
+              {/* ChEMBL */}
+              {hasChembl && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider flex items-center gap-1">
+                    <span>🧬</span> ChEMBL Filters
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[10px] text-gray-500 font-medium mb-1">Activity types</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {['IC50', 'Ki', 'EC50', 'Kd'].map(at => {
+                          const active = (f.activity_types || []).includes(at)
+                          return (
+                            <button key={at} onClick={() => {
+                              const arr = f.activity_types || []
+                              set('activity_types', active ? arr.filter(x => x !== at) : [...arr, at])
+                            }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-colors ${
+                                active ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-blue-200'
+                              }`}
+                            >{at}</button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-500 font-medium mb-1">Activity cutoff (nM)</p>
+                      <input type="number" min={1} max={100000} step={100}
+                        value={f.activity_cutoff ?? 10000}
+                        onChange={e => set('activity_cutoff', parseInt(e.target.value) || 10000)}
+                        className="w-28 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white tabular-nums
+                                   focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint" />
+                    </div>
+                  </div>
+                  <RangeInput label="pChEMBL min" min={3} max={10} step={0.1}
+                    value={f.pchembl_min ?? 5.0} onChange={v => set('pchembl_min', v)} />
+                </div>
+              )}
+
+              {/* PubChem */}
+              {hasPubchem && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold text-purple-600 uppercase tracking-wider flex items-center gap-1">
+                    <span>🔬</span> PubChem Filters
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[10px] text-gray-500 font-medium mb-1">Activity type</p>
+                      <select
+                        value={f.pubchem_activity_type || 'IC50'}
+                        onChange={e => set('pubchem_activity_type', e.target.value)}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white
+                                   focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint"
+                      >
+                        {['IC50', 'Ki', 'EC50', 'Potency'].map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <FilterToggle label="Active only" checked={f.pubchem_active_only ?? true}
+                      onChange={v => set('pubchem_active_only', v)} description="Only fetch 'active' compounds" />
+                  </div>
+                </div>
+              )}
+
+              {/* Enamine */}
+              {hasEnamine && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold text-orange-600 uppercase tracking-wider flex items-center gap-1">
+                    <span>🏭</span> Enamine REAL Filters
+                  </p>
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-medium mb-1">Scaffold complexity</p>
+                    <div className="flex gap-2">
+                      {['2-fragment', '3-fragment', 'mixed'].map(sc => (
+                        <button key={sc} onClick={() => set('scaffold_complexity', sc)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                            f.scaffold_complexity === sc ? 'bg-orange-100 border-orange-300 text-orange-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-orange-200'
+                          }`}
+                        >{sc}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Fragment Library */}
+              {hasFragments && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider flex items-center gap-1">
+                    <span>🧩</span> Fragment Library Filters
+                  </p>
+                  <FilterToggle label="Rule-of-3 strict" checked={f.ro3_strict ?? true}
+                    onChange={v => set('ro3_strict', v)}
+                    description="MW≤300, logP≤3, HBD≤3, HBA≤3, RotBonds≤3" />
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Configuration forms
+// ---------------------------------------------------------------------------
+function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
   const set = (key, value) => onChange({ ...config, [key]: value })
 
   const toggleArr = (key, item) => {
@@ -219,19 +493,33 @@ function ConfigForm({ runType, config, onChange, phase }) {
   const fileInputRef = useRef(null)
 
   switch (runType) {
-    case 'import':
+    case 'import': {
+      const DB_OPTIONS = [
+        { key: 'chembl', label: 'ChEMBL', desc: 'Known bioactive compounds for your target', icon: '🧬', needsTarget: true },
+        { key: 'pubchem', label: 'PubChem', desc: 'NCBI compound database with bioactivity data', icon: '🔬', needsTarget: true },
+        { key: 'zinc', label: 'ZINC20', desc: 'Drug-like commercially available molecules', icon: '💊' },
+        { key: 'enamine', label: 'Enamine REAL', desc: 'Virtual combinatorial library (37B+ compounds)', icon: '🏭' },
+        { key: 'fragments', label: 'Fragment Library', desc: 'Rule-of-3 fragments for FBDD screening', icon: '🧩' },
+      ]
+      const selectedDBs = config.databases || []
+      const toggleDB = (key) => {
+        const updated = selectedDBs.includes(key) ? selectedDBs.filter(k => k !== key) : [...selectedDBs, key]
+        onChange({ ...config, databases: updated })
+      }
+
       return (
         <div className="space-y-4">
           <FormSection title="Source">
-            <div className="flex gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {[
-                { value: 'external', label: 'External file' },
-                { value: 'internal', label: 'Internal selection' },
+                { value: 'database', label: 'Public Databases', icon: '🗄️' },
+                { value: 'external', label: 'Upload File', icon: '📁' },
+                { value: 'internal', label: 'Phase Bookmarks', icon: '🔖' },
               ].map(opt => (
                 <label key={opt.value}
-                  className={`flex-1 flex items-center gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 cursor-pointer transition-all text-center ${
                     config.sourceMode === opt.value
-                      ? 'border-bx-mint bg-blue-50'
+                      ? 'border-bx-mint bg-emerald-50'
                       : 'border-gray-100 hover:border-gray-200'
                   }`}
                 >
@@ -239,33 +527,107 @@ function ConfigForm({ runType, config, onChange, phase }) {
                     type="radio"
                     checked={config.sourceMode === opt.value}
                     onChange={() => set('sourceMode', opt.value)}
-                    className="accent-bx-mint"
+                    className="sr-only"
                   />
-                  <span className="text-sm font-medium text-gray-700">{opt.label}</span>
+                  <span className="text-lg">{opt.icon}</span>
+                  <span className="text-xs font-semibold text-gray-700">{opt.label}</span>
                 </label>
               ))}
             </div>
           </FormSection>
 
-          {config.sourceMode === 'external' ? (
+          {config.sourceMode === 'database' && (
+            <>
+              <FormSection title="Select databases">
+                <div className="space-y-2">
+                  {DB_OPTIONS.map(db => (
+                    <label key={db.key}
+                      className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                        selectedDBs.includes(db.key)
+                          ? 'border-bx-mint bg-emerald-50'
+                          : 'border-gray-100 hover:border-gray-200'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedDBs.includes(db.key)}
+                        onChange={() => toggleDB(db.key)}
+                        className="accent-bx-mint mt-0.5"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span>{db.icon}</span>
+                          <span className="text-sm font-semibold text-gray-800">{db.label}</span>
+                          {db.needsTarget && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded font-medium">target-aware</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">{db.desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </FormSection>
+              <FormSection title="Max compounds per source">
+                <input
+                  type="number"
+                  value={config.maxPerSource || 50}
+                  onChange={e => set('maxPerSource', parseInt(e.target.value) || 50)}
+                  min={10} max={500} step={10}
+                  className="w-32 text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white
+                             focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint"
+                />
+              </FormSection>
+
+              {/* Import Filters */}
+              <ImportFilters
+                filters={config.filters || {}}
+                onChange={f => set('filters', f)}
+                selectedDBs={selectedDBs}
+              />
+            </>
+          )}
+
+          {config.sourceMode === 'external' && (
             <>
               <div
                 onClick={() => fileInputRef.current?.click()}
                 className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer
                            hover:border-bx-mint/40 hover:bg-blue-50/30 transition-all group"
               >
-                <svg className="w-9 h-9 text-gray-300 mx-auto mb-2 group-hover:text-bx-light-text/40 transition-colors"
-                  fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                <p className="text-sm font-medium text-gray-500 mb-1">Drop file here or click to browse</p>
-                <div className="flex justify-center gap-2 mt-2">
-                  {['SDF', 'SMILES', 'CSV'].map(f => (
-                    <span key={f} className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500">.{f.toLowerCase()}</span>
-                  ))}
-                </div>
-                <input ref={fileInputRef} type="file" accept=".sdf,.smi,.csv" className="hidden" />
+                {config._file ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <svg className="w-5 h-5 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-sm font-semibold text-gray-700">{config._file.name}</span>
+                    <span className="text-xs text-gray-400">({(config._file.size / 1024).toFixed(1)} KB)</span>
+                  </div>
+                ) : (
+                  <>
+                    <svg className="w-9 h-9 text-gray-300 mx-auto mb-2 group-hover:text-bx-light-text/40 transition-colors"
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p className="text-sm font-medium text-gray-500 mb-1">Drop file here or click to browse</p>
+                    <div className="flex justify-center gap-2 mt-2">
+                      {['SDF', 'SMILES', 'CSV'].map(f => (
+                        <span key={f} className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500">.{f.toLowerCase()}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".sdf,.smi,.smiles,.csv"
+                  className="hidden"
+                  onChange={e => {
+                    const f = e.target.files?.[0]
+                    if (f) onChange({ ...config, _file: f, sourceName: config.sourceName || f.name })
+                  }}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-500 mb-1">Source name (optional)</label>
@@ -279,7 +641,9 @@ function ConfigForm({ runType, config, onChange, phase }) {
                 />
               </div>
             </>
-          ) : (
+          )}
+
+          {config.sourceMode === 'internal' && (
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-2">
               <div className="flex items-center gap-2">
                 <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -295,6 +659,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
           )}
         </div>
       )
+    }
 
     case 'calculation': {
       const calcTypes = config.calculation_types || []
@@ -354,6 +719,10 @@ function ConfigForm({ runType, config, onChange, phase }) {
                   badges={[{ text: 'Classic', color: 'bg-gray-100 text-gray-600' }]}
                   selected={(config.docking?.engine) === 'vina'}
                   onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
+                <EngineCard id="diffdock" label="DiffDock"
+                  badges={[{ text: 'Deep Learning', color: 'bg-purple-100 text-purple-700' }, { text: 'Blind docking', color: 'bg-amber-100 text-amber-700' }]}
+                  selected={(config.docking?.engine) === 'diffdock'}
+                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
                 <div className="flex items-center gap-4 mt-2">
                   <div>
                     <label className="text-[10px] font-medium text-gray-500">Exhaustiveness</label>
@@ -367,7 +736,10 @@ function ConfigForm({ runType, config, onChange, phase }) {
 
           {calcTypes.includes('scoring') && (
             <FormSection title="Scoring weights">
-              <p className="text-sm text-gray-400">Configure in the scoring weights editor when run starts.</p>
+              <ScoringWeightsEditor
+                weights={config.scoring?.weights || DEFAULT_CONFIGS.calculation.scoring.weights}
+                onChange={(w) => onChange({ ...config, scoring: { ...config.scoring, weights: w } })}
+              />
             </FormSection>
           )}
 
@@ -394,6 +766,9 @@ function ConfigForm({ runType, config, onChange, phase }) {
               <EngineCard id="vina" label="AutoDock Vina"
                 badges={[{ text: 'Classic', color: 'bg-gray-100 text-gray-600' }]}
                 selected={config.engine === 'vina'} onClick={v => set('engine', v)} />
+              <EngineCard id="diffdock" label="DiffDock"
+                badges={[{ text: 'Deep Learning', color: 'bg-purple-100 text-purple-700' }, { text: 'Blind docking', color: 'bg-amber-100 text-amber-700' }]}
+                selected={config.engine === 'diffdock'} onClick={v => set('engine', v)} />
             </div>
           </FormSection>
 
@@ -615,8 +990,36 @@ function ConfigForm({ runType, config, onChange, phase }) {
         { value: 'fragment_growing', label: 'Fragment Growing',  desc: 'Extend molecule at reactive positions' },
         { value: 'de_novo',          label: 'De Novo SMILES',    desc: 'Generate novel structures from scratch' },
       ]
+      const mode = config.mode || 'batch'
+      const iters = config.iterations ?? 3
+      const vars = config.variants_per_iteration ?? 5
+      const estTotal = iters * vars * (selectedCount || 1)
+
       return (
         <div className="space-y-5">
+          {/* Mode toggle: Batch vs Molecule */}
+          <FormSection title="Generation mode">
+            <div className="flex gap-2">
+              {[
+                { value: 'batch', label: 'Batch', desc: 'Apply to all selected molecules' },
+                { value: 'molecule', label: 'Per-Molecule', desc: 'R-group control on individual molecules' },
+              ].map(m => (
+                <button
+                  key={m.value}
+                  onClick={() => set('mode', m.value)}
+                  className={`flex-1 p-3 rounded-xl border-2 text-left transition-all ${
+                    mode === m.value
+                      ? 'border-pink-400 bg-pink-50'
+                      : 'border-gray-100 hover:border-pink-200'
+                  }`}
+                >
+                  <p className={`text-sm font-semibold ${mode === m.value ? 'text-pink-700' : 'text-gray-700'}`}>{m.label}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{m.desc}</p>
+                </button>
+              ))}
+            </div>
+          </FormSection>
+
           <FormSection title="Method">
             <div className="space-y-2">
               {methods.map(m => (
@@ -643,6 +1046,25 @@ function ConfigForm({ runType, config, onChange, phase }) {
             </div>
           </FormSection>
 
+          {/* Molecule mode: ScaffoldAnalyzer */}
+          {mode === 'molecule' && config.molecule_smiles && (
+            <FormSection title="R-group control">
+              <Suspense fallback={<div className="h-32 flex items-center justify-center"><BindXLogo variant="loading" size={24} label="Loading analyzer..." /></div>}>
+                <ScaffoldAnalyzer
+                  smiles={config.molecule_smiles}
+                  onRulesChange={(rules) => set('scaffold_rules', rules)}
+                />
+              </Suspense>
+            </FormSection>
+          )}
+
+          {mode === 'molecule' && !config.molecule_smiles && (
+            <div className="bg-pink-50 border border-pink-100 rounded-xl p-4 text-sm text-pink-600">
+              Select a single molecule in the dashboard to enable per-molecule R-group control. The molecule's SMILES will be analyzed for modifiable positions.
+            </div>
+          )}
+
+          {/* Batch mode: Parameters */}
           <FormSection title="Generation Parameters">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -650,7 +1072,7 @@ function ConfigForm({ runType, config, onChange, phase }) {
                   <p className="text-sm font-medium text-gray-600">Iterations</p>
                   <p className="text-[10px] text-gray-400">rounds of generation</p>
                 </div>
-                <Stepper value={config.iterations ?? 3} min={1} max={5}
+                <Stepper value={iters} min={1} max={5}
                   onChange={v => set('iterations', v)} />
               </div>
               <div className="flex items-center justify-between">
@@ -658,11 +1080,60 @@ function ConfigForm({ runType, config, onChange, phase }) {
                   <p className="text-sm font-medium text-gray-600">Variants per iteration</p>
                   <p className="text-[10px] text-gray-400">new molecules per round</p>
                 </div>
-                <Stepper value={config.variants_per_iteration ?? 5} min={3} max={20}
+                <Stepper value={vars} min={3} max={20}
                   onChange={v => set('variants_per_iteration', v)} />
               </div>
             </div>
           </FormSection>
+
+          {/* Filters */}
+          <FormSection title="Quality filters">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Min QED</p>
+                  <p className="text-[10px] text-gray-400">drug-likeness threshold (0-1)</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range" min="0" max="0.9" step="0.05"
+                    value={config.qed_min ?? 0.4}
+                    onChange={e => set('qed_min', parseFloat(e.target.value))}
+                    className="w-24 h-1.5 accent-pink-500"
+                  />
+                  <span className="text-sm font-mono font-semibold text-gray-700 w-8 text-right">
+                    {(config.qed_min ?? 0.4).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Lipinski Rule of 5</p>
+                  <p className="text-[10px] text-gray-400">enforce drug-like properties</p>
+                </div>
+                <input type="checkbox" checked={config.lipinski !== false}
+                  onChange={() => set('lipinski', !config.lipinski)}
+                  className="accent-pink-500 w-4 h-4" />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">PAINS filter</p>
+                  <p className="text-[10px] text-gray-400">reject pan-assay interference compounds</p>
+                </div>
+                <input type="checkbox" checked={config.pains_filter !== false}
+                  onChange={() => set('pains_filter', !config.pains_filter)}
+                  className="accent-pink-500 w-4 h-4" />
+              </label>
+            </div>
+          </FormSection>
+
+          {/* Estimate preview */}
+          <div className="bg-pink-50 border border-pink-100 rounded-xl p-3 flex items-center justify-between">
+            <span className="text-sm text-pink-600">Estimated output</span>
+            <span className="text-sm font-bold text-pink-700 tabular-nums">
+              ~{estTotal} molecules
+            </span>
+          </div>
 
           <FormSection title="Include analyses">
             <div className="flex flex-wrap gap-2">
@@ -769,7 +1240,24 @@ function ConfirmationView({ runType, config, selectedCount }) {
 
   const configLines = []
   if (runType === 'import') {
-    configLines.push(`Source: ${config.sourceMode === 'internal' ? 'Phase bookmarks' : 'External file'}`)
+    if (config.sourceMode === 'database') {
+      const dbs = config.databases || []
+      configLines.push(`Source: Public Databases (${dbs.join(', ')})`)
+      configLines.push(`Max per source: ${config.maxPerSource || 50}`)
+      // Filter summary
+      const f = config.filters || {}
+      const filterParts = []
+      filterParts.push(`MW ${f.mw_min ?? 200}–${f.mw_max ?? 500}`)
+      filterParts.push(`logP ${f.logp_min ?? -1}–${f.logp_max ?? 5}`)
+      if (f.lipinski) filterParts.push('Lipinski')
+      if (f.pains) filterParts.push('PAINS')
+      configLines.push(`Filters: ${filterParts.join(', ')}`)
+      if (dbs.includes('chembl')) configLines.push(`ChEMBL: ${(f.activity_types || []).join('/')} ≤${f.activity_cutoff ?? 10000}nM, pChEMBL≥${f.pchembl_min ?? 5.0}`)
+    } else if (config.sourceMode === 'internal') {
+      configLines.push('Source: Phase bookmarks')
+    } else {
+      configLines.push(`Source: File upload${config._file ? ` (${config._file.name})` : ''}`)
+    }
     if (config.sourceName) configLines.push(`Label: ${config.sourceName}`)
   }
   if (runType === 'calculation') {
@@ -896,6 +1384,10 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
 
   const canSubmit = (() => {
     if (submitting) return false
+    if (selectedType === 'import') {
+      if (config.sourceMode === 'external' && !config._file) return false
+      if (config.sourceMode === 'database' && (!config.databases?.length)) return false
+    }
     if (selectedType === 'calculation') {
       if (!config.calculation_types?.length) return false
       if (!selectedMoleculeIds?.size) return false
@@ -1015,6 +1507,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
               config={config}
               onChange={setConfig}
               phase={phaseType}
+              selectedCount={selectedMoleculeIds?.size || 0}
             />
           )}
 

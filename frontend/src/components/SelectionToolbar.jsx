@@ -1,80 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
-
-// ---------------------------------------------------------------------------
-// Export dropdown
-// ---------------------------------------------------------------------------
-function ExportDropdown({ onExport, onClose }) {
-  const ref = useRef(null)
-
-  useEffect(() => {
-    function handle(e) {
-      if (ref.current && !ref.current.contains(e.target)) onClose()
-    }
-    document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
-  }, [onClose])
-
-  const options = [
-    {
-      id: 'csv_visible', label: 'CSV (visible columns)',
-      icon: (
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      ),
-    },
-    {
-      id: 'csv_all', label: 'CSV (all columns)',
-      icon: (
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      ),
-    },
-    {
-      id: 'sdf', label: 'SDF structures',
-      icon: (
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
-        </svg>
-      ),
-    },
-    {
-      id: 'pdf', label: 'PDF report',
-      icon: (
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      ),
-    },
-  ]
-
-  return (
-    <div
-      ref={ref}
-      className="absolute right-0 top-full mt-1.5 z-50 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
-      style={{ width: 200 }}
-    >
-      <div className="px-3 py-2 border-b border-gray-100 bg-gray-50">
-        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Export As</p>
-      </div>
-      {options.map(opt => (
-        <button
-          key={opt.id}
-          onClick={() => { onExport(opt.id); onClose() }}
-          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-bx-light-text transition-colors text-left"
-        >
-          <span className="text-gray-400">{opt.icon}</span>
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  )
-}
+import React from 'react'
 
 // ---------------------------------------------------------------------------
 // SelectionToolbar — smart action bar above the molecule table
@@ -88,9 +12,9 @@ function ExportDropdown({ onExport, onClose }) {
 //   onSelectNone         — clear selection
 //   onSelectBookmarked   — select bookmarked
 //   onSelectFiltered     — select filtered (if filters active)
-//   onNewRun             — open run creator
 //   onExport             — export callback(type: 'csv_visible'|'csv_all'|'sdf'|'pdf')
 //   onBookmarkSelected   — bookmark currently selected
+//   onSendToNextPhase    — send bookmarked molecules to next phase
 //   isFrozen             — phase is frozen
 // ---------------------------------------------------------------------------
 export default function SelectionToolbar({
@@ -103,18 +27,11 @@ export default function SelectionToolbar({
   onSelectNone,
   onSelectBookmarked,
   onSelectFiltered,
-  onNewRun,
   onExport,
   onBookmarkSelected,
+  onSendToNextPhase,
   isFrozen = false,
 }) {
-  const [showExport, setShowExport] = useState(false)
-  const exportRef = useRef(null)
-
-  function handleExport(type) {
-    onExport && onExport(type)
-  }
-
   return (
     <div className="flex flex-wrap items-center gap-3 card px-4 py-2.5">
       {/* Left — selection state + quick select */}
@@ -208,46 +125,17 @@ export default function SelectionToolbar({
           </span>
         )}
 
-        {/* New Run */}
-        <div className="relative" title={isFrozen ? 'Phase frozen — cannot create runs' : undefined}>
-          <button
-            onClick={isFrozen ? undefined : onNewRun}
-            disabled={isFrozen}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-              isFrozen
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-bx-surface hover:bg-bx-elevated text-white shadow-sm hover:shadow-md'
-            }`}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New Run
-          </button>
-        </div>
-
-        {/* Export dropdown */}
-        <div className="relative" ref={exportRef}>
-          <button
-            onClick={() => setShowExport(v => !v)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all duration-150"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Export
-            <svg className={`w-3 h-3 transition-transform ${showExport ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {showExport && (
-            <ExportDropdown
-              onExport={handleExport}
-              onClose={() => setShowExport(false)}
-            />
-          )}
-        </div>
+        {/* Export */}
+        <button
+          onClick={onExport}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all duration-150"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Export
+        </button>
 
         {/* Bookmark selected */}
         <div title={selectedCount === 0 ? 'Select molecules first' : isFrozen ? 'Phase frozen' : 'Bookmark selected'}>
@@ -270,6 +158,22 @@ export default function SelectionToolbar({
             )}
           </button>
         </div>
+
+        {/* Send bookmarks to next phase */}
+        {onSendToNextPhase && bookmarkedCount > 0 && (
+          <button
+            onClick={onSendToNextPhase}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 transition-all duration-150"
+            title={`Send ${bookmarkedCount} bookmarked molecules to the next phase`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+            Next Phase
+            <span className="tabular-nums text-sm opacity-70">({bookmarkedCount})</span>
+          </button>
+        )}
       </div>
     </div>
   )

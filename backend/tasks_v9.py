@@ -23,14 +23,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Sync wrapper for async DB operations in Celery
 # ---------------------------------------------------------------------------
+# IMPORTANT: asyncpg connections are bound to the event loop that created them.
+# We must reuse a single loop per worker process so the connection pool works
+# across multiple _db_sync() calls within a task.
+
+_worker_loop = None
+
 
 def _db_sync(coro):
-    """Run an async DB coroutine in Celery sync context."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    """Run an async DB coroutine in Celery sync context.
+
+    Reuses a single event loop per worker process to avoid asyncpg
+    'Future attached to a different loop' errors.
+    """
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        _worker_loop = asyncio.new_event_loop()
+    return _worker_loop.run_until_complete(coro)
 
 
 # ---------------------------------------------------------------------------

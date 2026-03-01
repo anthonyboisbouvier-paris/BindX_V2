@@ -1,5 +1,4 @@
 import React from 'react'
-import { MOCK_PROJECTS } from '../mock/data.js'
 
 // ---------------------------------------------------------------------------
 // Relative time formatter
@@ -58,7 +57,7 @@ function typeLabelColor(type) {
 //   limit      — max items to show (default: all)
 //   showProject — show project name (default: true)
 
-export default function ActivityTimeline({ activities = [], limit, showProject = true }) {
+export default function ActivityTimeline({ activities = [], limit, showProject = true, projects = [] }) {
   const items = limit ? activities.slice(0, limit) : activities
 
   if (items.length === 0) {
@@ -73,7 +72,7 @@ export default function ActivityTimeline({ activities = [], limit, showProject =
     <div className="space-y-0">
       {items.map((act, idx) => {
         const isLast = idx === items.length - 1
-        const project = MOCK_PROJECTS.find(p => p.id === act.project_id)
+        const project = projects.find(p => p.id === act.project_id)
         const label = typeLabel(act.type)
         const labelColor = typeLabelColor(act.type)
 

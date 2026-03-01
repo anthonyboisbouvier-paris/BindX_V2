@@ -2,6 +2,7 @@ import React, { useEffect } from 'react'
 import { Outlet, NavLink, Link, useParams, useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
 import { useAuth } from '../contexts/AuthContext'
+import { PHASE_TYPES } from '../lib/columns.js'
 
 // ---------------------------------------------------------------------------
 // Brand logo SVG
@@ -95,9 +96,10 @@ function PhaseStatusDot({ status, notCreated }) {
 // Phase nav item
 // ---------------------------------------------------------------------------
 
-function PhaseNavItem({ phase, projectId, currentPhaseId }) {
+function PhaseNavItem({ phase, projectId, currentPhaseId, getPhaseStatus }) {
   const notCreated = !phase.created_at
-  const isFrozen = phase.status === 'frozen'
+  const effectiveStatus = (getPhaseStatus && getPhaseStatus(phase.id)) || phase.status
+  const isFrozen = effectiveStatus === 'frozen'
   const isCurrentPhase = phase.id === currentPhaseId
 
   const baseClass = 'flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-[.68rem] transition-colors duration-150 w-full text-left'
@@ -125,7 +127,7 @@ function PhaseNavItem({ phase, projectId, currentPhaseId }) {
         ].join(' ')
       }
     >
-      <PhaseStatusDot status={phase.status} notCreated={false} />
+      <PhaseStatusDot status={effectiveStatus} notCreated={false} />
       <span className="flex-1 truncate">{phase.label}</span>
       {isFrozen && (
         <span className="text-white/30 text-[10px] font-mono">Frozen</span>
@@ -138,8 +140,12 @@ function PhaseNavItem({ phase, projectId, currentPhaseId }) {
 // Project tree — campaign + phases
 // ---------------------------------------------------------------------------
 
-function ProjectTree({ project, projectId, currentPhaseId }) {
+function ProjectTree({ project, projectId, currentPhaseId, getPhaseStatus }) {
   const campaign = project.campaigns?.[0] || null
+  const target = project.target_preview || {}
+  const geneName = target.gene_name || project.target_name
+  const uniprotId = target.uniprot_id || project.uniprot_id
+  const pdbId = project.target_pdb_id || target.structures?.[0]?.pdb_id
 
   return (
     <div className="mt-2">
@@ -160,6 +166,21 @@ function ProjectTree({ project, projectId, currentPhaseId }) {
         <span className="flex-1 truncate font-medium">{project.name}</span>
       </NavLink>
 
+      {/* Target info row */}
+      {(uniprotId || geneName) && (
+        <div className="ml-3 border-l border-white/[.07] pl-2 mt-1">
+          <div className="px-2 py-1 flex items-center gap-1.5 flex-wrap">
+            <svg className="w-3 h-3 text-bx-dim shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+            </svg>
+            {uniprotId && <span className="text-[10px] font-mono text-bx-cyan">{uniprotId}</span>}
+            {geneName && <span className="text-[10px] text-white/50">{geneName}</span>}
+            {pdbId && <span className="text-[10px] font-mono text-bx-violet/70">PDB:{pdbId}</span>}
+          </div>
+        </div>
+      )}
+
       {campaign ? (
         <div className="ml-3 border-l border-white/[.07] pl-2 mt-1">
           {/* Campaign header — not a link, just a label */}
@@ -177,8 +198,18 @@ function ProjectTree({ project, projectId, currentPhaseId }) {
                 phase={phase}
                 projectId={projectId}
                 currentPhaseId={currentPhaseId}
+                getPhaseStatus={getPhaseStatus}
               />
             ))}
+          </div>
+
+          {/* Experimental Results placeholder */}
+          <div className="mt-1">
+            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-[.68rem] text-bx-dim cursor-default">
+              <IconFlask />
+              <span className="flex-1 truncate">Experimental Results</span>
+              <span className="text-white/15 text-[9px] font-mono">Soon</span>
+            </div>
           </div>
         </div>
       ) : (
@@ -214,6 +245,48 @@ function BottomNavLink({ to, icon, label }) {
 }
 
 // ---------------------------------------------------------------------------
+// Breadcrumb
+// ---------------------------------------------------------------------------
+
+function Breadcrumb({ project, projectId, phaseId }) {
+  if (!project) return null
+
+  const campaign = project.campaigns?.[0]
+  const phase = campaign?.phases?.find(p => p.id === phaseId)
+  const phaseLabel = phase
+    ? (PHASE_TYPES[phase.type]?.label || phase.label)
+    : null
+
+  return (
+    <nav className="flex items-center gap-1.5 text-[.7rem] text-bx-light-muted mb-4 font-medium" aria-label="Breadcrumb">
+      <Link to="/" className="hover:text-bx-mint-dim transition-colors">Projects</Link>
+      <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+      </svg>
+      <Link to={`/project/${projectId}`} className="hover:text-bx-mint-dim transition-colors truncate max-w-[140px]">
+        {project.name}
+      </Link>
+      {campaign && phaseId && (
+        <>
+          <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          <span className="truncate max-w-[100px] text-gray-400">{campaign.name}</span>
+          {phaseLabel && (
+            <>
+              <svg className="w-3 h-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <span className="text-bx-light-text2 font-semibold">{phaseLabel}</span>
+            </>
+          )}
+        </>
+      )}
+    </nav>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // SidebarLayout — main export
 // ---------------------------------------------------------------------------
 
@@ -228,7 +301,7 @@ function IconLogout() {
 
 export default function SidebarLayout() {
   const { projectId, phaseId } = useParams()
-  const { projects, currentProject, selectProject } = useWorkspace()
+  const { projects, currentProject, selectProject, getPhaseStatus } = useWorkspace()
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
@@ -302,6 +375,7 @@ export default function SidebarLayout() {
               project={currentProject}
               projectId={projectId}
               currentPhaseId={phaseId}
+              getPhaseStatus={getPhaseStatus}
             />
           </div>
         )}
@@ -392,6 +466,9 @@ export default function SidebarLayout() {
         {/* Mobile spacer */}
         <div className="md:hidden h-12" aria-hidden="true" />
         <div className="max-w-7xl mx-auto" style={{ padding: '1.8rem 2.2rem' }}>
+          {projectId && currentProject && (
+            <Breadcrumb project={currentProject} projectId={projectId} phaseId={phaseId} />
+          )}
           <Outlet />
         </div>
       </main>

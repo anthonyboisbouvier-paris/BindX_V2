@@ -4,21 +4,53 @@ import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 // Extended objectives config
 // --------------------------------------------------
 const ALL_OBJECTIVES = [
-  { key: 'affinity',        label: 'Affinity',         extract: m => m.pareto_objectives?.affinity ?? null },
-  { key: 'safety',          label: 'Safety',           extract: m => m.pareto_objectives?.safety ?? null },
-  { key: 'bioavailability', label: 'Bioavailability',  extract: m => m.pareto_objectives?.bioavailability ?? null },
-  { key: 'synthesis',       label: 'Synthesizability', extract: m => m.pareto_objectives?.synthesis ?? null },
-  { key: 'qed',             label: 'QED',              extract: m => m.qed ?? null },
-  { key: 'logp',            label: 'LogP',             extract: m => m.logp ?? null },
-  { key: 'mw',              label: 'MW (Da)',          extract: m => m.mw ?? null },
-  { key: 'sa_score',        label: 'SA Score',         extract: m => m.sa_score ?? null },
-  { key: 'composite_score', label: 'Composite',        extract: m => m.composite_score ?? null },
-  { key: 'cnn_score',       label: 'CNN Score',        extract: m => m.cnn_score ?? null },
-  { key: 'selectivity',     label: 'Selectivity',      extract: m => m.off_target?.selectivity_score ?? null },
+  { key: 'docking_score',   label: 'Docking Score',    extract: m => m.docking_score ?? null,    higher_is_better: false },
+  { key: 'cnn_score',       label: 'CNN Score',        extract: m => m.cnn_score ?? null,        higher_is_better: true },
+  { key: 'cnn_affinity',    label: 'CNN Affinity',     extract: m => m.cnn_affinity ?? null,     higher_is_better: true },
+  { key: 'composite_score', label: 'Composite',        extract: m => m.composite_score ?? null,  higher_is_better: true },
+  { key: 'QED',             label: 'QED',              extract: m => m.QED ?? null,              higher_is_better: true },
+  { key: 'logP',            label: 'LogP',             extract: m => m.logP ?? null,             higher_is_better: false },
+  { key: 'MW',              label: 'MW (Da)',          extract: m => m.MW ?? null,               higher_is_better: false },
+  { key: 'TPSA',            label: 'TPSA',             extract: m => m.TPSA ?? null,             higher_is_better: false },
+  { key: 'solubility',      label: 'Solubility',       extract: m => m.solubility ?? null,       higher_is_better: true },
+  { key: 'synth_confidence',label: 'Synth. Confidence',extract: m => m.synth_confidence ?? null, higher_is_better: true },
+  { key: 'confidence_score',label: 'Confidence',       extract: m => m.confidence_score ?? null, higher_is_better: true },
 ]
 
+// Compute Pareto front (2-objective dominance)
+function computeParetoFront(mols, xKey, yKey) {
+  const xObj = ALL_OBJECTIVES.find(o => o.key === xKey)
+  const yObj = ALL_OBJECTIVES.find(o => o.key === yKey)
+  if (!xObj || !yObj) return new Set()
+
+  // Determine direction: we normalize so "better" = higher
+  const xSign = xObj.higher_is_better === false ? -1 : 1
+  const ySign = yObj.higher_is_better === false ? -1 : 1
+
+  const points = mols.map((m, i) => ({
+    idx: i,
+    x: (xObj.extract(m) ?? -Infinity) * xSign,
+    y: (yObj.extract(m) ?? -Infinity) * ySign,
+  })).filter(p => p.x > -Infinity && p.y > -Infinity)
+
+  const paretoIds = new Set()
+  for (const p of points) {
+    let dominated = false
+    for (const q of points) {
+      if (q === p) continue
+      if (q.x >= p.x && q.y >= p.y && (q.x > p.x || q.y > p.y)) {
+        dominated = true
+        break
+      }
+    }
+    if (!dominated) paretoIds.add(mols[p.idx].id)
+  }
+  return paretoIds
+}
+
 const COLOR_SCHEMES = {
-  pareto_rank: { label: 'Pareto Rank', fn: m => m.pareto_front ? '#00e6a0' : '#9ca3af' },
+  pareto_rank: { label: 'Pareto Rank', fn: (m, paretoIds) => paretoIds?.has(m.id) ? '#00e6a0' : '#9ca3af' },
+  bookmarked:  { label: 'Bookmarked',  fn: m => m.bookmarked ? '#f59e0b' : '#d1d5db' },
   source:      { label: 'Source',      fn: m => {
     const s = (m.source || '').toLowerCase()
     if (s.includes('zinc')) return '#3b82f6'
@@ -30,10 +62,48 @@ const COLOR_SCHEMES = {
     const colors = ['#ef4444','#3b82f6','#00e6a0','#f59e0b','#a855f7','#06b6d4','#ec4899','#84cc16']
     return colors[(m.cluster_id || 0) % colors.length]
   }},
-  admet:       { label: 'ADMET',       fn: m => {
-    const c = m.admet?.color_code
-    return c === 'green' ? '#00e6a0' : c === 'red' ? '#ef4444' : '#eab308'
+  safety:      { label: 'Safety',      fn: m => {
+    const c = (m.safety_color_code || '').toLowerCase()
+    return c === 'green' ? '#00e6a0' : c === 'red' ? '#ef4444' : c === 'yellow' || c === 'orange' ? '#eab308' : '#9ca3af'
   }},
+  invalidated: { label: 'Invalidated', fn: m => m.invalidated ? '#ef4444' : '#00e6a0' },
+}
+
+// --------------------------------------------------
+// Inline SMILES preview for Pareto tooltip (lightweight, uses smiles-drawer)
+// --------------------------------------------------
+let _sdPromise = null
+const _paretoSvgCache = new Map()
+
+function ParetoSmilesPreview({ smiles }) {
+  const [html, setHtml] = React.useState(() => _paretoSvgCache.get(smiles) || null)
+  React.useEffect(() => {
+    if (!smiles || _paretoSvgCache.has(smiles)) return
+    let cancelled = false
+    if (!_sdPromise) _sdPromise = import('smiles-drawer').then(m => m.default || m)
+    _sdPromise.then(SD => {
+      if (cancelled) return
+      try {
+        SD.parse(smiles, (tree) => {
+          if (cancelled) return
+          const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+          svgEl.setAttribute('width', '160')
+          svgEl.setAttribute('height', '60')
+          document.body.appendChild(svgEl)
+          const drawer = new SD.SvgDrawer({ width: 160, height: 60 })
+          drawer.draw(tree, svgEl, 'dark')
+          const out = svgEl.outerHTML
+          document.body.removeChild(svgEl)
+          _paretoSvgCache.set(smiles, out)
+          if (!cancelled) setHtml(out)
+        }, () => {})
+      } catch {}
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [smiles])
+
+  if (!html) return <span style={{ color: '#6b7280', fontSize: '9px' }}>{smiles.length > 30 ? smiles.slice(0, 30) + '…' : smiles}</span>
+  return <span dangerouslySetInnerHTML={{ __html: html }} />
 }
 
 // --------------------------------------------------
@@ -200,9 +270,9 @@ function RadarOverlay({ molecules, width, height }) {
 // --------------------------------------------------
 // Main ParetoFront component
 // --------------------------------------------------
-export default function ParetoFront({ molecules, onSelect }) {
-  const [xKey, setXKey] = useState('affinity')
-  const [yKey, setYKey] = useState('safety')
+export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
+  const [xKey, setXKey] = useState('docking_score')
+  const [yKey, setYKey] = useState('composite_score')
   const [viewMode, setViewMode] = useState('scatter')
   const [colorBy, setColorBy] = useState('pareto_rank')
   const [sizeBy, setSizeBy] = useState('none')
@@ -219,18 +289,24 @@ export default function ParetoFront({ molecules, onSelect }) {
   const [brushRect, setBrushRect] = useState(null)
   const svgRef = useRef(null)
 
+  // Filter molecules that have at least one numeric property
   const mols = useMemo(() =>
-    (molecules || []).filter(m => m.pareto_objectives && typeof m.pareto_objectives === 'object'),
+    (molecules || []).filter(m => {
+      return ALL_OBJECTIVES.some(o => o.extract(m) != null)
+    }),
     [molecules]
   )
 
+  // Compute pareto front locally (2-objective)
+  const paretoIds = useMemo(() => computeParetoFront(mols, xKey, yKey), [mols, xKey, yKey])
+
   const filteredMols = useMemo(() =>
-    showDominated ? mols : mols.filter(m => m.pareto_front === true),
-    [mols, showDominated]
+    showDominated ? mols : mols.filter(m => paretoIds.has(m.id)),
+    [mols, showDominated, paretoIds]
   )
 
-  const paretoMols = mols.filter(m => m.pareto_front === true)
-  const nonParetoMols = filteredMols.filter(m => m.pareto_front !== true)
+  const paretoMols = mols.filter(m => paretoIds.has(m.id))
+  const nonParetoMols = filteredMols.filter(m => !paretoIds.has(m.id))
   const paretoCount = paretoMols.length
 
   // Dynamic ranges
@@ -250,7 +326,8 @@ export default function ParetoFront({ molecules, onSelect }) {
   const xTicks = linspace(xRange[0], xRange[1], 5)
   const yTicks = linspace(yRange[0], yRange[1], 5)
 
-  const colorFn = COLOR_SCHEMES[colorBy]?.fn || COLOR_SCHEMES.pareto_rank.fn
+  const colorFnRaw = COLOR_SCHEMES[colorBy]?.fn || COLOR_SCHEMES.pareto_rank.fn
+  const colorFn = useCallback(mol => colorFnRaw(mol, paretoIds), [colorFnRaw, paretoIds])
 
   const getRadius = useCallback((mol) => {
     if (sizeBy === 'none') return 5
@@ -345,18 +422,23 @@ export default function ParetoFront({ molecules, onSelect }) {
     }
   }, [onSelect])
 
+  const handlePointContextMenu = useCallback((mol, e) => {
+    e.preventDefault()
+    if (onToggleBookmark) onToggleBookmark(mol.id)
+  }, [onToggleBookmark])
+
   const handleResetZoom = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [])
 
   // Export CSV
   const exportCSV = useCallback(() => {
     const data = selected.length > 0 ? selected : filteredMols
     const keys = ALL_OBJECTIVES.map(o => o.key)
-    const header = ['name', 'smiles', ...keys, 'pareto_rank', 'pareto_front'].join(',')
+    const header = ['name', 'smiles', ...keys, 'pareto_optimal'].join(',')
     const rows = data.map(m => [
       `"${(m.name || '').replace(/"/g, '""')}"`,
       `"${(m.smiles || '').replace(/"/g, '""')}"`,
       ...keys.map(k => getVal(m, k) ?? ''),
-      m.pareto_rank ?? '', m.pareto_front ?? ''
+      paretoIds.has(m.id) ? 'yes' : 'no'
     ].join(','))
     const csv = [header, ...rows].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -527,7 +609,8 @@ export default function ParetoFront({ molecules, onSelect }) {
                   style={{ cursor: 'pointer', transition: 'r 0.1s' }}
                   onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
                   onMouseLeave={() => setHovered(null)}
-                  onClick={(e) => handlePointClick(mol, e)} />
+                  onClick={(e) => handlePointClick(mol, e)}
+                  onContextMenu={(e) => handlePointContextMenu(mol, e)} />
               )
             })}
 
@@ -547,7 +630,8 @@ export default function ParetoFront({ molecules, onSelect }) {
                     style={{ cursor: 'pointer', transition: 'r 0.1s' }}
                     onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
                     onMouseLeave={() => setHovered(null)}
-                    onClick={(e) => handlePointClick(mol, e)} />
+                    onClick={(e) => handlePointClick(mol, e)}
+                    onContextMenu={(e) => handlePointContextMenu(mol, e)} />
                   {mol.pareto_rank != null && (
                     <text x={cx} y={cy + 3.5} textAnchor="middle" fontSize={7} fontWeight={700} fill="#fff"
                       style={{ pointerEvents: 'none', userSelect: 'none' }}>{mol.pareto_rank}</text>
@@ -570,9 +654,19 @@ export default function ParetoFront({ molecules, onSelect }) {
               fill="#3b82f6" fillOpacity={0.1} stroke="#3b82f6" strokeWidth={1} strokeDasharray="4,2" />
           )}
 
+          {/* R² correlation badge */}
+          {stats.correlation !== 'N/A' && (
+            <g>
+              <rect x={ML + PW - 80} y={MT + 6} width={74} height={22} rx={4} fill="#f1f5f9" stroke="#e2e8f0" strokeWidth={0.5} />
+              <text x={ML + PW - 43} y={MT + 21} textAnchor="middle" fontSize={10} fill="#64748b" fontWeight={600}>
+                R² = {(Number(stats.correlation) ** 2).toFixed(3)}
+              </text>
+            </g>
+          )}
+
           {/* Tooltip */}
           {hovered && !brushing && (() => {
-            const W = 190, H = 160
+            const W = 200, H = 190
             let tx = hoveredPos.x + 14, ty = hoveredPos.y - H / 2
             if (tx + W > VW - 4) tx = hoveredPos.x - W - 14
             if (ty < MT) ty = MT
@@ -583,12 +677,23 @@ export default function ParetoFront({ molecules, onSelect }) {
                   background: '#0f131d', color: '#fff', borderRadius: '8px', padding: '8px 10px',
                   fontSize: '11px', lineHeight: '1.5', boxShadow: '0 4px 16px rgba(0,0,0,0.25)', width: `${W}px`,
                 }}>
-                  <div style={{ fontWeight: 700, marginBottom: '4px', color: '#00e6a0', fontSize: '12px' }}>
-                    {hovered.name || 'Molecule'}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ fontWeight: 700, color: '#00e6a0', fontSize: '12px' }}>
+                      {hovered.name || 'Molecule'}
+                    </span>
+                    {hovered.bookmarked && (
+                      <span style={{ color: '#f59e0b', fontSize: '10px' }}>★</span>
+                    )}
                   </div>
-                  {hovered.pareto_front && (
+                  {paretoIds.has(hovered.id) && (
                     <div style={{ color: '#86efac', fontSize: '10px', marginBottom: '3px' }}>
-                      Pareto front — rank {hovered.pareto_rank ?? '?'}
+                      Pareto-optimal
+                    </div>
+                  )}
+                  {/* 2D structure preview */}
+                  {hovered.smiles && (
+                    <div style={{ marginBottom: '4px', background: '#1a2332', borderRadius: '4px', padding: '3px', textAlign: 'center' }}>
+                      <ParetoSmilesPreview smiles={hovered.smiles} />
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
@@ -629,7 +734,7 @@ export default function ParetoFront({ molecules, onSelect }) {
           <svg width={14} height={12}><circle cx={6} cy={6} r={4} fill="#9ca3af" fillOpacity={0.5} /></svg>
           <span>Dominated</span>
         </div>
-        <span className="text-gray-300">Shift+drag: brush select | Ctrl+click: multi-select | Scroll: zoom</span>
+        <span className="text-gray-300">Shift+drag: brush select | Ctrl+click: multi-select | Right-click: bookmark | Scroll: zoom</span>
       </div>
 
       {showStats && <StatsPanel stats={stats} xLabel={xLabel} yLabel={yLabel} />}

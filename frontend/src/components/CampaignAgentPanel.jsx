@@ -1,229 +1,349 @@
-import React, { useState, useRef, useEffect } from 'react'
-import Badge from './Badge.jsx'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import BindXLogo from './BindXLogo.jsx'
+import { queryAgent } from '../api.js'
 
 // ---------------------------------------------------------------------------
-// Relative time
+// Chat message components
 // ---------------------------------------------------------------------------
 
-function relativeTime(iso) {
-  if (!iso) return ''
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
-}
-
-// ---------------------------------------------------------------------------
-// Priority badge
-// ---------------------------------------------------------------------------
-
-function PriorityBadge({ priority }) {
-  const map = { high: 'red', medium: 'yellow', low: 'green' }
+function UserMessage({ text }) {
   return (
-    <Badge variant={map[priority] || 'gray'} size="sm">
-      {priority?.toUpperCase()}
-    </Badge>
+    <div className="flex justify-end">
+      <div className="max-w-[85%] bg-bx-surface text-white px-4 py-2.5 rounded-2xl rounded-br-sm text-sm leading-relaxed">
+        {text}
+      </div>
+    </div>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Type icon
-// ---------------------------------------------------------------------------
-
-function TypeIcon({ type }) {
-  if (type === 'recommendation') {
-    return (
-      <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-      </svg>
-    )
-  }
-  if (type === 'alert') {
-    return (
-      <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-      </svg>
-    )
-  }
-  // observation
+function AgentMessage({ text, agent, timestamp }) {
   return (
-    <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
-        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-    </svg>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Single insight card
-// ---------------------------------------------------------------------------
-
-function InsightCard({ insight, onAction }) {
-  const [expanded, setExpanded] = useState(insight.priority === 'high')
-
-  const borderColor = {
-    high: 'border-l-red-400',
-    medium: 'border-l-amber-400',
-    low: 'border-l-green-400',
-  }[insight.priority] || 'border-l-gray-300'
-
-  return (
-    <div className={`border-l-2 ${borderColor} pl-3 py-2`}>
-      <div
-        className="flex items-start gap-2 cursor-pointer select-none"
-        onClick={() => setExpanded(e => !e)}
-      >
-        <TypeIcon type={insight.type} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap mb-0.5">
-            <span className="text-sm font-semibold text-gray-800 leading-tight">{insight.title}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <PriorityBadge priority={insight.priority} />
-            <span className="text-sm text-gray-400">{relativeTime(insight.timestamp)}</span>
-          </div>
-        </div>
-        <svg
-          className={`w-4 h-4 text-gray-300 shrink-0 transition-transform mt-0.5 ${expanded ? 'rotate-180' : ''}`}
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    <div className="flex gap-2.5">
+      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-bx-mint to-emerald-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+        <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
         </svg>
       </div>
-
-      {expanded && insight.body && (
-        <div className="mt-2 space-y-2">
-          <p className="text-sm text-gray-500 leading-relaxed">{insight.body}</p>
-          {insight.action && (
-            <button
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-bx-surface text-white text-sm font-medium rounded-lg hover:bg-bx-elevated transition-colors"
-              onClick={(e) => {
-                e.stopPropagation()
-                if (onAction) onAction(insight.action)
-              }}
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {insight.action.label}
-            </button>
-          )}
+      <div className="max-w-[85%] flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-[10px] font-semibold text-bx-mint uppercase tracking-wider">{agent || 'BindX Agent'}</span>
+          {timestamp && <span className="text-[10px] text-gray-400">{new Date(timestamp).toLocaleTimeString()}</span>}
         </div>
-      )}
+        <div className="bg-gray-50 border border-gray-100 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+          {text}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex gap-2.5">
+      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-bx-mint to-emerald-400 flex items-center justify-center flex-shrink-0">
+        <BindXLogo variant="loading" size={20} />
+      </div>
+      <div className="bg-gray-50 border border-gray-100 px-4 py-3 rounded-2xl rounded-tl-sm flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+      </div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// CampaignAgentPanel
+// Agent type picker
 // ---------------------------------------------------------------------------
-// Props:
-//   insights   — array of insight objects (from MOCK_AGENT_INSIGHTS)
-//   onAskAgent — (question: string) => void
+const AGENTS = [
+  { key: 'run_analysis', label: 'Run Analysis', desc: 'Hit selection, clustering, scoring trends' },
+  { key: 'candidate', label: 'Molecule Review', desc: 'ADMET, safety, synthesis assessment' },
+  { key: 'target', label: 'Target Strategy', desc: 'Druggability, screening recommendations' },
+  { key: 'optimization', label: 'Lead Optimization', desc: 'SAR, modifications, multi-parameter' },
+]
 
-export default function CampaignAgentPanel({ insights: initialInsights = [], onAskAgent }) {
-  const [insights, setInsights] = useState(initialInsights)
-  const [question, setQuestion] = useState('')
-  const [loading, setLoading] = useState(false)
-  const inputRef = useRef(null)
+// ---------------------------------------------------------------------------
+// Build campaign context from workspace data
+// ---------------------------------------------------------------------------
+function buildContext(project, campaign, phase, molecules) {
+  const ctx = {
+    project_name: project?.name || 'Unknown',
+    target: project?.target_input_value || '',
+  }
 
-  // Sync if prop changes
-  useEffect(() => {
-    setInsights(initialInsights)
-  }, [initialInsights])
+  if (campaign) {
+    ctx.campaign_name = campaign.name
+    ctx.pocket = campaign.pocket_label || ''
+  }
 
-  const handleAsk = async () => {
-    const q = question.trim()
-    if (!q) return
+  if (phase) {
+    ctx.phase = phase.label
+    ctx.phase_type = phase.type
+    ctx.molecule_count = molecules?.length || 0
+  }
 
-    setLoading(true)
-    const questionInsight = {
-      id: `user-q-${Date.now()}`,
-      type: 'observation',
-      priority: 'medium',
-      timestamp: new Date().toISOString(),
-      title: q,
-      body: 'Analyzing your question against campaign data... Based on current Phase A and B data, the key observation is that Osimertinib-v1 stands out with the highest composite score (91.3) and CNN affinity (8.0). Recommend prioritizing for full ADMET run.',
+  if (molecules?.length > 0) {
+    // Summary stats
+    const scores = molecules.filter(m => m.docking_score != null).map(m => m.docking_score)
+    const composites = molecules.filter(m => m.composite_score != null).map(m => m.composite_score)
+    const bookmarked = molecules.filter(m => m.bookmarked)
+
+    ctx.molecules_summary = {
+      total: molecules.length,
+      bookmarked: bookmarked.length,
+      with_docking: scores.length,
+      with_composite: composites.length,
+      avg_docking: scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2) : null,
+      avg_composite: composites.length ? (composites.reduce((a, b) => a + b, 0) / composites.length).toFixed(2) : null,
+      best_docking: scores.length ? Math.min(...scores).toFixed(2) : null,
+      best_composite: composites.length ? Math.max(...composites).toFixed(2) : null,
     }
 
-    // Simulate async response
-    setTimeout(() => {
-      setInsights(prev => [questionInsight, ...prev])
+    // Top 5 molecules by composite score
+    ctx.top_molecules = [...molecules]
+      .filter(m => m.composite_score != null)
+      .sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0))
+      .slice(0, 5)
+      .map(m => ({
+        name: m.name || m.id,
+        smiles: m.smiles,
+        docking_score: m.docking_score,
+        composite_score: m.composite_score,
+        QED: m.QED,
+        logP: m.logP,
+        bookmarked: m.bookmarked,
+      }))
+  }
+
+  return ctx
+}
+
+// ---------------------------------------------------------------------------
+// CampaignAgentPanel — Chat interface for AI agent
+// ---------------------------------------------------------------------------
+// Props:
+//   isOpen     — boolean
+//   onClose    — () => void
+//   project    — current project object
+//   campaign   — current campaign object
+//   phase      — current phase object
+//   molecules  — flat molecule array
+
+export default function CampaignAgentPanel({ isOpen, onClose, project, campaign, phase, molecules }) {
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [selectedAgent, setSelectedAgent] = useState('run_analysis')
+  const scrollRef = useRef(null)
+  const inputRef = useRef(null)
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages, loading])
+
+  // Focus input when panel opens
+  useEffect(() => {
+    if (isOpen && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 100)
+    }
+  }, [isOpen])
+
+  const handleSend = useCallback(async () => {
+    const q = input.trim()
+    if (!q || loading) return
+
+    const userMsg = { role: 'user', text: q, timestamp: new Date().toISOString() }
+    setMessages(prev => [...prev, userMsg])
+    setInput('')
+    setLoading(true)
+
+    try {
+      const context = buildContext(project, campaign, phase, molecules)
+      context.user_question = q
+
+      const result = await queryAgent(selectedAgent, context, project?.id)
+
+      // Handle unavailable agent (missing API key, etc.)
+      if (result.available === false) {
+        const agentMsg = {
+          role: 'agent',
+          agent: 'System',
+          text: `The AI Agent is not available yet. ${result.fallback || 'The backend API key may not be configured.'}. This feature requires an OpenAI API key to be set on the server.`,
+          timestamp: new Date().toISOString(),
+          isError: true,
+        }
+        setMessages(prev => [...prev, agentMsg])
+      } else {
+        const agentMsg = {
+          role: 'agent',
+          agent: AGENTS.find(a => a.key === selectedAgent)?.label || selectedAgent,
+          text: result.analysis || result.recommendation || result.summary || JSON.stringify(result, null, 2),
+          timestamp: new Date().toISOString(),
+        }
+        setMessages(prev => [...prev, agentMsg])
+      }
+    } catch (err) {
+      const errorMsg = {
+        role: 'agent',
+        agent: 'System',
+        text: `Agent unavailable: ${err.userMessage || err.message || 'Connection error'}. The agent backend may not be running or the API key may not be configured.`,
+        timestamp: new Date().toISOString(),
+        isError: true,
+      }
+      setMessages(prev => [...prev, errorMsg])
+    } finally {
       setLoading(false)
-      setQuestion('')
-    }, 800)
+    }
+  }, [input, loading, selectedAgent, project, campaign, phase, molecules])
 
-    if (onAskAgent) onAskAgent(q)
-  }
-
-  const handleAction = (action) => {
-    console.log('[CampaignAgentPanel] Action triggered:', action)
-  }
+  if (!isOpen) return null
 
   return (
-    <div className="card overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-3.5 border-b border-gray-50 flex items-center gap-2">
-        <div className="w-6 h-6 rounded-full bg-bx-surface flex items-center justify-center shrink-0">
-          <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
-          </svg>
-        </div>
-        <span className="text-sm font-semibold text-gray-700">AI Agent Insights</span>
-        <span className="ml-auto text-sm text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">
-          {insights.length} insight{insights.length !== 1 ? 's' : ''}
-        </span>
-      </div>
+    <div className="fixed inset-y-0 right-0 z-40 flex" onClick={onClose}>
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/20" />
 
-      {/* Insight list */}
-      <div className="px-5 py-3 space-y-3 max-h-80 overflow-y-auto">
-        {insights.length === 0 && (
-          <p className="text-sm text-gray-400 text-center py-4">No insights yet.</p>
-        )}
-        {insights.map(ins => (
-          <InsightCard key={ins.id} insight={ins} onAction={handleAction} />
-        ))}
-      </div>
-
-      {/* Agent chat input */}
-      <div className="px-5 py-3.5 border-t border-gray-50">
-        <div className="flex items-center gap-2">
-          <input
-            ref={inputRef}
-            type="text"
-            value={question}
-            onChange={e => setQuestion(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAsk()}
-            placeholder="Ask the AI agent about this campaign..."
-            className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-bx-mint/20 focus:border-bx-surface transition-colors placeholder-gray-400"
-            disabled={loading}
-          />
+      {/* Panel */}
+      <div
+        className="relative ml-auto w-[420px] max-w-[90vw] bg-white shadow-2xl flex flex-col border-l border-gray-200"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-bx-mint to-emerald-400 flex items-center justify-center">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-gray-800">BindX AI Agent</h3>
+              <p className="text-[10px] text-gray-400">{project?.name || 'Campaign'} analysis</p>
+            </div>
+          </div>
           <button
-            onClick={handleAsk}
-            disabled={loading || !question.trim()}
-            className="px-3 py-2 bg-bx-surface text-white text-sm font-semibold rounded-lg hover:bg-bx-elevated disabled:opacity-40 transition-colors flex items-center gap-1.5 shrink-0"
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
           >
-            {loading ? (
-              <BindXLogo variant="loading" size={14} />
-            ) : (
-              <>
-                Ask
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
-              </>
-            )}
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
+        </div>
+
+        {/* Agent selector */}
+        <div className="px-5 py-2.5 border-b border-gray-100 bg-gray-50/50">
+          <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+            {AGENTS.map(agent => (
+              <button
+                key={agent.key}
+                onClick={() => setSelectedAgent(agent.key)}
+                className={`flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                  selectedAgent === agent.key
+                    ? 'bg-bx-surface text-white shadow-sm'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                }`}
+                title={agent.desc}
+              >
+                {agent.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Context summary */}
+        {molecules?.length > 0 && (
+          <div className="px-5 py-2 border-b border-gray-100 bg-blue-50/30">
+            <p className="text-[10px] text-gray-500">
+              Context: <span className="font-semibold text-gray-700">{molecules.length}</span> molecules
+              {phase && <> in <span className="font-semibold text-gray-700">{phase.label}</span></>}
+              {molecules.filter(m => m.bookmarked).length > 0 && (
+                <> ({molecules.filter(m => m.bookmarked).length} bookmarked)</>
+              )}
+            </p>
+          </div>
+        )}
+
+        {/* Messages area */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-4"
+          style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
+
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-bx-mint/10 to-emerald-50 flex items-center justify-center mb-4">
+                <svg className="w-7 h-7 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+              </div>
+              <p className="text-sm font-semibold text-gray-700 mb-1">Ask the AI Agent</p>
+              <p className="text-xs text-gray-400 max-w-[240px] leading-relaxed">
+                Analyze your campaign data, get recommendations for next runs, identify scaffolds, or assess molecule safety.
+              </p>
+              <div className="mt-4 space-y-1.5 w-full max-w-[280px]">
+                {[
+                  'What are the best hits so far?',
+                  'Which molecules should I prioritize?',
+                  'Recommend the next analysis to run',
+                  'Are there any safety red flags?',
+                ].map(suggestion => (
+                  <button
+                    key={suggestion}
+                    onClick={() => { setInput(suggestion); inputRef.current?.focus() }}
+                    className="w-full text-left px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-600 hover:border-bx-mint/40 hover:bg-emerald-50/30 hover:text-gray-800 transition-all"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((msg, i) => (
+            msg.role === 'user'
+              ? <UserMessage key={i} text={msg.text} />
+              : <AgentMessage key={i} text={msg.text} agent={msg.agent} timestamp={msg.timestamp} />
+          ))}
+
+          {loading && <TypingIndicator />}
+        </div>
+
+        {/* Input area */}
+        <div className="px-5 py-3.5 border-t border-gray-100 bg-white flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
+              placeholder={`Ask ${AGENTS.find(a => a.key === selectedAgent)?.label || 'agent'}...`}
+              className="flex-1 text-sm px-3.5 py-2.5 rounded-xl border border-gray-200 bg-gray-50
+                         focus:outline-none focus:ring-2 focus:ring-bx-mint/20 focus:border-bx-mint
+                         transition-colors placeholder-gray-400"
+              disabled={loading}
+            />
+            <button
+              onClick={handleSend}
+              disabled={loading || !input.trim()}
+              className="p-2.5 bg-bx-surface text-white rounded-xl hover:bg-bx-elevated
+                         disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            >
+              {loading ? (
+                <BindXLogo variant="loading" size={20} />
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>

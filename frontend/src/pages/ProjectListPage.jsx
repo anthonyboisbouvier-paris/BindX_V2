@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
-import { PHASE_TYPES } from '../mock/data.js'
 import BindXLogo from '../components/BindXLogo.jsx'
+import MiniProteinViewer from '../components/MiniProteinViewer.jsx'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -133,6 +133,16 @@ function ProjectCard({ project, onClick, onDelete, searchQuery }) {
           ? 'bg-gradient-to-r from-bx-mint to-bx-cyan'
           : 'bg-transparent group-hover:bg-bx-mint/30'
       }`} />
+
+      {/* 3D protein preview */}
+      {project.target_preview?.structures?.[0]?.download_url && (
+        <div className="border-b border-bx-light-border-s">
+          <MiniProteinViewer
+            pdbUrl={project.target_preview.structures[0].download_url}
+            height={110}
+          />
+        </div>
+      )}
 
       <div className="p-5">
         {/* Header */}

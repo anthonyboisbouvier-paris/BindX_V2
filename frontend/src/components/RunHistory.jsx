@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import BindXLogo from './BindXLogo.jsx'
 
 // ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ const STATUS_CONFIG = {
   running: {
     ring: 'ring-2 ring-blue-400 ring-offset-1',
     bg: 'bg-blue-500',
-    icon: <BindXLogo variant="loading" size={16} />,
+    icon: <BindXLogo variant="loading" size={24} />,
     label: 'Running',
     labelColor: 'text-blue-600',
     connectorColor: 'bg-blue-200',
@@ -196,6 +196,12 @@ const STATUS_CONFIG = {
 export default function RunHistory({ runs = [], onCancel, onArchive }) {
   const [activeRunId, setActiveRunId] = useState(null)
 
+  // Sort runs by created_at ascending (oldest first)
+  const sortedRuns = useMemo(
+    () => [...runs].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0)),
+    [runs]
+  )
+
   if (!runs.length) {
     return (
       <div className="card p-8 text-center">
@@ -208,9 +214,9 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
     )
   }
 
-  const completedCount = runs.filter(r => r.status === 'completed').length
-  const runningCount = runs.filter(r => r.status === 'running').length
-  const failedCount = runs.filter(r => r.status === 'failed').length
+  const completedCount = sortedRuns.filter(r => r.status === 'completed').length
+  const runningCount = sortedRuns.filter(r => r.status === 'running').length
+  const failedCount = sortedRuns.filter(r => r.status === 'failed').length
 
   return (
     <div className="card overflow-hidden">
@@ -234,7 +240,7 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
           )}
           {runningCount > 0 && (
             <span className="flex items-center gap-1 text-blue-600 font-medium">
-              <BindXLogo variant="loading" size={12} />
+              <BindXLogo variant="loading" size={18} />
               {runningCount} running
             </span>
           )}
@@ -247,14 +253,14 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
             </span>
           )}
           <span className="text-gray-300">|</span>
-          <span className="text-gray-400">{runs.length} total</span>
+          <span className="text-gray-400">{sortedRuns.length} total</span>
         </div>
       </div>
 
       {/* Timeline */}
       <div className="px-5 py-5 overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
         <div className="flex items-start gap-0 min-w-max">
-          {runs.map((run, i) => {
+          {sortedRuns.map((run, i) => {
             const sc = STATUS_CONFIG[run.status] || STATUS_CONFIG.queued
             const duration = formatDuration(run.started_at, run.completed_at)
             const summary = configSummary(run.type, run.config)
@@ -262,7 +268,7 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
               ? run.calculation_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' + ')
               : run.type.charAt(0).toUpperCase() + run.type.slice(1)
             const isActive = activeRunId === run.id
-            const isLast = i === runs.length - 1
+            const isLast = i === sortedRuns.length - 1
 
             return (
               <div key={run.id} className="flex items-start">
@@ -325,6 +331,20 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
                           {run.error_message}
                         </p>
                       )}
+                      {/* Run logs */}
+                      {run.logs && run.logs.length > 0 && (
+                        <div className="mt-1 max-h-24 overflow-y-auto bg-gray-900 rounded-md px-2 py-1.5 text-[9px] font-mono text-gray-300 space-y-0.5 scrollbar-thin">
+                          {run.logs.map((log, li) => (
+                            <div key={li} className={`${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-amber-400' : 'text-gray-400'}`}>
+                              {log.timestamp && <span className="text-gray-600 mr-1">{new Date(log.timestamp).toLocaleTimeString()}</span>}
+                              {log.message || String(log)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {run.current_step && !run.logs?.length && (
+                        <p className="text-[9px] text-gray-500 text-center italic">Step: {run.current_step}</p>
+                      )}
                       {/* Action buttons */}
                       <div className="flex items-center justify-center gap-1.5 pt-1">
                         {(run.status === 'created' || run.status === 'running') && onCancel && (
@@ -378,8 +398,8 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
                         run.status === 'completed' ? 'bg-green-300' :
                         run.status === 'running' ? 'bg-blue-200' :
                         'bg-gray-200'
-                      } ${runs[i + 1]?.status === 'queued' ? 'border-dashed' : ''}`}
-                      style={runs[i + 1]?.status === 'queued' ? {
+                      } ${sortedRuns[i + 1]?.status === 'queued' ? 'border-dashed' : ''}`}
+                      style={sortedRuns[i + 1]?.status === 'queued' ? {
                         borderTop: '2px dashed #e5e7eb',
                         background: 'none',
                         height: 0,
