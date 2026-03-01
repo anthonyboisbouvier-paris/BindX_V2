@@ -8,6 +8,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [confirmationSent, setConfirmationSent] = useState(false)
   const { register } = useAuth()
   const navigate = useNavigate()
 
@@ -20,7 +21,18 @@ export default function RegisterPage() {
     }
     setLoading(true)
     try {
-      await register(email, password, username)
+      const user = await register(email, password, username)
+      // Supabase returns a user with identities=[] if email already exists (anti-enumeration)
+      if (user && user.identities && user.identities.length === 0) {
+        setError('An account with this email already exists. Try signing in instead.')
+        return
+      }
+      // If email confirmation is required, user won't have a session yet
+      if (user && !user.confirmed_at && !user.email_confirmed_at) {
+        setConfirmationSent(true)
+        return
+      }
+      // Auto-confirmed (e.g. dev mode) — go to app
       navigate('/')
     } catch (err) {
       setError(err.message || 'Registration failed')
@@ -45,6 +57,24 @@ export default function RegisterPage() {
 
         {/* Card */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+          {confirmationSent ? (
+            <div className="text-center py-4">
+              <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold text-gray-800 mb-2">Check your email</h2>
+              <p className="text-sm text-gray-500 mb-4">
+                We sent a confirmation link to <strong className="text-gray-700">{email}</strong>.
+                <br />Click the link to activate your BindX account.
+              </p>
+              <Link to="/login" className="text-sm text-bx-s2 font-medium hover:underline">
+                Back to Sign in
+              </Link>
+            </div>
+          ) : (
+          <>
           <h2 className="text-lg font-semibold text-bx-s2 mb-4">Sign up</h2>
 
           {error && (
@@ -112,6 +142,8 @@ export default function RegisterPage() {
               Sign in
             </Link>
           </p>
+          </>
+          )}
         </div>
       </div>
     </div>
