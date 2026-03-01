@@ -15,6 +15,7 @@ import FreezeDialog from '../../components/FreezeDialog.jsx'
 import ParetoFront from '../../components/ParetoFront.jsx'
 import ExportModal from '../../components/ExportModal.jsx'
 import CampaignAgentPanel from '../../components/CampaignAgentPanel.jsx'
+import InfoTip, { TIPS } from '../../components/InfoTip.jsx'
 
 import MoleculeDetailPanel, { DetailPopupModal } from './MoleculeDetailPanel.jsx'
 import PhaseHeader, { Breadcrumb, FilterBarWithCount, StatsBar } from './PhaseHeader.jsx'
