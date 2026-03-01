@@ -123,21 +123,157 @@ print(f'PASS: Project state OK (campaign={p[\"campaigns\"][0][\"id\"]})')
 CAMPAIGN=$(api GET "/api/v9/projects/$PROJECT" | python3 -c "import sys,json; print(json.load(sys.stdin)['campaigns'][0]['id'])")
 
 # ---------------------------------------------------------------------------
-# STEP 2: Configure target (REQUIRED before campaigns)
+# STEP 2a: Resolve target structure (REAL pipeline)
 # ---------------------------------------------------------------------------
-step "2: Configure target"
+step "2a: Resolve target structure (UniProt → PDB → Pockets)"
 
 # Rule R1: Target must be configured before creating campaigns
-TARGET_JSON='{"target_input_type":"uniprot","target_input_value":"P00533","target_name":"EGFR","target_pdb_id":"1M17","target_preview":{"uniprot":{"id":"P00533","name":"EGFR"},"structure":{"pdb_id":"1M17","source":"experimental","resolution":2.6},"pockets":[{"rank":1,"score":0.92,"residues":42}]},"structure_source":"experimental","structure_resolution":2.6,"pockets_detected":[{"rank":1,"score":0.92}]}'
-api PUT "/api/v9/projects/$PROJECT" "$TARGET_JSON" | python3 -c "
+# This calls the REAL pipeline: UniProt → RCSB PDB → P2Rank pocket detection
+info "Calling /api/preview-target with UniProt P00533 (EGFR)..."
+info "This calls external APIs (RCSB, UniProt, ChEMBL, P2Rank) — may take 30-120s"
+
+PREVIEW=$(curl -s -X POST "$BASE_URL/api/preview-target" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"uniprot_id": "P00533"}' \
+  --max-time 180)
+
+# Validate structure was resolved
+echo "$PREVIEW" | python3 -c "
+import sys,json
+try:
+    d = json.load(sys.stdin)
+except:
+    print('FAIL: Could not parse preview-target response')
+    sys.exit(1)
+
+errors = []
+
+# Must have a resolved structure
+structure = d.get('structure', {})
+if not structure:
+    errors.append('No structure resolved')
+elif structure.get('source') == 'none':
+    errors.append(f'Structure source is none: {structure.get(\"explanation\",\"?\")}')
+else:
+    print(f'  Structure: {structure.get(\"pdb_id\",\"?\")} ({structure.get(\"source\",\"?\")}, {structure.get(\"resolution\",\"?\")}A)')
+
+# Must have pockets with center coordinates
+pockets = d.get('pockets', [])
+if not pockets:
+    errors.append('No pockets detected')
+else:
+    print(f'  Pockets: {len(pockets)} detected')
+    for i, p in enumerate(pockets[:3]):
+        center = p.get('center', [])
+        method = p.get('method', '?')
+        prob = p.get('probability', 0)
+        print(f'    Pocket {i+1}: method={method}, probability={prob:.2f}, center={center}')
+        if not center or len(center) != 3:
+            errors.append(f'Pocket {i+1} has no valid center: {center}')
+
+# Must have protein name
+protein_name = d.get('protein_name', '')
+if not protein_name:
+    errors.append('No protein name')
+else:
+    print(f'  Protein: {protein_name}')
+
+if errors:
+    for e in errors: print(f'  ERROR: {e}')
+    sys.exit(1)
+" && pass "Target preview resolved" || fail "Target preview"
+
+# Extract key data for project update
+TARGET_DATA=$(echo "$PREVIEW" | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+s = d.get('structure', {})
+pockets = d.get('pockets', [])
+# Build the project update payload
+update = {
+    'target_input_type': 'uniprot',
+    'target_input_value': 'P00533',
+    'target_name': d.get('protein_name', 'EGFR'),
+    'target_pdb_id': s.get('pdb_id'),
+    'structure_source': s.get('source', 'experimental'),
+    'structure_resolution': s.get('resolution'),
+    'structure_method': s.get('method'),
+    'cocrystal_ligand': s.get('ligand_id'),
+    'target_preview': {
+        'uniprot': d.get('uniprot', {'id': 'P00533'}),
+        'structure': s,
+        'structures': d.get('structures', []),
+        'pockets': pockets,
+        'selected_pocket_index': 0,  # Select first (best) pocket
+        'chembl': d.get('chembl_info', {})
+    },
+    'pockets_detected': pockets,
+    'chembl_actives_count': d.get('chembl_info', {}).get('n_actives', 0)
+}
+print(json.dumps(update))
+")
+
+# ---------------------------------------------------------------------------
+# STEP 2b: Validate pocket has docking-ready center coordinates
+# ---------------------------------------------------------------------------
+step "2b: Validate pocket center for docking"
+
+echo "$PREVIEW" | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+pockets = d.get('pockets', [])
+if not pockets:
+    print('FAIL: No pockets to select')
+    sys.exit(1)
+
+# Pocket 1 (best) must have valid center
+p = pockets[0]
+center = p.get('center', [])
+if len(center) != 3:
+    print(f'FAIL: Pocket 1 center invalid: {center}')
+    sys.exit(1)
+x, y, z = center
+if not all(isinstance(c, (int, float)) for c in [x, y, z]):
+    print(f'FAIL: Pocket 1 center not numeric: {center}')
+    sys.exit(1)
+
+method = p.get('method', '?')
+prob = p.get('probability', 0)
+print(f'Selected pocket: method={method}, prob={prob:.2f}, center=[{x:.1f}, {y:.1f}, {z:.1f}]')
+print(f'  → Docking box: center=({x:.1f}, {y:.1f}, {z:.1f}), size=22x22x22 A')
+" && pass "Pocket center valid for docking" || fail "Pocket center validation"
+
+# ---------------------------------------------------------------------------
+# STEP 2c: Save target to project (like frontend 'Validate Target' click)
+# ---------------------------------------------------------------------------
+step "2c: Save target to project"
+
+api PUT "/api/v9/projects/$PROJECT" "$TARGET_DATA" | python3 -c "
 import sys,json
 p = json.load(sys.stdin)
-if p.get('target_preview'):
-    print('PASS')
+errors = []
+if not p.get('target_preview'):
+    errors.append('target_preview not saved')
+if not p.get('target_name'):
+    errors.append('target_name not saved')
+if not p.get('target_pdb_id'):
+    errors.append('target_pdb_id not saved')
+if not p.get('pockets_detected'):
+    errors.append('pockets_detected not saved')
 else:
-    print('FAIL')
+    # Verify selected pocket has center
+    pockets = p['pockets_detected']
+    if pockets and 'center' in pockets[0]:
+        print(f'  Saved: {p[\"target_name\"]} / PDB {p[\"target_pdb_id\"]}')
+        print(f'  Pockets: {len(pockets)}, selected pocket center: {pockets[0][\"center\"]}')
+    else:
+        errors.append('Saved pockets missing center data')
+
+if errors:
+    for e in errors: print(f'  ERROR: {e}')
     sys.exit(1)
-" > /dev/null && pass "Target configured (EGFR / 1M17)" || fail "Target configuration"
+" && pass "Target saved to project" || fail "Target save"
 
 # ---------------------------------------------------------------------------
 # STEP 3: Create Phase A (hit_discovery)
@@ -232,16 +368,16 @@ HTTP=$(api_code POST "/api/v9/phases/$PHASE_A/runs" '{"type":"calculation","calc
 HTTP=$(api_code POST "/api/v9/phases/$PHASE_A/runs" "{\"type\":\"calculation\",\"input_molecule_ids\":$MOL_IDS}")
 [ "$HTTP" = "422" ] && pass "Rule R5: Calc without types blocked (422)" || fail "Rule R5: Expected 422, got $HTTP"
 
-# Valid calculation run
+# Valid calculation run — includes docking to test pocket/structure integration
 CALC_RUN=$(api POST "/api/v9/phases/$PHASE_A/runs" "{
   \"type\": \"calculation\",
-  \"calculation_types\": [\"admet\", \"scoring\"],
+  \"calculation_types\": [\"docking\", \"admet\", \"scoring\"],
   \"input_molecule_ids\": $MOL_IDS
 }" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
-[ -n "$CALC_RUN" ] && pass "Calculation run created: $CALC_RUN" || { fail "Calc run creation"; exit 1; }
+[ -n "$CALC_RUN" ] && pass "Calculation run created (docking+admet+scoring): $CALC_RUN" || { fail "Calc run creation"; exit 1; }
 
 info "Waiting for calculation to complete..."
-CALC_STATUS=$(wait_run "$CALC_RUN" 60)
+CALC_STATUS=$(wait_run "$CALC_RUN" 120)
 [ "$CALC_STATUS" = "completed" ] && pass "Calculation completed" || fail "Calculation $CALC_STATUS"
 
 # Validate properties on molecules
@@ -255,6 +391,55 @@ else:
     print(f'FAIL: Only {len(with_props)} molecules have properties')
     sys.exit(1)
 " || fail "Molecule properties"
+
+# ---------------------------------------------------------------------------
+# STEP 6b: Validate docking status
+# ---------------------------------------------------------------------------
+step "6b: Validate docking integration"
+
+# Docking without GPU produces 'pending_gpu' status — this is expected
+# The key validation is that the docking_status property EXISTS (structure+pocket were accessible)
+api GET "/api/v9/phases/$PHASE_A/molecules?limit=20" | python3 -c "
+import sys,json
+d = json.load(sys.stdin)
+with_props = [m for m in d['molecules'] if m.get('properties')]
+docking_ok = 0
+for m in with_props:
+    props = m['properties']
+    # Check docking_status exists (proves structure+pocket chain worked)
+    ds = props.get('docking_status')
+    if ds:
+        docking_ok += 1
+        status = ds.get('status', '?') if isinstance(ds, dict) else ds
+        if docking_ok == 1:
+            print(f'  Docking status: {status}')
+    # Check ADMET properties exist
+    admet = props.get('admet') or props.get('physicochemical')
+    if admet and docking_ok == 1:
+        if isinstance(admet, dict):
+            top_keys = list(admet.keys())[:5]
+            print(f'  ADMET keys: {top_keys}')
+
+if docking_ok >= 4:
+    print(f'PASS: {docking_ok} molecules have docking_status')
+else:
+    print(f'FAIL: Only {docking_ok} molecules have docking_status (expected >=4)')
+    sys.exit(1)
+" && pass "Docking integration validated" || fail "Docking integration"
+
+# Validate run has calculation_types including docking
+api GET "/api/v9/runs/$CALC_RUN" | python3 -c "
+import sys,json
+r = json.load(sys.stdin)
+ct = r.get('calculation_types', [])
+if 'docking' not in ct:
+    print(f'FAIL: calculation_types missing docking: {ct}')
+    sys.exit(1)
+if 'admet' not in ct:
+    print(f'FAIL: calculation_types missing admet: {ct}')
+    sys.exit(1)
+print(f'PASS: Run has calculation_types: {ct}')
+" && pass "Run calculation_types correct" || fail "Run calculation_types"
 
 # ---------------------------------------------------------------------------
 # STEP 7: Validate run structure (logs, types, config)

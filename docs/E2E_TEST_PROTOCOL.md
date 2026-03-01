@@ -120,36 +120,61 @@ print(f'  Campaign ID: {p[\"campaigns\"][0][\"id\"]}')
 
 ---
 
-### Etape 2 : Configurer la cible (OBLIGATOIRE avant toute campagne)
+### Etape 2a : Resoudre la structure 3D (VRAI pipeline)
 
 **Action frontend** : Page `/project/:id/target-setup` → UniProt ID → Preview
 
 **Regle** : Le frontend bloque la creation de campagne tant que `target_preview` est null.
 
+> **IMPORTANT** : Cette etape appelle les VRAIES APIs externes (RCSB PDB, UniProt, ChEMBL, P2Rank).
+> Duree : 30 a 120 secondes.
+
 ```bash
-# Simuler ce que TargetSetup fait apres la preview
+# Appel reel : UniProt → RCSB PDB → P2Rank pocket detection
+PREVIEW=$(curl -s -X POST http://localhost:3000/api/preview-target \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"uniprot_id": "P00533"}' \
+  --max-time 180)
+```
+
+**Validations** :
+- [ ] Structure resolue (`structure.source != 'none'`)
+- [ ] PDB ID present (`structure.pdb_id`)
+- [ ] Resolution disponible (`structure.resolution`)
+- [ ] Au moins 1 pocket detectee
+- [ ] Nom de proteine present (`protein_name`)
+
+### Etape 2b : Valider la pocket pour le docking
+
+**Regle** : La pocket selectionnee DOIT avoir des coordonnees `center: [x, y, z]` valides.
+Sans ces coordonnees, GNINA ne peut pas definir sa boite de recherche.
+
+**Validations** :
+- [ ] `pockets[0].center` est un tableau de 3 floats
+- [ ] `pockets[0].method` indique la methode de detection (co-crystallized_ligand, p2rank, etc.)
+- [ ] `pockets[0].probability` > 0
+
+### Etape 2c : Sauvegarder la cible dans le projet
+
+**Action frontend** : TargetSetup → "Validate Target"
+
+```bash
+# Construire le payload comme le frontend le fait
+# Inclure selected_pocket_index = 0 (premiere pocket)
+TARGET_DATA=$(echo "$PREVIEW" | python3 -c "...")  # voir e2e_test.sh
 curl -s -X PUT http://localhost:3000/api/v9/projects/$PROJECT \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "target_input_type": "uniprot",
-    "target_input_value": "P00533",
-    "target_name": "EGFR",
-    "target_pdb_id": "1M17",
-    "target_preview": {
-      "uniprot": {"id": "P00533", "name": "EGFR"},
-      "structure": {"pdb_id": "1M17", "source": "experimental", "resolution": 2.6},
-      "pockets": [{"rank": 1, "score": 0.92, "residues": 42}]
-    },
-    "structure_source": "experimental",
-    "structure_resolution": 2.6,
-    "pockets_detected": [{"rank": 1, "score": 0.92}]
-  }' | python3 -c "import sys,json; print('PASS: Target configured')"
+  -d "$TARGET_DATA"
 ```
 
-**Validation** :
-- [ ] `target_preview` non null
-- [ ] `target_name` = "EGFR"
+**Validations** :
+- [ ] `target_preview` sauvegarde non null
+- [ ] `target_name` present
+- [ ] `target_pdb_id` present
+- [ ] `pockets_detected` sauvegarde avec coordonnees `center`
+- [ ] `target_preview.selected_pocket_index` = 0
 - [ ] Frontend afficherait maintenant le bouton "Create Campaign"
 
 ---
