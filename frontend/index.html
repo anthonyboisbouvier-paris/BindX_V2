@@ -12,6 +12,26 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- GitHub Pages SPA: restore route from 404.html redirect -->
+    <script>
+      (function(){
+        var redir = sessionStorage.redirect;
+        delete sessionStorage.redirect;
+        if (redir && redir !== location.href) {
+          history.replaceState(null, null, redir);
+        }
+      })();
+      // Capture redirect from 404.html query string
+      (function(){
+        var q = window.location.search;
+        if (q && q[1] === '/') {
+          var decoded = q.slice(1).split('&').map(function(s){return s.replace(/~and~/g,'&')}).join('?');
+          window.history.replaceState(null, null,
+            window.location.pathname.slice(0, -1) + decoded + window.location.hash
+          );
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
