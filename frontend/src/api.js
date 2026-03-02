@@ -7,6 +7,8 @@ const apiClient = axios.create({
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
+    // Bypass ngrok free-tier browser warning on API calls
+    ...(BASE_URL.includes('ngrok') ? { 'ngrok-skip-browser-warning': 'true' } : {}),
   },
 })
 
