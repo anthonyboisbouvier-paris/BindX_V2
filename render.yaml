@@ -1,0 +1,108 @@
+# BindX V9 — Render Blueprint
+# Auto-deploys from GitHub main branch
+# https://render.com/docs/blueprint-spec
+#
+# After connecting repo on Render:
+#   1. Set DATABASE_V9_URL, SUPABASE_JWT_SECRET, SUPABASE_SERVICE_ROLE_KEY
+#      in the Render dashboard (env groups or per-service)
+#   2. Redis + backend URLs are auto-wired via fromService references
+
+services:
+  # --- Frontend (nginx + React SPA + basic auth) ---
+  - type: web
+    name: bindx-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    branch: main
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: BACKEND_HOST
+        fromService:
+          name: bindx-backend
+          type: web
+          property: host
+
+  # --- Backend (FastAPI) ---
+  - type: web
+    name: bindx-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    branch: main
+    plan: standard
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_V9_URL
+        sync: false
+      - key: SUPABASE_URL
+        value: "https://webkntghfzscrnuixfba.supabase.co"
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: bindx-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: bindx-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: bindx-redis
+          type: redis
+          property: connectionString
+      - key: DATA_DIR
+        value: "/data"
+
+  # --- Celery Worker (background tasks) ---
+  - type: worker
+    name: bindx-celery
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: "celery -A celery_app worker --loglevel=info --concurrency=2"
+    branch: main
+    plan: standard
+    envVars:
+      - key: DATABASE_V9_URL
+        sync: false
+      - key: SUPABASE_URL
+        value: "https://webkntghfzscrnuixfba.supabase.co"
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: bindx-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: bindx-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: bindx-redis
+          type: redis
+          property: connectionString
+      - key: DATA_DIR
+        value: "/data"
+      - key: PYTHONPATH
+        value: "/app"
+
+  # --- Redis ---
+  - type: redis
+    name: bindx-redis
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
