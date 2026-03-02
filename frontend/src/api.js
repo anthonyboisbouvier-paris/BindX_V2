@@ -7,8 +7,9 @@ const apiClient = axios.create({
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
-    // Bypass ngrok free-tier browser warning on API calls
+    // Bypass tunnel interstitial pages (ngrok / localtunnel)
     ...(BASE_URL.includes('ngrok') ? { 'ngrok-skip-browser-warning': 'true' } : {}),
+    ...(BASE_URL.includes('loca.lt') ? { 'bypass-tunnel-reminder': 'true' } : {}),
   },
 })
 
