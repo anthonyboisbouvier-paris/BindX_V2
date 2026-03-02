@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, Suspense } from 'react'
 import { Outlet, NavLink, Link, useParams, useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
 import { useAuth } from '../contexts/AuthContext'
@@ -100,7 +100,7 @@ function PhaseNavItem({ phase, projectId, currentPhaseId, getPhaseStatus }) {
   const notCreated = !phase.created_at
   const effectiveStatus = (getPhaseStatus && getPhaseStatus(phase.id)) || phase.status
   const isFrozen = effectiveStatus === 'frozen'
-  const isCurrentPhase = phase.id === currentPhaseId
+  const phaseType = PHASE_TYPES[phase.type] || {}
 
   const baseClass = 'flex items-center gap-2 px-2.5 py-1.5 rounded-[7px] text-[.68rem] transition-colors duration-150 w-full text-left'
 
@@ -108,8 +108,9 @@ function PhaseNavItem({ phase, projectId, currentPhaseId, getPhaseStatus }) {
     return (
       <div className={`${baseClass} text-bx-dim cursor-default`}>
         <PhaseStatusDot status={phase.status} notCreated={true} />
-        <span className="flex-1 truncate">{phase.label}</span>
-        <span className="text-white/20 text-[10px]">Not started</span>
+        <div className="flex-1 min-w-0">
+          <span className="truncate block">{phaseType.label || phase.label}</span>
+        </div>
       </div>
     )
   }
@@ -128,9 +129,11 @@ function PhaseNavItem({ phase, projectId, currentPhaseId, getPhaseStatus }) {
       }
     >
       <PhaseStatusDot status={effectiveStatus} notCreated={false} />
-      <span className="flex-1 truncate">{phase.label}</span>
+      <div className="flex-1 min-w-0">
+        <span className="truncate block">{phaseType.label || phase.label}</span>
+      </div>
       {isFrozen && (
-        <span className="text-white/30 text-[10px] font-mono">Frozen</span>
+        <span className="text-white/30 text-[10px] font-mono shrink-0">Frozen</span>
       )}
     </NavLink>
   )
@@ -174,9 +177,8 @@ function ProjectTree({ project, projectId, currentPhaseId, getPhaseStatus }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
             </svg>
-            {uniprotId && <span className="text-[10px] font-mono text-bx-cyan">{uniprotId}</span>}
             {geneName && <span className="text-[10px] text-white/50">{geneName}</span>}
-            {pdbId && <span className="text-[10px] font-mono text-bx-violet/70">PDB:{pdbId}</span>}
+            {uniprotId && <span className="text-[10px] font-mono text-bx-cyan">{uniprotId}</span>}
           </div>
         </div>
       )}
@@ -469,7 +471,16 @@ export default function SidebarLayout() {
           {projectId && currentProject && (
             <Breadcrumb project={currentProject} projectId={projectId} phaseId={phaseId} />
           )}
-          <Outlet />
+          <Suspense fallback={
+            <div className="flex items-center justify-center py-32">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-2 border-bx-mint/30 border-t-bx-mint rounded-full animate-spin" />
+                <p className="text-sm text-gray-400">Loading...</p>
+              </div>
+            </div>
+          }>
+            <Outlet />
+          </Suspense>
         </div>
       </main>
     </div>

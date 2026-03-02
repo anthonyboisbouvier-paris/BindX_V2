@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -192,6 +193,12 @@ async def list_molecules(
         # Apply cursor if provided
         if cursor:
             cursor_val, cursor_id = _decode_cursor(cursor)
+            # If the sort column is a datetime, parse the cursor value back
+            if hasattr(sort_col.type, 'python_type') and issubclass(sort_col.type.python_type, datetime):
+                try:
+                    cursor_val = datetime.fromisoformat(cursor_val)
+                except (ValueError, TypeError):
+                    raise HTTPException(status_code=400, detail="Invalid cursor value for datetime column")
             if sort_dir == "desc":
                 stmt = stmt.where(
                     or_(

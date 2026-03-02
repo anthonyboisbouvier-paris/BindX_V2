@@ -7,26 +7,25 @@ import SynthesisTree from '../../components/SynthesisTree.jsx'
 import ConfidenceBreakdown from '../../components/ConfidenceBreakdown.jsx'
 import InfoTip, { TIPS } from '../../components/InfoTip.jsx'
 
-function AdmetRadar({ admet }) {
-  const keys = ['absorption', 'distribution', 'metabolism', 'excretion', 'toxicity', 'pharmacodynamics']
-  const labels = ['Absorption', 'Distribution', 'Metabolism', 'Excretion', 'Toxicity', 'Pharm.']
-  const values = keys.map(k => (typeof admet[k] === 'number' ? admet[k] : 0.5))
-  const N = values.length, CX = 70, CY = 70, R = 52
+function AdmetRadar({ entries }) {
+  // entries: [{ key, label, value (0-1), ideal }]
+  const N = entries.length
+  if (N < 3) return null
+  const CX = 70, CY = 70, R = 52
 
   function pt(v, i) {
     const a = (Math.PI * 2 * i) / N - Math.PI / 2
     return { x: CX + v * R * Math.cos(a), y: CY + v * R * Math.sin(a) }
   }
 
-  const dataPoints = values.map((v, i) => pt(v, i))
+  const dataPoints = entries.map((e, i) => pt(e.value, i))
   const polygon = dataPoints.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
 
   return (
     <div className="flex items-center gap-4">
       <svg width={140} height={140} viewBox="0 0 140 140" className="flex-shrink-0">
-        {/* Grid rings */}
         {[0.25, 0.5, 0.75, 1.0].map((r, ri) => {
-          const pts = values.map((_, i) => {
+          const pts = entries.map((_, i) => {
             const p = pt(r, i)
             return `${p.x.toFixed(1)},${p.y.toFixed(1)}`
           }).join(' ')
@@ -36,41 +35,36 @@ function AdmetRadar({ admet }) {
               strokeWidth={r === 1.0 ? 1 : 0.5} />
           )
         })}
-        {/* Axes */}
-        {values.map((_, i) => {
+        {entries.map((_, i) => {
           const tip = pt(1, i)
           return <line key={i} x1={CX} y1={CY} x2={tip.x.toFixed(1)} y2={tip.y.toFixed(1)}
             stroke="#d1d5db" strokeWidth={0.75} />
         })}
-        {/* Data polygon */}
         <polygon points={polygon} fill="#00e6a0" fillOpacity={0.15} stroke="#00e6a0" strokeWidth={1.5} />
-        {/* Data points */}
         {dataPoints.map((p, i) => (
           <circle key={i} cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r={3}
             fill="#00e6a0" stroke="white" strokeWidth={1.5} />
         ))}
-        {/* Labels */}
-        {values.map((_, i) => {
+        {entries.map((e, i) => {
           const lp = pt(1.3, i)
           const anchor = lp.x < CX - 5 ? 'end' : lp.x > CX + 5 ? 'start' : 'middle'
           return (
             <text key={i} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)}
               fontSize={7} fill="#6b7280" textAnchor={anchor} dominantBaseline="central">
-              {labels[i]}
+              {e.label}
             </text>
           )
         })}
       </svg>
       <div className="flex-1 space-y-1.5">
-        {keys.map((k, i) => {
-          const v = values[i]
-          const pct = Math.round(v * 100)
-          const color = v >= 0.7 ? 'bg-green-400' : v >= 0.5 ? 'bg-yellow-400' : 'bg-red-400'
+        {entries.map(e => {
+          const pct = Math.round(e.value * 100)
+          const color = e.value >= 0.7 ? 'bg-green-400' : e.value >= 0.4 ? 'bg-yellow-400' : 'bg-red-400'
           return (
-            <div key={k}>
+            <div key={e.key}>
               <div className="flex justify-between text-[10px] mb-0.5">
-                <span className="text-gray-500 capitalize">{k}</span>
-                <span className="font-medium text-gray-700 tabular-nums">{pct}%</span>
+                <span className="text-gray-500">{e.label}</span>
+                <span className="font-medium text-gray-700 tabular-nums">{e.raw != null ? e.raw : `${pct}%`}</span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-1">
                 <div className={`h-1 rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
@@ -91,7 +85,7 @@ function ScoresTab({ mol }) {
     { label: 'Docking', value: mol.docking_score, unit: 'kcal/mol', color: 'bg-bx-surface', textColor: 'text-bx-light-text', format: v => v.toFixed(1) },
     { label: 'CNN Score', value: mol.cnn_score, unit: '', color: 'bg-green-500', textColor: 'text-green-600', format: v => v.toFixed(2) },
     { label: 'CNN Aff.', value: mol.cnn_affinity, unit: 'pKi', color: 'bg-teal-500', textColor: 'text-teal-600', format: v => v.toFixed(1) },
-    { label: 'Composite', value: mol.composite_score, unit: '/100', color: 'bg-amber-500', textColor: 'text-amber-700', format: v => v.toFixed(1) },
+    { label: 'Composite', value: mol.composite_score, unit: '/100', color: 'bg-amber-500', textColor: 'text-amber-700', format: v => Math.round(v * 100) },
   ]
   return (
     <div className="space-y-3">
@@ -106,7 +100,7 @@ function ScoresTab({ mol }) {
             <div className="mt-2 h-1 bg-gray-200 rounded-full overflow-hidden">
               <div
                 className={`h-1 ${s.color} rounded-full`}
-                style={{ width: s.label === 'Composite' ? `${s.value}%` : s.label === 'CNN Score' ? `${s.value * 100}%` : '60%' }}
+                style={{ width: s.label === 'Composite' ? `${s.value * 100}%` : s.label === 'CNN Score' ? `${s.value * 100}%` : '60%' }}
               />
             </div>
           </div>
@@ -182,19 +176,56 @@ function PropertiesTab({ mol }) {
 }
 
 function AdmetTab({ mol }) {
-  // Try mol.admet first (nested), then reconstruct from flat properties
-  const admet = mol.admet || (() => {
-    const keys = ['oral_bioavailability', 'solubility', 'BBB', 'metabolic_stability', 'hERG', 'QED']
-    const found = keys.filter(k => mol[k] != null)
-    if (!found.length) return null
-    const obj = {}
-    found.forEach(k => { obj[k] = mol[k] })
-    return obj
-  })()
-  if (!admet) {
+  // Build radar entries from flattened molecule properties (after deepFlatten)
+  // Keys match backend ADMET output: oral_bioavailability, solubility, BBB (alias),
+  // plasma_protein_binding, hERG (alias), intestinal_permeability, clearance, half_life, etc.
+  // All backend ADMET values are already in 0-1 range (probabilities/scores)
+  const ADMET_PROPS = [
+    { key: 'oral_bioavailability', label: 'Oral Bioavail.', norm: v => v, higher: true },
+    { key: 'intestinal_permeability', label: 'Intestinal Perm.', norm: v => v, higher: true },
+    { key: 'solubility', label: 'Solubility', norm: v => v, higher: true },
+    { key: 'BBB', label: 'BBB Perm.', norm: v => v, higher: true },
+    { key: 'plasma_protein_binding', label: 'PPB', norm: v => v, higher: false },
+    { key: 'clearance', label: 'Clearance', norm: v => v, higher: true },
+    { key: 'half_life', label: 'Half-life', norm: v => v, higher: true },
+    { key: 'hERG', label: 'hERG Risk (inv.)', norm: v => 1 - v, higher: false },
+    { key: 'ames_mutagenicity', label: 'Ames (inv.)', norm: v => 1 - v, higher: false },
+    { key: 'hepatotoxicity', label: 'Hepatotox. (inv.)', norm: v => 1 - v, higher: false },
+  ]
+
+  const entries = ADMET_PROPS
+    .filter(p => mol[p.key] != null && typeof mol[p.key] === 'number')
+    .map(p => ({
+      key: p.key,
+      label: p.label,
+      value: Math.min(1, Math.max(0, p.norm(mol[p.key]))),
+      raw: (mol[p.key] * 100).toFixed(0) + '%',
+    }))
+
+  if (entries.length === 0) {
     return <p className="text-sm text-gray-400 text-center py-4">No ADMET data — run the ADMET analysis first.</p>
   }
-  return <AdmetRadar admet={admet} />
+
+  if (entries.length < 3) {
+    return (
+      <div className="space-y-2">
+        {entries.map(e => (
+          <div key={e.key}>
+            <div className="flex justify-between text-xs mb-0.5">
+              <span className="text-gray-500">{e.label}</span>
+              <span className="font-medium text-gray-700 tabular-nums">{e.raw}</span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-1.5">
+              <div className={`h-1.5 rounded-full ${e.value >= 0.7 ? 'bg-green-400' : e.value >= 0.4 ? 'bg-yellow-400' : 'bg-red-400'} transition-all`}
+                style={{ width: `${e.value * 100}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return <AdmetRadar entries={entries} />
 }
 
 function SafetyTab({ mol, details }) {
@@ -449,22 +480,49 @@ function DetailPopupModal({ type, molecule, onClose }) {
             synthesisRoute={props.retrosynthesis || null}
           />
         )
-      case 'confidence':
+      case 'confidence': {
+        // Build confidence from explicit data or derive from available properties
+        let confidence = props.confidence
+        if (!confidence) {
+          const components = {}
+          let total = 0, count = 0
+          // Docking confidence: normalize docking_score (-12 to 0 → 0 to 1)
+          if (flat.docking_score != null) {
+            const ds = Math.min(0, Math.max(-12, flat.docking_score))
+            const score = Math.abs(ds) / 12
+            components.docking = { score: Math.round(score * 100) / 100, note: `Docking score: ${flat.docking_score?.toFixed(1)} kcal/mol` }
+            total += score; count++
+          }
+          // CNN pose quality
+          if (flat.cnn_score != null) {
+            components.pocket = { score: Math.round(flat.cnn_score * 100) / 100, note: `CNN pose score: ${flat.cnn_score?.toFixed(2)}` }
+            total += flat.cnn_score; count++
+          }
+          // ADMET confidence: average of available ADMET values
+          const admetKeys = ['oral_bioavailability', 'solubility', 'BBB', 'clearance', 'half_life']
+          const admetVals = admetKeys.map(k => flat[k]).filter(v => v != null && typeof v === 'number')
+          if (admetVals.length > 0) {
+            const avg = admetVals.reduce((s, v) => s + v, 0) / admetVals.length
+            components.admet = { score: Math.round(avg * 100) / 100, note: `Based on ${admetVals.length} ADMET properties` }
+            total += avg; count++
+          }
+          // Structure / drug-likeness
+          if (flat.QED != null) {
+            components.structure = { score: Math.round(flat.QED * 100) / 100, note: `QED drug-likeness: ${flat.QED?.toFixed(2)}` }
+            total += flat.QED; count++
+          }
+          if (count > 0) {
+            confidence = { overall: Math.round((total / count) * 100) / 100, components }
+          }
+        }
         return (
           <ConfidenceBreakdown
-            confidence={props.confidence || (flat.confidence_score != null ? {
-              overall: flat.confidence_score,
-              components: {
-                structure: { score: flat.structure_confidence, label: 'Structure' },
-                docking: { score: flat.docking_confidence, label: 'Docking' },
-                admet: { score: flat.admet_confidence, label: 'ADMET' },
-              },
-              flags: flat.confidence_flags || [],
-            } : null)}
+            confidence={confidence}
             moleculeName={molecule.name || molecule.id}
             pipeline_summary={props.pipeline_summary || null}
           />
         )
+      }
       default:
         return <p className="text-gray-400 text-sm p-6">Unknown popup type: {type}</p>
     }
@@ -535,13 +593,14 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
   // Build details from molecule properties (API data, not mock)
   const details = useMemo(() => {
     const props = molecule.properties || {}
+    const retro = props.retrosynthesis
     return {
       interactions: props.enrichment || null,
-      synthesis: props.retrosynthesis ? {
-        feasibility: props.retrosynthesis.synth_confidence,
-        total_cost: props.retrosynthesis.synth_cost_estimate,
-        num_steps: props.retrosynthesis.n_synth_steps,
-        steps: props.retrosynthesis.steps || [],
+      synthesis: retro ? {
+        feasibility: retro.confidence ?? retro.synth_confidence ?? null,
+        total_cost: retro.estimated_cost ?? retro.synth_cost_estimate ?? null,
+        num_steps: retro.n_steps ?? retro.n_synth_steps ?? null,
+        steps: retro.steps || [],
       } : null,
     }
   }, [molecule])

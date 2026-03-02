@@ -184,12 +184,8 @@ function FunnelPhaseCard({ phase, phaseIndex, projectId, navigate, onCreatePhase
                 </div>
                 <div className="text-white/[.07] text-lg font-light">|</div>
                 <div className="text-center px-2">
-                  <p className="text-sm font-semibold text-bx-sub">
-                    {stats.runs_completed ?? 0}
-                    <span className="text-sm text-bx-dim font-normal ml-0.5">
-                      {(stats.runs_running ?? 0) > 0 ? `+ ${stats.runs_running} running` : 'runs'}
-                    </span>
-                  </p>
+                  <p className="stat-value text-bx-sub">{stats.runs_completed ?? 0}</p>
+                  <p className="stat-label">runs</p>
                 </div>
 
                 {/* Last run type */}
@@ -611,23 +607,19 @@ function TargetSummary({ project, onEdit }) {
             </div>
           )}
 
-          {/* ChEMBL info */}
+          {/* ChEMBL info — compact */}
           {chembl.has_data && (
-            <div className="bg-green-50 border border-green-100 rounded-xl px-5 py-4">
-              <p className="text-sm font-semibold text-green-700 uppercase tracking-wider mb-2">ChEMBL Data</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="text-center">
-                  <p className="text-xl font-bold text-green-700">{chembl.n_actives?.toLocaleString()}</p>
-                  <p className="text-sm text-green-600">Active compounds</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xl font-bold text-green-700">{chembl.n_with_ic50?.toLocaleString() || '-'}</p>
-                  <p className="text-sm text-green-600">With IC50 data</p>
-                </div>
+            <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">ChEMBL</p>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-gray-600"><strong className="text-gray-700">{chembl.n_actives?.toLocaleString()}</strong> actives</span>
+                {chembl.n_with_ic50 > 0 && (
+                  <span className="text-gray-500"><strong className="text-gray-600">{chembl.n_with_ic50?.toLocaleString()}</strong> IC50</span>
+                )}
+                {chembl.target_chembl_id && (
+                  <span className="text-gray-400 font-mono text-[10px]">{chembl.target_chembl_id}</span>
+                )}
               </div>
-              {chembl.target_chembl_id && (
-                <p className="text-sm text-green-600 mt-2">Target: {chembl.target_chembl_id}</p>
-              )}
             </div>
           )}
 

@@ -50,43 +50,53 @@ function PhaseProgress({ campaigns }) {
     return 'empty'
   }
 
+  const phaseMolCount = (type) => {
+    const phase = allPhases.find(p => p.type === type)
+    return phase?.stats?.total_molecules || 0
+  }
+
   const types = ['hit_discovery', 'hit_to_lead', 'lead_optimization']
   const labels = ['A', 'B', 'C']
+  const fullLabels = ['Hit Discovery', 'Hit-to-Lead', 'Lead Opt.']
 
-  // Phase brand colors per design system
   const phaseColors = [
-    { border: 'border-bx-mint', text: 'text-bx-mint', bg: 'bg-bx-mint/10', fill: 'bg-bx-mint' },
-    { border: 'border-bx-cyan', text: 'text-bx-cyan', bg: 'bg-bx-cyan/10', fill: 'bg-bx-cyan' },
-    { border: 'border-bx-blue', text: 'text-bx-blue', bg: 'bg-bx-blue/10', fill: 'bg-bx-blue' },
+    { border: 'border-bx-mint', text: 'text-bx-mint', bg: 'bg-bx-mint/10', fill: 'bg-bx-mint', line: 'from-bx-mint to-bx-cyan' },
+    { border: 'border-bx-cyan', text: 'text-bx-cyan', bg: 'bg-bx-cyan/10', fill: 'bg-bx-cyan', line: 'from-bx-cyan to-bx-blue' },
+    { border: 'border-bx-blue', text: 'text-bx-blue', bg: 'bg-bx-blue/10', fill: 'bg-bx-blue', line: '' },
   ]
 
   return (
-    <div className="dark-inset inline-flex items-center px-3 py-2 gap-0">
+    <div className="w-full flex items-start justify-between px-2 py-2.5 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg border border-gray-100">
       {types.map((type, i) => {
         const status = phaseStatus(type)
         const isLast = i === types.length - 1
         const pc = phaseColors[i]
+        const molCount = phaseMolCount(type)
 
         const isDone = status === 'done' || status === 'active'
+        const isActive = status === 'active'
         const nodeClass = isDone
           ? `${pc.border} ${pc.text} ${pc.bg}`
-          : 'border-white/[.07] text-bx-dim bg-bx-bg'
+          : 'border-gray-200 text-gray-300 bg-white'
 
         return (
           <React.Fragment key={type}>
-            <div className="flex flex-col items-center gap-0.5">
-              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold ${nodeClass}`}>
+            <div className={`flex flex-col items-center gap-0.5 transition-transform duration-500 ${isActive ? 'scale-110' : ''}`}>
+              <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all duration-300 ${nodeClass} ${isActive ? 'shadow-sm' : ''}`}>
                 {status === 'done' ? (
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                   </svg>
                 ) : labels[i]}
               </div>
-              <span className="text-bx-sub" style={{ fontSize: '0.7rem', fontWeight: 500 }}>{labels[i]}</span>
+              <span className="text-gray-500 font-medium" style={{ fontSize: '0.65rem' }}>{fullLabels[i]}</span>
+              <span className={`font-mono font-semibold tabular-nums ${isDone ? 'text-gray-700' : 'text-gray-300'}`} style={{ fontSize: '0.6rem' }}>
+                {molCount > 0 ? `${molCount} mol` : '—'}
+              </span>
             </div>
             {!isLast && (
-              <div className={`h-0.5 w-5 mb-3.5 mx-0.5 rounded ${
-                isDone ? 'bg-gradient-to-r from-bx-mint to-bx-cyan' : 'bg-white/[.07]'
+              <div className={`flex-1 h-0.5 self-center mt-1 mx-1 rounded transition-all duration-500 ${
+                isDone ? `bg-gradient-to-r ${pc.line}` : 'bg-gray-200'
               }`} />
             )}
           </React.Fragment>
@@ -175,11 +185,7 @@ function ProjectCard({ project, onClick, onDelete, searchQuery, colorIndex = 0 }
         </div>
 
         {/* Stats row */}
-        <div className="grid grid-cols-3 gap-2 mb-3 pt-3 border-t border-bx-light-border-s">
-          <div className="text-center">
-            <p className="text-base font-extrabold text-bx-light-text">{totalMolecules}</p>
-            <p className="text-xs text-bx-light-muted">molecules</p>
-          </div>
+        <div className="grid grid-cols-2 gap-2 mb-3 pt-3 border-t border-bx-light-border-s">
           <div className="text-center">
             <p className="text-base font-extrabold text-bx-light-text2">{totalRuns}</p>
             <p className="text-xs text-bx-light-muted">runs</p>

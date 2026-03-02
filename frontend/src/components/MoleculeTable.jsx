@@ -7,13 +7,14 @@ import InfoTip, { TIPS } from './InfoTip.jsx'
 // ---------------------------------------------------------------------------
 function formatNumber(key, value) {
   if (value == null || typeof value !== 'number') return null
+  // Composite score: backend stores 0-1, display as 0-100
+  if (key === 'composite_score') return Math.round(value * 100).toString()
   // Key-specific precision
   const decimals = {
     docking_score: 1,
     cnn_score: 2,
     cnn_affinity: 1,
     cnn_vs: 2,
-    composite_score: 1,
     logP: 1,
     MW: 0,
     HBD: 0,
@@ -337,14 +338,13 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation }) {
     )
   }
 
-  // Safety color code — render colored dot + label
+  // Safety color code — render colored dot only (no label)
   if (col.key === 'safety_color_code') {
     const lc = String(value).toLowerCase()
     const dotColor = lc === 'green' ? 'bg-green-500' : lc === 'yellow' || lc === 'orange' ? 'bg-yellow-400' : lc === 'red' ? 'bg-red-500' : 'bg-gray-400'
     return (
-      <span className="inline-flex items-center gap-1.5">
-        <span className={`w-2.5 h-2.5 rounded-full ${dotColor} flex-shrink-0`} />
-        <span className="text-xs text-gray-600 capitalize">{lc}</span>
+      <span className="inline-flex items-center justify-center w-full">
+        <span className={`w-3 h-3 rounded-full ${dotColor} flex-shrink-0`} title={lc} />
       </span>
     )
   }
@@ -391,6 +391,19 @@ export default function MoleculeTable({
   const [columnFilters, setColumnFilters] = useState({}) // {key: {type:'text',value} | {type:'number',min,max} | {type:'boolean',value}}
   const [showFilterCol, setShowFilterCol] = useState(null) // key of column with open filter
   const tableRef = useRef(null)
+  const filterDropdownRef = useRef(null)
+
+  // Close column filter dropdown on click outside
+  useEffect(() => {
+    if (!showFilterCol) return
+    const handler = (e) => {
+      if (filterDropdownRef.current && !filterDropdownRef.current.contains(e.target)) {
+        setShowFilterCol(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showFilterCol])
 
   // Pre-compute column value arrays for color scaling
   const colValues = useMemo(() => {
@@ -416,6 +429,7 @@ export default function MoleculeTable({
       if (f.type === 'text') return f.value && f.value !== ''
       if (f.type === 'number') return f.min != null || f.max != null
       if (f.type === 'boolean') return f.value !== null && f.value !== undefined
+      if (f.type === 'enum') return f.value != null
       return false
     })
     if (!filterKeys.length) return molecules
@@ -432,6 +446,10 @@ export default function MoleculeTable({
           return String(val).toLowerCase().includes(filterVal)
         }
         // Typed filters
+        if (f.type === 'enum') {
+          if (val == null) return false
+          return String(val).toLowerCase() === f.value.toLowerCase()
+        }
         if (f.type === 'text') {
           if (val == null) return false
           return String(val).toLowerCase().includes(f.value.toLowerCase())
@@ -493,15 +511,28 @@ export default function MoleculeTable({
     }
   }, [rowVirtualizer.getVirtualItems(), onLoadMore, hasMore, sorted.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Compute effective column width: max(declared width, label-based minimum)
+  const effectiveWidths = useMemo(() => columns.map(col => {
+    if (col.type === 'action') return 36
+    // Uppercase text-xs ≈ 7.5px per char, + unit text, + sort icon + padding
+    const labelChars = (col.label || '').length
+    const unitChars = col.unit ? col.unit.length + 2 : 0 // "(Da)" etc.
+    const textWidth = (labelChars + unitChars) * 7.5
+    const extras = 24 // sort icon + gaps
+    const padding = 20 // px-2 each side + internal gaps
+    const minFromLabel = Math.ceil(textWidth + extras + padding)
+    return Math.max(col.width || 80, minFromLabel)
+  }), [columns])
+
   // Grid template: checkbox(40px) + bookmark(32px) + data columns
   const gridTemplate = useMemo(() => {
-    const colWidths = columns.map(col => col.type === 'action' ? '36px' : `${col.width || 80}px`)
+    const colWidths = effectiveWidths.map(w => `${w}px`)
     return `40px 32px ${colWidths.join(' ')}`
-  }, [columns])
+  }, [effectiveWidths])
 
   const minTableWidth = useMemo(
-    () => Math.max(600, columns.reduce((sum, c) => sum + (c.width || 80), 0) + 90),
-    [columns]
+    () => Math.max(600, effectiveWidths.reduce((sum, w) => sum + w, 0) + 90),
+    [effectiveWidths]
   )
 
   // Header click: shift for multi-sort (max 2 levels)
@@ -629,6 +660,7 @@ export default function MoleculeTable({
                 if (f.type === 'text') return f.value && f.value !== ''
                 if (f.type === 'number') return f.min != null || f.max != null
                 if (f.type === 'boolean') return f.value !== null && f.value !== undefined
+                if (f.type === 'enum') return f.value != null
                 return false
               })()
               const isFilterable = col.type === 'number' || col.type === 'text' || col.type === 'boolean' || col.type === 'smiles'
@@ -640,36 +672,43 @@ export default function MoleculeTable({
               return (
                 <div
                   key={col.key}
-                  className={`px-3 py-2.5 font-semibold uppercase tracking-wide text-xs whitespace-nowrap select-none relative flex items-center ${
-                    col.type === 'number' ? 'justify-end' : 'justify-start'
+                  className={`px-2 py-1.5 font-semibold uppercase tracking-wide text-xs select-none relative flex flex-col gap-0.5 ${
+                    col.type === 'number' ? 'items-end' : 'items-start'
                   } ${col.sortable ? 'cursor-pointer transition-colors' : ''} ${
                     isActive ? 'text-bx-light-text bg-blue-50/50' : 'text-gray-500 hover:text-bx-light-text hover:bg-gray-100'
                   }`}
                   onClick={e => handleHeaderClick(col, e)}
                   title={col.sortable ? 'Click to sort · Shift+click to add sort level' : col.label}
                 >
-                  <span className={`inline-flex items-center gap-1 ${col.type === 'number' ? 'flex-row-reverse' : ''}`}>
+                  {/* Line 1: label + unit + sort icon */}
+                  <span className="flex items-center gap-1 whitespace-nowrap leading-tight">
                     {col.label}
                     {col.unit && (
                       <span className="font-normal text-gray-300 text-[9px]">({col.unit})</span>
                     )}
-                    {TIPS[col.key] && <InfoTip text={TIPS[col.key]} size="xs" />}
                     {col.sortable && <SortIcon direction={dir} rank={rank} />}
-                    {isFilterable && (
-                      <button
-                        onClick={e => { e.stopPropagation(); setShowFilterCol(prev => prev === col.key ? null : col.key) }}
-                        className={`ml-0.5 p-0.5 rounded transition-colors ${hasFilter ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500'}`}
-                        title="Filter column"
-                      >
-                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                        </svg>
-                      </button>
-                    )}
                   </span>
+                  {/* Line 2: info tip + filter button */}
+                  {(TIPS[col.key] || isFilterable) && (
+                    <span className="flex items-center gap-0.5">
+                      {TIPS[col.key] && <InfoTip text={TIPS[col.key]} size="xs" />}
+                      {isFilterable && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setShowFilterCol(prev => prev === col.key ? null : col.key) }}
+                          className={`p-0.5 rounded transition-colors ${hasFilter ? 'text-blue-500' : 'text-gray-300 hover:text-gray-500'}`}
+                          title="Filter column"
+                        >
+                          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                          </svg>
+                        </button>
+                      )}
+                    </span>
+                  )}
                   {/* Column filter dropdown */}
                   {showFilterCol === col.key && (
                     <div
+                      ref={filterDropdownRef}
                       className="absolute top-full left-0 z-20 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5"
                       onClick={e => e.stopPropagation()}
                     >
@@ -739,8 +778,40 @@ export default function MoleculeTable({
                         )
                       })()}
 
-                      {/* Text / SMILES filter: text input */}
-                      {(col.type === 'text' || col.type === 'smiles') && (() => {
+                      {/* Safety color code filter: colored buttons */}
+                      {col.key === 'safety_color_code' && (() => {
+                        const f = columnFilters[col.key]
+                        const currentVal = (f && typeof f === 'object' && f.type === 'enum') ? f.value : null
+                        const btnBase = 'text-xs px-2 py-1 rounded transition-colors inline-flex items-center gap-1'
+                        const btnActive = 'ring-2 ring-blue-400 font-medium'
+                        const btnInactive = 'opacity-60 hover:opacity-100'
+                        const colors = [
+                          { value: 'green', dot: 'bg-green-500', label: '' },
+                          { value: 'yellow', dot: 'bg-yellow-400', label: '' },
+                          { value: 'red', dot: 'bg-red-500', label: '' },
+                        ]
+                        return (
+                          <div className="flex items-center gap-1">
+                            <button
+                              className={`${btnBase} ${currentVal === null ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+                              onClick={() => setColumnFilters(prev => { const n = { ...prev }; delete n[col.key]; return n })}
+                            >All</button>
+                            {colors.map(c => (
+                              <button
+                                key={c.value}
+                                className={`${btnBase} bg-gray-50 ${currentVal === c.value ? btnActive : btnInactive}`}
+                                onClick={() => setColumnFilters(prev => ({ ...prev, [col.key]: { type: 'enum', value: c.value } }))}
+                                title={c.value}
+                              >
+                                <span className={`w-3 h-3 rounded-full ${c.dot}`} />
+                              </button>
+                            ))}
+                          </div>
+                        )
+                      })()}
+
+                      {/* Text / SMILES filter: text input (skip safety_color_code) */}
+                      {(col.type === 'text' || col.type === 'smiles') && col.key !== 'safety_color_code' && (() => {
                         const f = columnFilters[col.key]
                         // Backward compat: plain string → extract value
                         const textVal = typeof f === 'string' ? f : (f && f.type === 'text' ? f.value : '')

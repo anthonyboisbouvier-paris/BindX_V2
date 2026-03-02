@@ -99,7 +99,7 @@ const PROP_ALIASES = {
  * Skips arrays and special keys (flags, note, status, smiles, confidence_modifier).
  */
 function deepFlatten(obj, out = {}) {
-  const SKIP_KEYS = new Set(['flags', 'note', 'status', 'smiles', 'confidence_modifier', 'nearest_tanimoto', 'docking_status'])
+  const SKIP_KEYS = new Set(['flags', 'note', 'status', 'smiles', 'confidence_modifier', 'nearest_tanimoto', 'docking_status', 'tree', 'children', 'reaction', 'reactants', 'reactant_names', 'conditions'])
   for (const [k, v] of Object.entries(obj)) {
     if (SKIP_KEYS.has(k)) continue
     if (v && typeof v === 'object' && !Array.isArray(v)) {

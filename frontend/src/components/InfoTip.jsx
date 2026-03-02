@@ -31,29 +31,26 @@ export default function InfoTip({ text, variant = 'dark', size = 'sm', className
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  // Auto-position: check if popup would overflow viewport (vertical + horizontal)
+  // Compute fixed position for popup (escapes overflow-hidden containers)
+  const [popupStyle, setPopupStyle] = useState({})
   useEffect(() => {
     if (!open || !popupRef.current || !tipRef.current) return
     const rect = tipRef.current.getBoundingClientRect()
     const popupRect = popupRef.current.getBoundingClientRect()
 
-    // Vertical
-    if (rect.bottom + popupRect.height + 8 > window.innerHeight) {
-      setPosition('top')
-    } else {
-      setPosition('bottom')
-    }
+    // Vertical: prefer below, flip to above if no space
+    const goUp = rect.bottom + popupRect.height + 8 > window.innerHeight
+    setPosition(goUp ? 'top' : 'bottom')
 
-    // Horizontal — check if centered popup overflows
-    const centerLeft = rect.left + rect.width / 2 - popupRect.width / 2
-    const centerRight = rect.left + rect.width / 2 + popupRect.width / 2
-    if (centerLeft < 8) {
-      setHAlign('left')
-    } else if (centerRight > window.innerWidth - 8) {
-      setHAlign('right')
-    } else {
-      setHAlign('center')
-    }
+    // Horizontal: center on icon, push left/right if overflowing
+    let left = rect.left + rect.width / 2 - popupRect.width / 2
+    let hA = 'center'
+    if (left < 8) { left = rect.left; hA = 'left' }
+    else if (left + popupRect.width > window.innerWidth - 8) { left = rect.right - popupRect.width; hA = 'right' }
+    setHAlign(hA)
+
+    const top = goUp ? rect.top - popupRect.height - 8 : rect.bottom + 8
+    setPopupStyle({ left, top })
   }, [open])
 
   if (!text) return null
@@ -64,7 +61,6 @@ export default function InfoTip({ text, variant = 'dark', size = 'sm', className
   const popupClasses = isDark
     ? 'bg-gray-800 border-gray-700 text-gray-200 shadow-xl shadow-black/20'
     : 'bg-bx-s2 border-bx-s3/60 text-slate-300 shadow-xl shadow-black/30'
-  const arrowBg = isDark ? 'bg-gray-800 border-gray-700' : 'bg-bx-s2 border-bx-s3/60'
 
   return (
     <span
@@ -89,23 +85,12 @@ export default function InfoTip({ text, variant = 'dark', size = 'sm', className
       {open && (
         <div
           ref={popupRef}
-          className={`absolute z-[60] max-w-[280px] w-max px-3 py-2.5 rounded-lg border
+          className={`fixed z-[9999] max-w-[280px] w-max px-3 py-2.5 rounded-lg border
                      text-xs leading-relaxed max-h-[200px] overflow-y-auto
-                     ${popupClasses}
-                     ${position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'}
-                     ${hAlign === 'left' ? 'left-0' : hAlign === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'}`}
-          style={{ pointerEvents: 'none' }}
+                     ${popupClasses}`}
+          style={{ pointerEvents: 'none', ...popupStyle }}
           role="tooltip"
         >
-          <div
-            className={`absolute w-2 h-2 rotate-45 ${arrowBg} ${
-              hAlign === 'left' ? 'left-3' : hAlign === 'right' ? 'right-3' : 'left-1/2 -translate-x-1/2'
-            } ${
-              position === 'top'
-                ? 'bottom-[-5px] border-r border-b'
-                : 'top-[-5px] border-l border-t'
-            }`}
-          />
           {text}
         </div>
       )}

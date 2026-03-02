@@ -56,6 +56,7 @@ export default function PhaseDashboard() {
     loadMoreMolecules,
     updateServerSort,
     updateServerFilters,
+    createPhase,
   } = useWorkspace()
 
   const { addToast } = useToast()
@@ -342,10 +343,25 @@ export default function PhaseDashboard() {
     const myIdx = phases.findIndex(p => p.id === currentPhase.id)
     if (myIdx < 0) return
 
-    const nextPhase = phases[myIdx + 1]
+    let nextPhase = phases[myIdx + 1]
+
+    // Auto-create next phase if it doesn't exist
     if (!nextPhase) {
-      addToast('No next phase in this campaign. Create a new phase from the project page first.', 'warning')
-      return
+      const typeOrder = ['hit_discovery', 'hit_to_lead', 'lead_optimization']
+      const currentTypeIdx = typeOrder.indexOf(currentPhase.type)
+      if (currentTypeIdx < 0 || currentTypeIdx >= typeOrder.length - 1) {
+        addToast('This is the final phase (Lead Optimization). No further phase can be created.', 'warning')
+        return
+      }
+      const nextType = typeOrder[currentTypeIdx + 1]
+      const nextLabel = PHASE_TYPES[nextType]?.label || nextType
+      try {
+        nextPhase = await createPhase(currentCampaign.id, { type: nextType })
+        addToast(`Created ${nextLabel} phase`, 'success')
+      } catch (err) {
+        addToast(err.userMessage || 'Failed to create next phase', 'error')
+        return
+      }
     }
 
     try {
@@ -362,7 +378,7 @@ export default function PhaseDashboard() {
     } catch (err) {
       addToast(err.userMessage || 'Failed to send bookmarks to next phase', 'error')
     }
-  }, [currentCampaign, currentPhase, createRun, bookmarkedCount, addToast, navigate, projectId])
+  }, [currentCampaign, currentPhase, createRun, createPhase, bookmarkedCount, addToast, navigate, projectId])
 
   const showDetail = !!selectedMolecule
 

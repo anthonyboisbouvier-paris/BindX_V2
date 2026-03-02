@@ -47,6 +47,7 @@ function buildRuleFn(rule) {
   // Boolean rules don't need a value input
   if (colType === 'boolean') {
     return (mol) => {
+      if (!mol) return false
       const v = mol[column]
       if (operator === 'is_yes') return !!v
       if (operator === 'is_no') return !v
@@ -61,6 +62,7 @@ function buildRuleFn(rule) {
       const numTo = parseFloat(valueTo)
       if (isNaN(num) || isNaN(numTo)) return null
       return (mol) => {
+        if (!mol) return false
         const v = parseFloat(mol[column])
         if (isNaN(v)) return false
         return v >= Math.min(num, numTo) && v <= Math.max(num, numTo)
@@ -68,6 +70,7 @@ function buildRuleFn(rule) {
     }
     if (isNaN(num)) return null
     return (mol) => {
+      if (!mol) return false
       const v = parseFloat(mol[column])
       if (isNaN(v)) return false
       switch (operator) {

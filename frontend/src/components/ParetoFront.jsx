@@ -287,7 +287,10 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
   const [panStart, setPanStart] = useState(null)
   const [brushing, setBrushing] = useState(false)
   const [brushRect, setBrushRect] = useState(null)
+  const [brushStart, setBrushStart] = useState(null) // { svgX, svgY, clientX, clientY }
+  const [contextMenu, setContextMenu] = useState(null) // { x, y } screen coords
   const svgRef = useRef(null)
+  const contextMenuRef = useRef(null)
 
   // Filter molecules that have at least one numeric property
   const mols = useMemo(() =>
@@ -355,24 +358,46 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
     return () => el.removeEventListener('wheel', handleWheel)
   }, [handleWheel])
 
-  // Pan handlers
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return
+    const handler = (e) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
+        setContextMenu(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [contextMenu])
+
+  // Pan / brush handlers — right-click drag = brush select
   const handleMouseDown = useCallback((e) => {
-    if (e.shiftKey) {
-      // Brush mode
+    setContextMenu(null)
+    if (e.button === 2) {
+      // Right-click: prepare for brush or context menu
       const rect = svgRef.current.getBoundingClientRect()
       const sx = (e.clientX - rect.left) / rect.width * VW
       const sy = (e.clientY - rect.top) / rect.height * VH
-      setBrushing(true)
-      setBrushRect({ x: sx, y: sy, w: 0, h: 0 })
+      setBrushStart({ svgX: sx, svgY: sy, clientX: e.clientX, clientY: e.clientY })
       return
     }
-    if (zoom > 1) {
+    if (e.button === 0 && zoom > 1) {
       setIsPanning(true)
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y })
     }
   }, [zoom, pan])
 
   const handleMouseMove = useCallback((e) => {
+    // Detect brush start threshold (right-click drag)
+    if (brushStart && !brushing) {
+      const dx = e.clientX - brushStart.clientX
+      const dy = e.clientY - brushStart.clientY
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        setBrushing(true)
+        setBrushRect({ x: brushStart.svgX, y: brushStart.svgY, w: 0, h: 0 })
+      }
+      return
+    }
     if (brushing && brushRect) {
       const rect = svgRef.current.getBoundingClientRect()
       const cx = (e.clientX - rect.left) / rect.width * VW
@@ -383,11 +408,11 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
     if (isPanning && panStart) {
       setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y })
     }
-  }, [isPanning, panStart, brushing, brushRect])
+  }, [isPanning, panStart, brushing, brushRect, brushStart])
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e) => {
     if (brushing && brushRect) {
-      // Select points in brush rect
+      // Finish brush selection
       const bx = Math.min(brushRect.x, brushRect.x + brushRect.w)
       const by = Math.min(brushRect.y, brushRect.y + brushRect.h)
       const bw = Math.abs(brushRect.w)
@@ -403,17 +428,26 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
       }
       setBrushing(false)
       setBrushRect(null)
+      setBrushStart(null)
+      return
+    }
+    // Right-click without dragging — show context menu if selection exists
+    if (brushStart && !brushing) {
+      if (selected.length > 0) {
+        setContextMenu({ x: e.clientX, y: e.clientY })
+      }
+      setBrushStart(null)
       return
     }
     setIsPanning(false)
     setPanStart(null)
-  }, [brushing, brushRect, filteredMols, xKey, yKey, toX, toY])
+  }, [brushing, brushRect, brushStart, filteredMols, xKey, yKey, toX, toY, selected])
 
   const handlePointClick = useCallback((mol, e) => {
+    setContextMenu(null)
     if (e.ctrlKey || e.metaKey) {
       setSelected(prev => {
         if (prev.includes(mol)) return prev.filter(m => m !== mol)
-        if (prev.length >= 3) return [...prev.slice(1), mol]
         return [...prev, mol]
       })
     } else {
@@ -424,8 +458,34 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
 
   const handlePointContextMenu = useCallback((mol, e) => {
     e.preventDefault()
-    if (onToggleBookmark) onToggleBookmark(mol.id)
-  }, [onToggleBookmark])
+    e.stopPropagation()
+    // If this point is already in selection, show context menu for all selected
+    if (selected.includes(mol) && selected.length > 0) {
+      setContextMenu({ x: e.clientX, y: e.clientY })
+    } else {
+      // Single point: select it and show context menu
+      setSelected([mol])
+      setContextMenu({ x: e.clientX, y: e.clientY })
+    }
+  }, [selected])
+
+  const handleBookmarkSelected = useCallback(() => {
+    if (!onToggleBookmark) return
+    // Only bookmark non-bookmarked molecules
+    selected.filter(mol => !mol.bookmarked).forEach(mol => onToggleBookmark(mol.id))
+    setContextMenu(null)
+  }, [selected, onToggleBookmark])
+
+  const handleUnbookmarkSelected = useCallback(() => {
+    if (!onToggleBookmark) return
+    // Only unbookmark bookmarked molecules
+    selected.filter(mol => mol.bookmarked).forEach(mol => onToggleBookmark(mol.id))
+    setContextMenu(null)
+  }, [selected, onToggleBookmark])
+
+  const handleSvgContextMenu = useCallback((e) => {
+    e.preventDefault()
+  }, [])
 
   const handleResetZoom = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [])
 
@@ -543,7 +603,8 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
         style={{ cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'crosshair' }}>
         <svg ref={svgRef} viewBox={`0 0 ${VW} ${VH}`} className="w-full" style={{ display: 'block' }}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+          onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+          onContextMenu={handleSvgContextMenu}>
           <rect x={0} y={0} width={VW} height={VH} fill="#fff" />
 
           <g transform={svgTransform}>
@@ -603,14 +664,18 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
               const isHov = hovered === mol
               const isSel = selected.includes(mol)
               return (
-                <circle key={`np-${idx}`} cx={cx} cy={cy} r={isHov ? r + 2 : isSel ? r + 1 : r}
-                  fill={fill} fillOpacity={isHov ? 0.9 : isSel ? 0.8 : 0.5}
-                  stroke={isSel ? '#0b1120' : isHov ? '#4b5563' : 'none'} strokeWidth={isSel ? 2 : 1.5}
-                  style={{ cursor: 'pointer', transition: 'r 0.1s' }}
-                  onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
-                  onMouseLeave={() => setHovered(null)}
-                  onClick={(e) => handlePointClick(mol, e)}
-                  onContextMenu={(e) => handlePointContextMenu(mol, e)} />
+                <g key={`np-${idx}`}>
+                  {/* Selection highlight ring */}
+                  {isSel && <circle cx={cx} cy={cy} r={r + 5} fill="#3b82f6" fillOpacity={0.2} stroke="#3b82f6" strokeWidth={2} strokeDasharray="3,2" />}
+                  <circle cx={cx} cy={cy} r={isHov ? r + 2 : isSel ? r + 1 : r}
+                    fill={isSel ? '#3b82f6' : fill} fillOpacity={isHov ? 0.9 : isSel ? 0.9 : 0.5}
+                    stroke={isSel ? '#1d4ed8' : isHov ? '#4b5563' : 'none'} strokeWidth={isSel ? 2 : 1.5}
+                    style={{ cursor: 'pointer', transition: 'r 0.1s' }}
+                    onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
+                    onMouseLeave={() => setHovered(null)}
+                    onClick={(e) => handlePointClick(mol, e)}
+                    onContextMenu={(e) => handlePointContextMenu(mol, e)} />
+                </g>
               )
             })}
 
@@ -624,9 +689,11 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
               const isSel = selected.includes(mol)
               return (
                 <g key={`p-${idx}`}>
-                  <circle cx={cx} cy={cy} r={isHov ? r + 6 : r + 3} fill="#00e6a0" fillOpacity={0.15} />
-                  <circle cx={cx} cy={cy} r={isHov ? r + 3 : isSel ? r + 1 : r + 1}
-                    fill="#00e6a0" stroke={isSel ? '#0b1120' : '#fff'} strokeWidth={isSel ? 2 : 1.5}
+                  {/* Selection highlight ring */}
+                  {isSel && <circle cx={cx} cy={cy} r={r + 8} fill="#3b82f6" fillOpacity={0.2} stroke="#3b82f6" strokeWidth={2} strokeDasharray="3,2" />}
+                  <circle cx={cx} cy={cy} r={isHov ? r + 6 : r + 3} fill={isSel ? '#3b82f6' : '#00e6a0'} fillOpacity={isSel ? 0.25 : 0.15} />
+                  <circle cx={cx} cy={cy} r={isHov ? r + 3 : isSel ? r + 2 : r + 1}
+                    fill={isSel ? '#3b82f6' : '#00e6a0'} stroke={isSel ? '#1d4ed8' : '#fff'} strokeWidth={isSel ? 2 : 1.5}
                     style={{ cursor: 'pointer', transition: 'r 0.1s' }}
                     onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
                     onMouseLeave={() => setHovered(null)}
@@ -721,6 +788,56 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
         </svg>
       </div>
 
+      {/* Context menu */}
+      {contextMenu && selected.length > 0 && (() => {
+        const unbookmarkedCount = selected.filter(m => !m.bookmarked).length
+        const bookmarkedCount = selected.filter(m => m.bookmarked).length
+        return (
+          <div
+            ref={contextMenuRef}
+            className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-xl py-1 min-w-[180px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <div className="px-3 py-1.5 text-xs text-gray-400 border-b border-gray-100">
+              {selected.length} molecule{selected.length > 1 ? 's' : ''} selected
+            </div>
+            {unbookmarkedCount > 0 && (
+              <button
+                onClick={handleBookmarkSelected}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-yellow-50 hover:text-yellow-700 transition-colors"
+              >
+                <svg className="w-4 h-4 text-yellow-400" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+                Bookmark ({unbookmarkedCount})
+              </button>
+            )}
+            {bookmarkedCount > 0 && (
+              <button
+                onClick={handleUnbookmarkSelected}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-600 transition-colors"
+              >
+                <svg className="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+                Remove bookmark ({bookmarkedCount})
+              </button>
+            )}
+            <button
+              onClick={() => { setSelected([]); setContextMenu(null) }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 transition-colors border-t border-gray-100"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Clear selection
+            </button>
+          </div>
+        )
+      })()}
+
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-5 text-sm text-gray-500 px-1">
         <div className="flex items-center gap-2">
@@ -734,7 +851,7 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
           <svg width={14} height={12}><circle cx={6} cy={6} r={4} fill="#9ca3af" fillOpacity={0.5} /></svg>
           <span>Dominated</span>
         </div>
-        <span className="text-gray-300">Shift+drag: brush select | Ctrl+click: multi-select | Right-click: bookmark | Scroll: zoom</span>
+        <span className="text-gray-300">Right-drag: select area | Ctrl+click: multi-select | Right-click: bookmark | Scroll: zoom</span>
       </div>
 
       {showStats && <StatsPanel stats={stats} xLabel={xLabel} yLabel={yLabel} />}
