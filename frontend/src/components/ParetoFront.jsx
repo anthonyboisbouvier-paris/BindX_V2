@@ -1,9 +1,11 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import useSettingsStore from '../stores/settingsStore.js'
+import ParetoSettings from './ParetoSettings.jsx'
 
 // --------------------------------------------------
 // Extended objectives config
 // --------------------------------------------------
-const ALL_OBJECTIVES = [
+export const ALL_OBJECTIVES = [
   { key: 'docking_score',   label: 'Docking Score',    extract: m => m.docking_score ?? null,    higher_is_better: false },
   { key: 'cnn_score',       label: 'CNN Score',        extract: m => m.cnn_score ?? null,        higher_is_better: true },
   { key: 'cnn_affinity',    label: 'CNN Affinity',     extract: m => m.cnn_affinity ?? null,     higher_is_better: true },
@@ -18,9 +20,9 @@ const ALL_OBJECTIVES = [
 ]
 
 // Compute Pareto front (2-objective dominance)
-function computeParetoFront(mols, xKey, yKey) {
-  const xObj = ALL_OBJECTIVES.find(o => o.key === xKey)
-  const yObj = ALL_OBJECTIVES.find(o => o.key === yKey)
+function computeParetoFront(mols, xKey, yKey, objectives = ALL_OBJECTIVES) {
+  const xObj = objectives.find(o => o.key === xKey)
+  const yObj = objectives.find(o => o.key === yKey)
   if (!xObj || !yObj) return new Set()
 
   // Determine direction: we normalize so "better" = higher
@@ -152,128 +154,31 @@ function std(arr) {
   return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / (arr.length - 1))
 }
 
-// --------------------------------------------------
-// Mini radar for tooltip
-// --------------------------------------------------
-function MiniRadar({ mol, size = 60 }) {
-  const axes = ALL_OBJECTIVES.slice(0, 6)
-  const cx = size / 2, cy = size / 2, r = size / 2 - 6
-  const points = axes.map((a, i) => {
-    const angle = (Math.PI * 2 * i) / axes.length - Math.PI / 2
-    const val = Math.max(0, Math.min(1, a.extract(mol) ?? 0))
-    return { x: cx + Math.cos(angle) * r * val, y: cy + Math.sin(angle) * r * val }
-  })
-  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
-  return (
-    <svg width={size} height={size}>
-      {/* Grid */}
-      {[0.25, 0.5, 0.75, 1].map(s => (
-        <polygon key={s} points={axes.map((_, i) => {
-          const a = (Math.PI * 2 * i) / axes.length - Math.PI / 2
-          return `${cx + Math.cos(a) * r * s},${cy + Math.sin(a) * r * s}`
-        }).join(' ')} fill="none" stroke="#e5e7eb" strokeWidth={0.5} />
-      ))}
-      {/* Data polygon */}
-      <path d={path} fill="#00e6a0" fillOpacity={0.25} stroke="#00e6a0" strokeWidth={1.5} />
-      {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={2} fill="#00e6a0" />
-      ))}
-    </svg>
-  )
-}
-
-// --------------------------------------------------
-// Distribution histogram
-// --------------------------------------------------
-function Histogram({ values, width, height, color = '#3b82f6' }) {
-  if (!values.length) return null
-  const nBins = Math.min(15, Math.max(5, Math.ceil(Math.sqrt(values.length))))
-  const min = Math.min(...values), max = Math.max(...values)
-  const range = max - min || 1
-  const binW = range / nBins
-  const bins = Array(nBins).fill(0)
-  values.forEach(v => {
-    const idx = Math.min(nBins - 1, Math.floor((v - min) / binW))
-    bins[idx]++
-  })
-  const maxCount = Math.max(...bins)
-  const barW = width / nBins - 1
-  return (
-    <g>
-      {bins.map((count, i) => {
-        const h = maxCount > 0 ? (count / maxCount) * height : 0
-        return (
-          <rect key={i} x={i * (barW + 1)} y={height - h} width={barW} height={h}
-            fill={color} fillOpacity={0.6} rx={1} />
-        )
-      })}
-    </g>
-  )
-}
-
-// --------------------------------------------------
-// Radar overlay view
-// --------------------------------------------------
-function RadarOverlay({ molecules, width, height }) {
-  const axes = ALL_OBJECTIVES.slice(0, 8)
-  const cx = width / 2, cy = height / 2, r = Math.min(width, height) / 2 - 30
-  const colors = ['#00e6a0', '#3b82f6', '#a855f7']
-
-  return (
-    <svg width={width} height={height} className="mx-auto">
-      {/* Grid circles */}
-      {[0.25, 0.5, 0.75, 1].map(s => (
-        <polygon key={s} points={axes.map((_, i) => {
-          const a = (Math.PI * 2 * i) / axes.length - Math.PI / 2
-          return `${cx + Math.cos(a) * r * s},${cy + Math.sin(a) * r * s}`
-        }).join(' ')} fill="none" stroke="#e5e7eb" strokeWidth={0.5} />
-      ))}
-      {/* Axis lines + labels */}
-      {axes.map((ax, i) => {
-        const a = (Math.PI * 2 * i) / axes.length - Math.PI / 2
-        const ex = cx + Math.cos(a) * r, ey = cy + Math.sin(a) * r
-        const lx = cx + Math.cos(a) * (r + 18), ly = cy + Math.sin(a) * (r + 18)
-        return (
-          <g key={ax.key}>
-            <line x1={cx} y1={cy} x2={ex} y2={ey} stroke="#d1d5db" strokeWidth={0.5} />
-            <text x={lx} y={ly} textAnchor="middle" fontSize={8} fill="#6b7280">{ax.label}</text>
-          </g>
-        )
-      })}
-      {/* Molecule polygons */}
-      {molecules.map((mol, mi) => {
-        const pts = axes.map((ax, i) => {
-          const a = (Math.PI * 2 * i) / axes.length - Math.PI / 2
-          const val = Math.max(0, Math.min(1, ax.extract(mol) ?? 0))
-          return { x: cx + Math.cos(a) * r * val, y: cy + Math.sin(a) * r * val }
-        })
-        const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
-        return (
-          <g key={mi}>
-            <path d={path} fill={colors[mi]} fillOpacity={0.15} stroke={colors[mi]} strokeWidth={2} />
-            {pts.map((p, i) => (
-              <circle key={i} cx={p.x} cy={p.y} r={3} fill={colors[mi]} />
-            ))}
-          </g>
-        )
-      })}
-      {/* Legend */}
-      {molecules.map((mol, mi) => (
-        <text key={mi} x={10} y={20 + mi * 14} fontSize={10} fill={colors[mi]} fontWeight={600}>
-          {mol.name || `Molecule ${mi + 1}`}
-        </text>
-      ))}
-    </svg>
-  )
-}
 
 // --------------------------------------------------
 // Main ParetoFront component
 // --------------------------------------------------
-export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
+export default function ParetoFront({ molecules, onSelect, onToggleBookmark, visibleKeys }) {
+  const paretoOverrides = useSettingsStore(s => s.paretoOverrides)
+  const visibleSet = useMemo(() => visibleKeys ? new Set(visibleKeys) : null, [visibleKeys])
+
+  // Effective objectives: filter by enabled + visible columns, override direction
+  const effectiveObjectives = useMemo(() =>
+    ALL_OBJECTIVES
+      .filter(o => paretoOverrides[o.key]?.enabled !== false)
+      .filter(o => !visibleSet || visibleSet.has(o.key))
+      .map(o => {
+        const ov = paretoOverrides[o.key]
+        if (ov?.higher_is_better !== undefined) {
+          return { ...o, higher_is_better: ov.higher_is_better }
+        }
+        return o
+      }),
+    [paretoOverrides, visibleSet]
+  )
+
   const [xKey, setXKey] = useState('docking_score')
   const [yKey, setYKey] = useState('composite_score')
-  const [viewMode, setViewMode] = useState('scatter')
   const [colorBy, setColorBy] = useState('pareto_rank')
   const [sizeBy, setSizeBy] = useState('none')
   const [showDominated, setShowDominated] = useState(true)
@@ -282,15 +187,21 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
   const [hoveredPos, setHoveredPos] = useState({ x: 0, y: 0 })
   const [selected, setSelected] = useState([])
   const [zoom, setZoom] = useState(1)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [isPanning, setIsPanning] = useState(false)
-  const [panStart, setPanStart] = useState(null)
   const [brushing, setBrushing] = useState(false)
   const [brushRect, setBrushRect] = useState(null)
-  const [brushStart, setBrushStart] = useState(null) // { svgX, svgY, clientX, clientY }
+  const [dragOrigin, setDragOrigin] = useState(null) // left-click drag tracking
   const [contextMenu, setContextMenu] = useState(null) // { x, y } screen coords
   const svgRef = useRef(null)
   const contextMenuRef = useRef(null)
+  const hitMolRef = useRef(null) // molecule under cursor at mousedown
+
+  // Auto-switch keys if objective disabled
+  useEffect(() => {
+    const keys = effectiveObjectives.map(o => o.key)
+    if (keys.length === 0) return
+    if (!keys.includes(xKey)) setXKey(keys[0])
+    if (!keys.includes(yKey)) setYKey(keys[Math.min(1, keys.length - 1)])
+  }, [effectiveObjectives]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filter molecules that have at least one numeric property
   const mols = useMemo(() =>
@@ -300,8 +211,8 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
     [molecules]
   )
 
-  // Compute pareto front locally (2-objective)
-  const paretoIds = useMemo(() => computeParetoFront(mols, xKey, yKey), [mols, xKey, yKey])
+  // Compute pareto front locally (2-objective) using effective directions
+  const paretoIds = useMemo(() => computeParetoFront(mols, xKey, yKey, effectiveObjectives), [mols, xKey, yKey, effectiveObjectives])
 
   const filteredMols = useMemo(() =>
     showDominated ? mols : mols.filter(m => paretoIds.has(m.id)),
@@ -311,6 +222,7 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
   const paretoMols = mols.filter(m => paretoIds.has(m.id))
   const nonParetoMols = filteredMols.filter(m => !paretoIds.has(m.id))
   const paretoCount = paretoMols.length
+  const selectedIdSet = useMemo(() => new Set(selected.map(m => m.id)), [selected])
 
   // Dynamic ranges
   const xValues = filteredMols.map(m => getVal(m, xKey)).filter(v => v != null)
@@ -370,104 +282,83 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [contextMenu])
 
-  // Pan / brush handlers — right-click drag = brush select
+  // Selection: click=toggle, drag=brush area, right-click=context menu
   const handleMouseDown = useCallback((e) => {
+    if (e.button !== 0) return // only left button
     setContextMenu(null)
-    if (e.button === 2) {
-      // Right-click: prepare for brush or context menu
-      const rect = svgRef.current.getBoundingClientRect()
-      const sx = (e.clientX - rect.left) / rect.width * VW
-      const sy = (e.clientY - rect.top) / rect.height * VH
-      setBrushStart({ svgX: sx, svgY: sy, clientX: e.clientX, clientY: e.clientY })
-      return
-    }
-    if (e.button === 0 && zoom > 1) {
-      setIsPanning(true)
-      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y })
-    }
-  }, [zoom, pan])
+    const rect = svgRef.current.getBoundingClientRect()
+    const svgX = (e.clientX - rect.left) / rect.width * VW
+    const svgY = (e.clientY - rect.top) / rect.height * VH
+    setDragOrigin({ clientX: e.clientX, clientY: e.clientY, svgX, svgY })
+  }, [])
 
   const handleMouseMove = useCallback((e) => {
-    // Detect brush start threshold (right-click drag)
-    if (brushStart && !brushing) {
-      const dx = e.clientX - brushStart.clientX
-      const dy = e.clientY - brushStart.clientY
-      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-        setBrushing(true)
-        setBrushRect({ x: brushStart.svgX, y: brushStart.svgY, w: 0, h: 0 })
-      }
-      return
+    if (!dragOrigin) return
+    const dx = e.clientX - dragOrigin.clientX
+    const dy = e.clientY - dragOrigin.clientY
+    if (!brushing && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+      setBrushing(true)
+      hitMolRef.current = null // dragging — not a click
     }
-    if (brushing && brushRect) {
+    if (brushing || (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
       const rect = svgRef.current.getBoundingClientRect()
       const cx = (e.clientX - rect.left) / rect.width * VW
       const cy = (e.clientY - rect.top) / rect.height * VH
-      setBrushRect(prev => ({ ...prev, w: cx - prev.x, h: cy - prev.y }))
-      return
+      setBrushRect({
+        x: dragOrigin.svgX, y: dragOrigin.svgY,
+        w: cx - dragOrigin.svgX, h: cy - dragOrigin.svgY,
+      })
     }
-    if (isPanning && panStart) {
-      setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y })
-    }
-  }, [isPanning, panStart, brushing, brushRect, brushStart])
+  }, [dragOrigin, brushing])
 
   const handleMouseUp = useCallback((e) => {
     if (brushing && brushRect) {
-      // Finish brush selection
+      // Finish brush — add enclosed points to selection (cumulative)
       const bx = Math.min(brushRect.x, brushRect.x + brushRect.w)
       const by = Math.min(brushRect.y, brushRect.y + brushRect.h)
       const bw = Math.abs(brushRect.w)
       const bh = Math.abs(brushRect.h)
       if (bw > 5 && bh > 5) {
+        // Account for zoom when comparing coords
+        const z = zoom || 1
+        const gbx = bx / z, gby = by / z, gbw = bw / z, gbh = bh / z
         const brushed = filteredMols.filter(mol => {
           const xv = getVal(mol, xKey), yv = getVal(mol, yKey)
           if (xv == null || yv == null) return false
           const px = toX(xv), py = toY(yv)
-          return px >= bx && px <= bx + bw && py >= by && py <= by + bh
+          return px >= gbx && px <= gbx + gbw && py >= gby && py <= gby + gbh
         })
-        setSelected(brushed)
+        if (brushed.length > 0) {
+          setSelected(prev => {
+            const ids = new Set(prev.map(m => m.id))
+            const toAdd = brushed.filter(m => !ids.has(m.id))
+            return [...prev, ...toAdd]
+          })
+          setTimeout(() => setContextMenu({ x: e.clientX, y: e.clientY }), 50)
+        }
       }
-      setBrushing(false)
-      setBrushRect(null)
-      setBrushStart(null)
-      return
+    } else if (hitMolRef.current) {
+      // Click on a point — toggle it in/out of selection
+      const mol = hitMolRef.current
+      setSelected(prev =>
+        prev.some(m => m.id === mol.id)
+          ? prev.filter(m => m.id !== mol.id)
+          : [...prev, mol]
+      )
+    } else if (dragOrigin && !brushing) {
+      // Click on empty area — clear selection
+      setSelected([])
     }
-    // Right-click without dragging — show context menu if selection exists
-    if (brushStart && !brushing) {
-      if (selected.length > 0) {
-        setContextMenu({ x: e.clientX, y: e.clientY })
-      }
-      setBrushStart(null)
-      return
-    }
-    setIsPanning(false)
-    setPanStart(null)
-  }, [brushing, brushRect, brushStart, filteredMols, xKey, yKey, toX, toY, selected])
+    hitMolRef.current = null
+    setBrushing(false)
+    setBrushRect(null)
+    setDragOrigin(null)
+  }, [brushing, brushRect, dragOrigin, filteredMols, xKey, yKey, toX, toY, zoom])
 
-  const handlePointClick = useCallback((mol, e) => {
-    setContextMenu(null)
-    if (e.ctrlKey || e.metaKey) {
-      setSelected(prev => {
-        if (prev.includes(mol)) return prev.filter(m => m !== mol)
-        return [...prev, mol]
-      })
-    } else {
-      setSelected([mol])
-      if (onSelect) onSelect(mol)
-    }
+  // Double-click on a point: open detail panel
+  const handlePointDblClick = useCallback((mol) => {
+    if (onSelect) onSelect(mol)
   }, [onSelect])
-
-  const handlePointContextMenu = useCallback((mol, e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    // If this point is already in selection, show context menu for all selected
-    if (selected.includes(mol) && selected.length > 0) {
-      setContextMenu({ x: e.clientX, y: e.clientY })
-    } else {
-      // Single point: select it and show context menu
-      setSelected([mol])
-      setContextMenu({ x: e.clientX, y: e.clientY })
-    }
-  }, [selected])
 
   const handleBookmarkSelected = useCallback(() => {
     if (!onToggleBookmark) return
@@ -485,9 +376,11 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
 
   const handleSvgContextMenu = useCallback((e) => {
     e.preventDefault()
-  }, [])
+    if (selected.length > 0) setContextMenu({ x: e.clientX, y: e.clientY })
+  }, [selected])
 
-  const handleResetZoom = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [])
+  const clearSelection = useCallback(() => setSelected([]), [])
+  const handleResetZoom = useCallback(() => { setZoom(1) }, [])
 
   // Export CSV
   const exportCSV = useCallback(() => {
@@ -541,66 +434,17 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
   const xLabel = ALL_OBJECTIVES.find(o => o.key === xKey)?.label || xKey
   const yLabel = ALL_OBJECTIVES.find(o => o.key === yKey)?.label || yKey
 
-  // Radar view
-  if (viewMode === 'radar') {
-    const radarMols = selected.length > 0 ? selected : paretoMols.slice(0, 3)
-    return (
-      <div className="space-y-3">
-        <Toolbar {...{ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy, setColorBy,
-          sizeBy, setSizeBy, showDominated, setShowDominated, showStats, setShowStats,
-          handleResetZoom, exportCSV, paretoCount, zoom, selected }} />
-        <div className="card p-4">
-          <RadarOverlay molecules={radarMols} width={400} height={350} />
-          <p className="text-sm text-gray-400 text-center mt-2">
-            {radarMols.length === 0 ? 'Select molecules to compare' : `Comparing ${radarMols.length} molecule(s)`}
-            {' — Ctrl+click points in scatter to select up to 3'}
-          </p>
-        </div>
-        {showStats && <StatsPanel stats={stats} xLabel={xLabel} yLabel={yLabel} />}
-      </div>
-    )
-  }
-
-  // Distribution view
-  if (viewMode === 'distribution') {
-    return (
-      <div className="space-y-3">
-        <Toolbar {...{ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy, setColorBy,
-          sizeBy, setSizeBy, showDominated, setShowDominated, showStats, setShowStats,
-          handleResetZoom, exportCSV, paretoCount, zoom, selected }} />
-        <div className="card overflow-hidden">
-          <div className="grid grid-cols-2 gap-4 p-4">
-            <div>
-              <p className="text-sm font-semibold text-gray-500 mb-2">{xLabel} Distribution</p>
-              <svg width="100%" viewBox={`0 0 ${PW} 80`}>
-                <Histogram values={xValues} width={PW} height={70} color="#3b82f6" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-500 mb-2">{yLabel} Distribution</p>
-              <svg width="100%" viewBox={`0 0 ${PW} 80`}>
-                <Histogram values={yValues} width={PW} height={70} color="#00e6a0" />
-              </svg>
-            </div>
-          </div>
-        </div>
-        {showStats && <StatsPanel stats={stats} xLabel={xLabel} yLabel={yLabel} />}
-      </div>
-    )
-  }
-
-  // Scatter view (default)
-  const svgTransform = zoom !== 1 || pan.x !== 0 || pan.y !== 0
-    ? `translate(${pan.x},${pan.y}) scale(${zoom})` : undefined
+  // Scatter view
+  const svgTransform = zoom !== 1 ? `scale(${zoom})` : undefined
 
   return (
     <div className="space-y-3">
-      <Toolbar {...{ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy, setColorBy,
+      <Toolbar {...{ xKey, setXKey, yKey, setYKey, colorBy, setColorBy,
         sizeBy, setSizeBy, showDominated, setShowDominated, showStats, setShowStats,
-        handleResetZoom, exportCSV, paretoCount, zoom, selected }} />
+        handleResetZoom, exportCSV, paretoCount, zoom, selected, effectiveObjectives, visibleSet }} />
 
       <div className="card overflow-hidden"
-        style={{ cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'crosshair' }}>
+        style={{ cursor: 'crosshair' }}>
         <svg ref={svgRef} viewBox={`0 0 ${VW} ${VH}`} className="w-full" style={{ display: 'block' }}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
@@ -662,19 +506,20 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
               const r = getRadius(mol)
               const fill = colorFn(mol)
               const isHov = hovered === mol
-              const isSel = selected.includes(mol)
+              const isSel = selectedIdSet.has(mol.id)
               return (
                 <g key={`np-${idx}`}>
-                  {/* Selection highlight ring */}
                   {isSel && <circle cx={cx} cy={cy} r={r + 5} fill="#3b82f6" fillOpacity={0.2} stroke="#3b82f6" strokeWidth={2} strokeDasharray="3,2" />}
+                  <circle cx={cx} cy={cy} r={Math.max(r + 6, 10)} fill="transparent"
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
+                    onMouseLeave={() => setHovered(null)}
+                    onMouseDown={(e) => { if (e.button === 0) hitMolRef.current = mol }}
+                    onDoubleClick={() => handlePointDblClick(mol)} />
                   <circle cx={cx} cy={cy} r={isHov ? r + 2 : isSel ? r + 1 : r}
                     fill={isSel ? '#3b82f6' : fill} fillOpacity={isHov ? 0.9 : isSel ? 0.9 : 0.5}
                     stroke={isSel ? '#1d4ed8' : isHov ? '#4b5563' : 'none'} strokeWidth={isSel ? 2 : 1.5}
-                    style={{ cursor: 'pointer', transition: 'r 0.1s' }}
-                    onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
-                    onMouseLeave={() => setHovered(null)}
-                    onClick={(e) => handlePointClick(mol, e)}
-                    onContextMenu={(e) => handlePointContextMenu(mol, e)} />
+                    style={{ cursor: 'pointer', transition: 'r 0.1s', pointerEvents: 'none' }} />
                 </g>
               )
             })}
@@ -686,19 +531,21 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
               const cx = toX(xv), cy = toY(yv)
               const r = getRadius(mol)
               const isHov = hovered === mol
-              const isSel = selected.includes(mol)
+              const isSel = selectedIdSet.has(mol.id)
               return (
                 <g key={`p-${idx}`}>
-                  {/* Selection highlight ring */}
                   {isSel && <circle cx={cx} cy={cy} r={r + 8} fill="#3b82f6" fillOpacity={0.2} stroke="#3b82f6" strokeWidth={2} strokeDasharray="3,2" />}
-                  <circle cx={cx} cy={cy} r={isHov ? r + 6 : r + 3} fill={isSel ? '#3b82f6' : '#00e6a0'} fillOpacity={isSel ? 0.25 : 0.15} />
-                  <circle cx={cx} cy={cy} r={isHov ? r + 3 : isSel ? r + 2 : r + 1}
-                    fill={isSel ? '#3b82f6' : '#00e6a0'} stroke={isSel ? '#1d4ed8' : '#fff'} strokeWidth={isSel ? 2 : 1.5}
-                    style={{ cursor: 'pointer', transition: 'r 0.1s' }}
+                  <circle cx={cx} cy={cy} r={Math.max(r + 8, 12)} fill="transparent"
+                    style={{ cursor: 'pointer' }}
                     onMouseEnter={() => { setHovered(mol); setHoveredPos({ x: cx, y: cy }) }}
                     onMouseLeave={() => setHovered(null)}
-                    onClick={(e) => handlePointClick(mol, e)}
-                    onContextMenu={(e) => handlePointContextMenu(mol, e)} />
+                    onMouseDown={(e) => { if (e.button === 0) hitMolRef.current = mol }}
+                    onDoubleClick={() => handlePointDblClick(mol)} />
+                  <circle cx={cx} cy={cy} r={isHov ? r + 6 : r + 3} fill={isSel ? '#3b82f6' : '#00e6a0'} fillOpacity={isSel ? 0.25 : 0.15}
+                    style={{ pointerEvents: 'none' }} />
+                  <circle cx={cx} cy={cy} r={isHov ? r + 3 : isSel ? r + 2 : r + 1}
+                    fill={isSel ? '#3b82f6' : '#00e6a0'} stroke={isSel ? '#1d4ed8' : '#fff'} strokeWidth={isSel ? 2 : 1.5}
+                    style={{ cursor: 'pointer', transition: 'r 0.1s', pointerEvents: 'none' }} />
                   {mol.pareto_rank != null && (
                     <text x={cx} y={cy + 3.5} textAnchor="middle" fontSize={7} fontWeight={700} fill="#fff"
                       style={{ pointerEvents: 'none', userSelect: 'none' }}>{mol.pareto_rank}</text>
@@ -721,6 +568,16 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
               fill="#3b82f6" fillOpacity={0.1} stroke="#3b82f6" strokeWidth={1} strokeDasharray="4,2" />
           )}
 
+          {/* Selection count badge */}
+          {selected.length > 0 && (
+            <g>
+              <rect x={ML + 6} y={MT + 6} width={84} height={24} rx={12} fill="#3b82f6" fillOpacity={0.9} />
+              <text x={ML + 48} y={MT + 22} textAnchor="middle" fontSize={11} fontWeight={700} fill="#fff">
+                {selected.length} selected
+              </text>
+            </g>
+          )}
+
           {/* R² correlation badge */}
           {stats.correlation !== 'N/A' && (
             <g>
@@ -733,7 +590,7 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
 
           {/* Tooltip */}
           {hovered && !brushing && (() => {
-            const W = 200, H = 190
+            const W = 200, H = 170
             let tx = hoveredPos.x + 14, ty = hoveredPos.y - H / 2
             if (tx + W > VW - 4) tx = hoveredPos.x - W - 14
             if (ty < MT) ty = MT
@@ -763,19 +620,16 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
                       <ParetoSmilesPreview smiles={hovered.smiles} />
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
-                    <MiniRadar mol={hovered} size={50} />
-                    <div style={{ flex: 1, fontSize: '10px' }}>
-                      {ALL_OBJECTIVES.slice(0, 6).map(({ key, label, extract }) => {
-                        const val = extract(hovered)
-                        return (
-                          <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-                            <span style={{ opacity: 0.7 }}>{label}</span>
-                            <span style={{ fontWeight: 600 }}>{val != null ? Number(val).toFixed(3) : 'N/A'}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
+                  <div style={{ fontSize: '10px', marginBottom: '4px' }}>
+                    {ALL_OBJECTIVES.slice(0, 6).map(({ key, label, extract }) => {
+                      const val = extract(hovered)
+                      return (
+                        <div key={key} style={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+                          <span style={{ opacity: 0.7 }}>{label}</span>
+                          <span style={{ fontWeight: 600 }}>{val != null ? Number(val).toFixed(3) : 'N/A'}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                   <div style={{ fontSize: '10px', opacity: 0.6 }}>
                     {hovered.source && <span>Source: {hovered.source} </span>}
@@ -851,7 +705,7 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
           <svg width={14} height={12}><circle cx={6} cy={6} r={4} fill="#9ca3af" fillOpacity={0.5} /></svg>
           <span>Dominated</span>
         </div>
-        <span className="text-gray-300">Right-drag: select area | Ctrl+click: multi-select | Right-click: bookmark | Scroll: zoom</span>
+        <span className="text-gray-300">Click: select/deselect | Drag: area select | Right-click: actions</span>
       </div>
 
       {showStats && <StatsPanel stats={stats} xLabel={xLabel} yLabel={yLabel} />}
@@ -862,32 +716,28 @@ export default function ParetoFront({ molecules, onSelect, onToggleBookmark }) {
 // --------------------------------------------------
 // Toolbar component
 // --------------------------------------------------
-function Toolbar({ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy, setColorBy,
+function Toolbar({ xKey, setXKey, yKey, setYKey, colorBy, setColorBy,
   sizeBy, setSizeBy, showDominated, setShowDominated, showStats, setShowStats,
-  handleResetZoom, exportCSV, paretoCount, zoom, selected }) {
+  handleResetZoom, exportCSV, paretoCount, zoom, selected, clearSelection, effectiveObjectives = ALL_OBJECTIVES, visibleSet }) {
+  const [showParetoSettings, setShowParetoSettings] = React.useState(false)
+  const paretoOverrides = useSettingsStore(s => s.paretoOverrides)
+  const hasOverrides = Object.keys(paretoOverrides).length > 0
+
   return (
     <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-1.5">
         <label className="text-sm font-medium text-gray-500">X:</label>
         <select value={xKey} onChange={e => setXKey(e.target.value)}
           className="text-sm border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-bx-mint">
-          {ALL_OBJECTIVES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+          {effectiveObjectives.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
       </div>
       <div className="flex items-center gap-1.5">
         <label className="text-sm font-medium text-gray-500">Y:</label>
         <select value={yKey} onChange={e => setYKey(e.target.value)}
           className="text-sm border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-bx-mint">
-          {ALL_OBJECTIVES.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+          {effectiveObjectives.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
         </select>
-      </div>
-      <div className="flex gap-0.5 p-0.5 bg-gray-100 rounded-lg">
-        {[{ v: 'scatter', l: 'Scatter' }, { v: 'radar', l: 'Radar' }, { v: 'distribution', l: 'Dist.' }].map(({ v, l }) => (
-          <button key={v} onClick={() => setViewMode(v)}
-            className={`px-2 py-0.5 rounded text-sm font-medium transition-colors ${viewMode === v ? 'bg-white text-bx-light-text shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-            {l}
-          </button>
-        ))}
       </div>
       <select value={colorBy} onChange={e => setColorBy(e.target.value)}
         className="text-sm border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700">
@@ -896,7 +746,7 @@ function Toolbar({ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy,
       <select value={sizeBy} onChange={e => setSizeBy(e.target.value)}
         className="text-sm border border-gray-200 rounded-md px-1.5 py-1 bg-white text-gray-700">
         <option value="none">Size: off</option>
-        {ALL_OBJECTIVES.map(o => <option key={o.key} value={o.key}>Size: {o.label}</option>)}
+        {effectiveObjectives.map(o => <option key={o.key} value={o.key}>Size: {o.label}</option>)}
       </select>
       <label className="flex items-center gap-1 text-sm text-gray-500 cursor-pointer">
         <input type="checkbox" checked={showDominated} onChange={e => setShowDominated(e.target.checked)}
@@ -918,13 +768,41 @@ function Toolbar({ xKey, setXKey, yKey, setYKey, viewMode, setViewMode, colorBy,
           className={`px-2 py-1 text-sm font-medium rounded-lg transition-colors ${showStats ? 'bg-bx-surface text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
           Stats
         </button>
+        <div className="relative">
+          <button
+            onClick={() => setShowParetoSettings(v => !v)}
+            className={`flex items-center gap-1 px-2 py-1 text-sm font-medium rounded-lg transition-colors ${
+              showParetoSettings ? 'bg-bx-surface text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+            title="Configure Pareto objectives"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            {hasOverrides && <span className="w-1.5 h-1.5 rounded-full bg-bx-cyan" />}
+          </button>
+          <ParetoSettings
+            isOpen={showParetoSettings}
+            onClose={() => setShowParetoSettings(false)}
+            allObjectives={visibleSet ? ALL_OBJECTIVES.filter(o => visibleSet.has(o.key)) : ALL_OBJECTIVES}
+          />
+        </div>
         {paretoCount > 0 && (
           <span className="text-sm text-gray-400">
             <span className="font-semibold text-bx-mint">{paretoCount}</span> on front
           </span>
         )}
         {selected.length > 0 && (
-          <span className="text-sm text-blue-600 font-medium">{selected.length} selected</span>
+          <span className="flex items-center gap-1.5 text-sm text-blue-600 font-medium">
+            {selected.length} selected
+            <button onClick={clearSelection} className="text-blue-400 hover:text-blue-600" title="Clear selection">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </span>
         )}
       </div>
     </div>

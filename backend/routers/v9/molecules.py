@@ -27,6 +27,7 @@ from models_v9 import (
 from routers.v9.deps import get_molecule_owned, get_phase_owned
 from schemas_v9 import (
     BookmarkRequest,
+    MoleculeAnnotationUpdate,
     MoleculeListResponse,
     MoleculeResponse,
     MoleculeStatsResponse,
@@ -39,6 +40,7 @@ router = APIRouter()
 # Direct columns on the molecules table that can be sorted
 VALID_SORT_FIELDS = {
     "created_at", "smiles", "name", "bookmarked", "canonical_smiles",
+    "invalidated",
 }
 
 # Property-based sort fields — resolved via lateral join on molecule_properties
@@ -84,6 +86,10 @@ def _mol_to_response(mol: MoleculeORM_V9) -> MoleculeResponse:
         generation_level=mol.generation_level,
         parent_molecule_id=mol.parent_molecule_id,
         ai_generated=mol.ai_generated,
+        user_comment=mol.user_comment,
+        ai_comment=mol.ai_comment,
+        tags=mol.tags or [],
+        invalidated=mol.invalidated,
         created_at=mol.created_at,
         properties=props if props else None,
     )
@@ -298,6 +304,25 @@ async def bookmark_molecule(
     return _mol_to_response(mol)
 
 
+@router.patch("/molecules/{molecule_id}/annotations", response_model=MoleculeResponse)
+async def update_annotations(
+    molecule_id: UUID,
+    body: MoleculeAnnotationUpdate,
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """Update user annotations (comment, tags, invalidated) on a molecule."""
+    mol = await get_molecule_owned(molecule_id, user_id, db)
+    if body.user_comment is not None:
+        mol.user_comment = body.user_comment
+    if body.tags is not None:
+        mol.tags = body.tags
+    if body.invalidated is not None:
+        mol.invalidated = body.invalidated
+    await db.flush()
+    return _mol_to_response(mol)
+
+
 @router.post("/phases/{phase_id}/molecules/bookmark-batch")
 async def bookmark_batch(
     phase_id: UUID,
@@ -373,3 +398,143 @@ async def smiles_to_3d(
         )
 
     return {"molblock": molblock}
+
+
+# ---------------------------------------------------------------------------
+# Property detail endpoints (safety, synthesis, confidence)
+# ---------------------------------------------------------------------------
+
+async def _get_molecule_property(
+    molecule_id: UUID, property_name: str, user_id: str, db: AsyncSession
+) -> dict:
+    """Fetch a specific property for a molecule, return its value or 404."""
+    mol = await get_molecule_owned(molecule_id, user_id, db)
+    stmt = (
+        select(MoleculePropertyORM_V9)
+        .where(
+            MoleculePropertyORM_V9.molecule_id == mol.id,
+            MoleculePropertyORM_V9.property_name == property_name,
+        )
+        .order_by(MoleculePropertyORM_V9.created_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    prop = result.scalar_one_or_none()
+    if not prop:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No {property_name} data for this molecule",
+        )
+    return prop.property_value
+
+
+@router.get("/molecules/{molecule_id}/safety")
+async def get_molecule_safety(
+    molecule_id: UUID,
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """Get safety profile for a molecule."""
+    return await _get_molecule_property(molecule_id, "safety", user_id, db)
+
+
+@router.get("/molecules/{molecule_id}/synthesis")
+async def get_molecule_synthesis(
+    molecule_id: UUID,
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """Get retrosynthesis route for a molecule."""
+    return await _get_molecule_property(molecule_id, "retrosynthesis", user_id, db)
+
+
+@router.get("/molecules/{molecule_id}/confidence")
+async def get_molecule_confidence(
+    molecule_id: UUID,
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """Get confidence breakdown for a molecule."""
+    return await _get_molecule_property(molecule_id, "confidence", user_id, db)
+
+
+# ---------------------------------------------------------------------------
+# Scaffold analysis
+# ---------------------------------------------------------------------------
+
+@router.post("/scaffold-analysis")
+async def scaffold_analysis(
+    body: dict = Body(...),
+    user_id: str = Depends(require_v9_user),
+):
+    """Analyze a molecule's scaffold and R-group positions."""
+    smiles = body.get("smiles")
+    if not smiles or not isinstance(smiles, str):
+        raise HTTPException(status_code=422, detail="Missing or invalid 'smiles' field")
+
+    try:
+        from pipeline.scaffold_analysis import analyze_scaffold
+        result = analyze_scaffold(smiles)
+        return result
+    except Exception as e:
+        logger.error("Scaffold analysis failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Scaffold analysis failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# ESMFold structure prediction
+# ---------------------------------------------------------------------------
+
+@router.post("/predict-structure")
+async def predict_structure(
+    body: dict = Body(...),
+    user_id: str = Depends(require_v9_user),
+):
+    """Predict protein structure from FASTA sequence using ESMFold API."""
+    import httpx
+
+    sequence = body.get("sequence", "").strip()
+    if not sequence:
+        raise HTTPException(status_code=422, detail="Missing 'sequence' field")
+
+    # Clean FASTA: remove header lines and whitespace
+    lines = sequence.split("\n")
+    clean_seq = "".join(l.strip() for l in lines if not l.startswith(">"))
+
+    if len(clean_seq) < 10:
+        raise HTTPException(status_code=422, detail="Sequence too short (min 10 residues)")
+    if len(clean_seq) > 2000:
+        raise HTTPException(status_code=422, detail="Sequence too long (max 2000 residues)")
+
+    # Validate amino acid characters
+    valid_aa = set("ACDEFGHIKLMNPQRSTVWY")
+    invalid = set(clean_seq.upper()) - valid_aa
+    if invalid:
+        raise HTTPException(status_code=422, detail=f"Invalid amino acid characters: {invalid}")
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(
+                "https://api.esmatlas.com/foldSequence/v1/pdb/",
+                content=clean_seq,
+                headers={"Content-Type": "text/plain"},
+            )
+            if resp.status_code != 200:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"ESMFold API returned {resp.status_code}: {resp.text[:200]}"
+                )
+            pdb_text = resp.text
+            return {
+                "pdb_text": pdb_text,
+                "sequence_length": len(clean_seq),
+                "source": "esmfold",
+                "method": "ESMFold v1",
+            }
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="ESMFold prediction timed out (>5 min)")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("ESMFold prediction failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Structure prediction failed: {e}")

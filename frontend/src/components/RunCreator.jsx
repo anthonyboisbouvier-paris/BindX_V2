@@ -1,8 +1,10 @@
-import React, { useState, useRef, lazy, Suspense } from 'react'
+import React, { useState, useRef, useEffect, lazy, Suspense } from 'react'
 import { RUN_TYPES, CALCULATION_SUBTYPES } from '../lib/columns.js'
 import ScoringWeightsEditor from './ScoringWeightsEditor.jsx'
 import Badge from './Badge.jsx'
 import BindXLogo from './BindXLogo.jsx'
+import InfoTip, { TIPS } from './InfoTip.jsx'
+import { v9GpuHealth } from '../api.js'
 
 const ScaffoldAnalyzer = lazy(() => import('./ScaffoldAnalyzer.jsx'))
 
@@ -168,7 +170,11 @@ const DEFAULT_CONFIGS = {
     retrosynthesis: {},
     safety: {},
   },
-  generation:  { mode: 'batch', method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5, qed_min: 0.4, lipinski: true, pains_filter: true, include_docking: true, include_admet: true, include_scoring: true },
+  generation:  { mode: 'batch', method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5, qed_min: 0.4, lipinski: true, pains_filter: true, include_docking: true, include_admet: true, include_scoring: true,
+    // Optimization defaults
+    opt_iterations: 5, opt_variants_per_iteration: 50,
+    weights: { binding_affinity: 0.35, toxicity: 0.25, bioavailability: 0.20, synthesis_ease: 0.20 },
+  },
 }
 
 // Keep legacy keys for ConfigForm compatibility
@@ -185,6 +191,7 @@ const ESTIMATED_TIMES = {
   docking: '~3-5 min', admet: '~30 sec', scoring: '~15 sec',
   enrichment: '~1-2 min', clustering: '~30 sec', off_target: '~1 min',
   confidence: '~15 sec', retrosynthesis: '~1 min', safety: '~30 sec',
+  pharmacophore: '~30 sec', activity_cliffs: '~15 sec',
 }
 
 // ---------------------------------------------------------------------------
@@ -199,27 +206,36 @@ function FormSection({ title, children }) {
   )
 }
 
-function EngineCard({ id, label, badges = [], selected, onClick }) {
+function EngineCard({ id, label, badges = [], selected, onClick, disabled = false, disabledReason = '' }) {
   return (
     <button
-      onClick={() => onClick(id)}
+      onClick={() => !disabled && onClick(id)}
+      disabled={disabled}
+      title={disabled ? disabledReason : ''}
       className={`w-full flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-        selected
-          ? 'border-bx-mint bg-blue-50 ring-2 ring-bx-mint/20'
-          : 'border-gray-100 hover:border-blue-200 hover:shadow-sm'
+        disabled
+          ? 'border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed'
+          : selected
+            ? 'border-bx-mint bg-blue-50 ring-2 ring-bx-mint/20'
+            : 'border-gray-100 hover:border-blue-200 hover:shadow-sm'
       }`}
     >
       <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 border-2 transition-colors ${
-        selected ? 'border-bx-mint bg-bx-surface' : 'border-gray-300'
+        disabled ? 'border-gray-200' : selected ? 'border-bx-mint bg-bx-surface' : 'border-gray-300'
       }`} />
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-semibold ${selected ? 'text-bx-light-text' : 'text-gray-800'}`}>{label}</p>
+        <p className={`text-sm font-semibold ${disabled ? 'text-gray-400' : selected ? 'text-bx-light-text' : 'text-gray-800'}`}>{label}</p>
         <div className="flex flex-wrap gap-1 mt-1">
           {badges.map(b => (
             <span key={b.text} className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${b.color}`}>
               {b.text}
             </span>
           ))}
+          {disabled && disabledReason && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-gray-100 text-gray-400">
+              {disabledReason}
+            </span>
+          )}
         </div>
       </div>
     </button>
@@ -485,6 +501,26 @@ function ImportFilters({ filters, onChange, selectedDBs }) {
 function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
   const set = (key, value) => onChange({ ...config, [key]: value })
 
+  // GPU health state — fetched once on mount
+  const [gpuEngines, setGpuEngines] = useState(null) // null = loading, object = loaded
+  useEffect(() => {
+    v9GpuHealth()
+      .then(data => setGpuEngines(data.engines || {}))
+      .catch(() => setGpuEngines({ gnina_gpu: false, gnina_cpu: true, vina: true, diffdock: false }))
+  }, [])
+  // Auto-switch engine if GPU is unavailable and current selection is gnina_gpu
+  useEffect(() => {
+    if (!gpuEngines || gpuEngines.gnina_gpu) return
+    // Standalone docking run
+    if (runType === 'docking' && config.engine === 'gnina_gpu') {
+      onChange({ ...config, engine: 'gnina_cpu' })
+    }
+    // Calculation sub-type docking
+    if (runType === 'calculation' && config.docking?.engine === 'gnina_gpu') {
+      onChange({ ...config, docking: { ...config.docking, engine: 'gnina_cpu' } })
+    }
+  }, [gpuEngines]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggleArr = (key, item) => {
     const arr = config[key] || []
     onChange({ ...config, [key]: arr.includes(item) ? arr.filter(v => v !== item) : [...arr, item] })
@@ -686,7 +722,10 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
                       className="accent-bx-mint mt-0.5" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className={`text-sm font-semibold ${checked ? 'text-bx-light-text' : 'text-gray-700'}`}>{sub.label}</p>
+                        <p className={`text-sm font-semibold ${checked ? 'text-bx-light-text' : 'text-gray-700'}`}>
+                          {sub.label}
+                          {TIPS[`run_${sub.key}`] && <InfoTip text={TIPS[`run_${sub.key}`]} size="xs" />}
+                        </p>
                         <span className="text-[9px] text-gray-400">{ESTIMATED_TIMES[sub.key]}</span>
                       </div>
                       <p className="text-sm text-gray-500 mt-0.5">{sub.description}</p>
@@ -710,7 +749,9 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
                 <EngineCard id="gnina_gpu" label="GNINA (GPU)"
                   badges={[{ text: 'Fastest', color: 'bg-green-100 text-green-700' }]}
                   selected={(config.docking?.engine || 'gnina_gpu') === 'gnina_gpu'}
-                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
+                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })}
+                  disabled={gpuEngines && !gpuEngines.gnina_gpu}
+                  disabledReason="RunPod not configured" />
                 <EngineCard id="gnina_cpu" label="GNINA (CPU)"
                   badges={[{ text: 'CNN rescoring', color: 'bg-blue-100 text-blue-700' }]}
                   selected={(config.docking?.engine) === 'gnina_cpu'}
@@ -722,7 +763,9 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
                 <EngineCard id="diffdock" label="DiffDock"
                   badges={[{ text: 'Deep Learning', color: 'bg-purple-100 text-purple-700' }, { text: 'Blind docking', color: 'bg-amber-100 text-amber-700' }]}
                   selected={(config.docking?.engine) === 'diffdock'}
-                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
+                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })}
+                  disabled={true}
+                  disabledReason="Coming soon" />
                 <div className="flex items-center gap-4 mt-2">
                   <div>
                     <label className="text-[10px] font-medium text-gray-500">Exhaustiveness</label>
@@ -759,7 +802,9 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
             <div className="space-y-2">
               <EngineCard id="gnina_gpu" label="GNINA (GPU)"
                 badges={[{ text: 'Fastest', color: 'bg-green-100 text-green-700' }, { text: 'CNN rescoring', color: 'bg-blue-100 text-blue-700' }]}
-                selected={config.engine === 'gnina_gpu'} onClick={v => set('engine', v)} />
+                selected={config.engine === 'gnina_gpu'} onClick={v => set('engine', v)}
+                disabled={gpuEngines && !gpuEngines.gnina_gpu}
+                disabledReason="RunPod not configured" />
               <EngineCard id="gnina_cpu" label="GNINA (CPU)"
                 badges={[{ text: 'CNN rescoring', color: 'bg-blue-100 text-blue-700' }]}
                 selected={config.engine === 'gnina_cpu'} onClick={v => set('engine', v)} />
@@ -768,7 +813,9 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
                 selected={config.engine === 'vina'} onClick={v => set('engine', v)} />
               <EngineCard id="diffdock" label="DiffDock"
                 badges={[{ text: 'Deep Learning', color: 'bg-purple-100 text-purple-700' }, { text: 'Blind docking', color: 'bg-amber-100 text-amber-700' }]}
-                selected={config.engine === 'diffdock'} onClick={v => set('engine', v)} />
+                selected={config.engine === 'diffdock'} onClick={v => set('engine', v)}
+                disabled={true}
+                disabledReason="Coming soon" />
             </div>
           </FormSection>
 
@@ -815,6 +862,62 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
                              focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint tabular-nums"
                 />
               </div>
+
+              <div>
+                <div className="flex items-center justify-between text-sm mb-1">
+                  <label className="font-medium text-gray-600">Energy range</label>
+                  <span className="font-bold text-bx-light-text tabular-nums">{config.energy_range ?? 3} kcal/mol</span>
+                </div>
+                <input
+                  type="range" min={1} max={5} step={1}
+                  value={config.energy_range ?? 3}
+                  onChange={e => set('energy_range', Number(e.target.value))}
+                  className="w-full accent-bx-mint"
+                />
+                <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                  {[1, 2, 3, 4, 5].map(v => <span key={v}>{v}</span>)}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between text-sm mb-1">
+                  <label className="font-medium text-gray-600">Box padding</label>
+                  <span className="font-bold text-bx-light-text tabular-nums">{config.autobox_add ?? 4} Å</span>
+                </div>
+                <input
+                  type="range" min={2} max={12} step={2}
+                  value={config.autobox_add ?? 4}
+                  onChange={e => set('autobox_add', Number(e.target.value))}
+                  className="w-full accent-bx-mint"
+                />
+                <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                  {[2, 4, 6, 8, 10, 12].map(v => <span key={v}>{v}</span>)}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5">Padding around pocket. 4Å for known sites, 8-12Å if uncertain.</p>
+              </div>
+
+              {(config.engine === 'gnina_gpu' || config.engine === 'gnina_cpu' || !config.engine) && (
+                <div>
+                  <label className="text-sm font-medium text-gray-600 mb-1 block">CNN scoring mode</label>
+                  <div className="flex gap-2">
+                    {[
+                      { id: 'rescore', label: 'Rescore', desc: 'Fast — same speed as Vina + CNN rescore' },
+                      { id: 'refinement', label: 'Refinement', desc: 'Better poses — CNN guides optimization' },
+                    ].map(mode => (
+                      <button key={mode.id}
+                        onClick={() => set('cnn_scoring', mode.id)}
+                        className={`flex-1 text-left p-2 rounded-lg border text-xs transition-all ${
+                          (config.cnn_scoring || 'rescore') === mode.id
+                            ? 'border-blue-300 bg-blue-50 text-blue-700'
+                            : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                        }`}>
+                        <div className="font-medium">{mode.label}</div>
+                        <div className="text-[10px] opacity-70">{mode.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </FormSection>
 
@@ -947,10 +1050,10 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
 
     case 'enrichment': {
       const allAnalyses = [
-        { value: 'prolif',        label: 'ProLIF Interactions',  desc: 'Protein-ligand interaction fingerprints' },
-        { value: 'clustering',    label: 'Tanimoto Clustering',  desc: 'Group molecules by structural similarity' },
-        { value: 'scaffold',      label: 'Scaffold Analysis',    desc: 'Identify core scaffolds across hits' },
-        { value: 'pharmacophore', label: 'Pharmacophore',        desc: 'Map 3D pharmacophoric features' },
+        { value: 'prolif',        label: 'ProLIF Interactions',  desc: 'Protein-ligand interaction fingerprints', implemented: true },
+        { value: 'clustering',    label: 'Tanimoto Clustering',  desc: 'Group molecules by structural similarity', implemented: true },
+        { value: 'scaffold',      label: 'Scaffold Analysis',    desc: 'Identify core scaffolds across hits', implemented: true },
+        { value: 'pharmacophore', label: 'Pharmacophore',        desc: 'Map 3D pharmacophoric features', implemented: true },
       ]
       return (
         <div className="space-y-2">
@@ -961,20 +1064,30 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
             const checked = (config.analyses || []).includes(a.value)
             return (
               <label key={a.value}
-                className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer border transition-all ${
-                  checked
-                    ? 'border-purple-200 bg-purple-50'
-                    : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
+                  !a.implemented
+                    ? 'border-gray-100 bg-gray-50/50 opacity-60 cursor-not-allowed'
+                    : checked
+                      ? 'border-purple-200 bg-purple-50 cursor-pointer'
+                      : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50 cursor-pointer'
                 }`}
               >
                 <input
                   type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleArr('analyses', a.value)}
+                  checked={checked && a.implemented}
+                  onChange={() => a.implemented && toggleArr('analyses', a.value)}
+                  disabled={!a.implemented}
                   className="accent-purple-600 mt-0.5 flex-shrink-0"
                 />
                 <div>
-                  <p className="text-sm font-semibold text-gray-700">{a.label}</p>
+                  <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    {a.label}
+                    {!a.implemented && (
+                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 border border-amber-200">
+                        Coming Soon
+                      </span>
+                    )}
+                  </p>
                   <p className="text-sm text-gray-400">{a.desc}</p>
                 </div>
               </label>
@@ -986,65 +1099,179 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
 
     case 'generation': {
       const methods = [
-        { value: 'scaffold_hopping', label: 'Scaffold Hopping',  desc: 'Replace core scaffold while keeping substituents' },
-        { value: 'fragment_growing', label: 'Fragment Growing',  desc: 'Extend molecule at reactive positions' },
-        { value: 'de_novo',          label: 'De Novo SMILES',    desc: 'Generate novel structures from scratch' },
+        { value: 'scaffold_hopping',  label: 'Scaffold Hopping',  desc: 'Replace core scaffold while keeping substituents', implemented: true },
+        { value: 'fragment_growing',  label: 'Fragment Growing',  desc: 'Extend molecule at reactive positions (BRICS fragments)', implemented: true },
+        { value: 'de_novo',           label: 'De Novo SMILES',    desc: 'Generate novel structures from scratch (unconstrained)', implemented: true },
+        { value: 'bioisosteric',      label: 'Bioisosteric',      desc: 'Replace functional groups with bioisosteric equivalents', implemented: true },
+        { value: 'fragment_linking',  label: 'Fragment Linking',   desc: 'Recombine BRICS fragments from multiple parents', implemented: true },
+        { value: 'matched_pairs',     label: 'Matched Pairs',     desc: 'Apply curated medicinal chemistry transformations', implemented: true },
       ]
       const mode = config.mode || 'batch'
-      const iters = config.iterations ?? 3
-      const vars = config.variants_per_iteration ?? 5
-      const estTotal = iters * vars * (selectedCount || 1)
+      const isOptimization = mode === 'optimization'
+      const iters = isOptimization ? (config.opt_iterations ?? 5) : (config.iterations ?? 3)
+      const vars = isOptimization ? (config.opt_variants_per_iteration ?? 50) : (config.variants_per_iteration ?? 5)
+      const estTotal = isOptimization ? `~${vars * iters} tested → top 10` : `~${iters * vars * (selectedCount || 1)} molecules`
+
+      // Optimization weights
+      const optWeights = config.weights || { binding_affinity: 0.35, toxicity: 0.25, bioavailability: 0.20, synthesis_ease: 0.20 }
+      const optWeightTotal = Object.values(optWeights).reduce((a, b) => a + b, 0)
+      const optWeightOk = Math.abs(optWeightTotal - 1.0) < 0.02
+
+      const WEIGHT_META = [
+        { key: 'binding_affinity', label: 'Binding Affinity', color: 'accent-blue-500', desc: 'Docking score priority' },
+        { key: 'toxicity', label: 'Low Toxicity', color: 'accent-green-500', desc: 'hERG, hepatotoxicity, AMES' },
+        { key: 'bioavailability', label: 'Bioavailability', color: 'accent-purple-500', desc: 'Oral absorption, BBB' },
+        { key: 'synthesis_ease', label: 'Synthesis Ease', color: 'accent-orange-500', desc: 'Synthetic accessibility' },
+      ]
 
       return (
         <div className="space-y-5">
-          {/* Mode toggle: Batch vs Molecule */}
+          {/* Mode toggle: Batch vs Optimization vs Molecule */}
           <FormSection title="Generation mode">
             <div className="flex gap-2">
               {[
-                { value: 'batch', label: 'Batch', desc: 'Apply to all selected molecules' },
-                { value: 'molecule', label: 'Per-Molecule', desc: 'R-group control on individual molecules' },
+                { value: 'batch', label: 'Batch', desc: 'Apply to all selected molecules', implemented: true },
+                { value: 'optimization', label: 'Optimization', desc: 'Multi-iteration lead optimization', implemented: true },
+                { value: 'molecule', label: 'Per-Molecule', desc: 'R-group control per molecule', implemented: true },
               ].map(m => (
                 <button
                   key={m.value}
-                  onClick={() => set('mode', m.value)}
+                  onClick={() => m.implemented ? set('mode', m.value) : null}
+                  disabled={!m.implemented}
                   className={`flex-1 p-3 rounded-xl border-2 text-left transition-all ${
-                    mode === m.value
-                      ? 'border-pink-400 bg-pink-50'
-                      : 'border-gray-100 hover:border-pink-200'
+                    !m.implemented
+                      ? 'border-gray-100 bg-gray-50/50 opacity-60 cursor-not-allowed'
+                      : mode === m.value
+                        ? 'border-pink-400 bg-pink-50'
+                        : 'border-gray-100 hover:border-pink-200'
                   }`}
                 >
-                  <p className={`text-sm font-semibold ${mode === m.value ? 'text-pink-700' : 'text-gray-700'}`}>{m.label}</p>
+                  <p className={`text-sm font-semibold flex items-center gap-2 ${mode === m.value && m.implemented ? 'text-pink-700' : 'text-gray-700'}`}>
+                    {m.label}
+                    {!m.implemented && (
+                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 border border-amber-200">
+                        Coming Soon
+                      </span>
+                    )}
+                  </p>
                   <p className="text-[10px] text-gray-400 mt-0.5">{m.desc}</p>
                 </button>
               ))}
             </div>
           </FormSection>
 
-          <FormSection title="Method">
-            <div className="space-y-2">
-              {methods.map(m => (
-                <button
-                  key={m.value}
-                  onClick={() => set('method', m.value)}
-                  className={`w-full flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                    config.method === m.value
-                      ? 'border-pink-400 bg-pink-50'
-                      : 'border-gray-100 hover:border-pink-200 hover:bg-pink-50/20'
-                  }`}
-                >
-                  <div className={`w-2.5 h-2.5 rounded-full mt-1.5 border-2 flex-shrink-0 ${
-                    config.method === m.value ? 'border-pink-500 bg-pink-500' : 'border-gray-300'
-                  }`} />
-                  <div>
-                    <p className={`text-sm font-semibold ${config.method === m.value ? 'text-pink-700' : 'text-gray-800'}`}>
-                      {m.label}
-                    </p>
-                    <p className="text-sm text-gray-400 mt-0.5">{m.desc}</p>
+          {/* Optimization mode — weights + parameters */}
+          {isOptimization && (
+            <>
+              <FormSection title="Optimization Objectives">
+                <div className="space-y-3 bg-gradient-to-b from-pink-50/50 to-white rounded-xl border border-pink-100 p-4">
+                  <p className="text-[10px] text-gray-400 mb-2">
+                    Set the relative importance of each objective. The optimizer will balance these goals across iterations.
+                  </p>
+                  {WEIGHT_META.map(wm => (
+                    <div key={wm.key}>
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <div>
+                          <span className="font-medium text-gray-700">{wm.label}</span>
+                          <span className="text-[10px] text-gray-400 ml-2">{wm.desc}</span>
+                        </div>
+                        <span className="font-bold text-pink-700 tabular-nums w-10 text-right">
+                          {(optWeights[wm.key] ?? 0).toFixed(2)}
+                        </span>
+                      </div>
+                      <input
+                        type="range" min={0} max={1} step={0.05}
+                        value={optWeights[wm.key] ?? 0}
+                        onChange={e => set('weights', { ...optWeights, [wm.key]: parseFloat(e.target.value) })}
+                        className={`w-full h-1.5 rounded-full appearance-none cursor-pointer ${wm.color}`}
+                      />
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between pt-2 border-t border-pink-100">
+                    <div className={`flex items-center gap-2 text-sm font-semibold ${optWeightOk ? 'text-green-600' : 'text-red-500'}`}>
+                      <span className={`w-2 h-2 rounded-full ${optWeightOk ? 'bg-green-500' : 'bg-red-500'}`} />
+                      Total: {optWeightTotal.toFixed(2)}
+                      {optWeightOk ? '' : ' — adjust to sum to 1.0'}
+                    </div>
+                    <button
+                      onClick={() => set('weights', { binding_affinity: 0.35, toxicity: 0.25, bioavailability: 0.20, synthesis_ease: 0.20 })}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors font-medium"
+                    >
+                      Reset
+                    </button>
                   </div>
-                </button>
-              ))}
-            </div>
-          </FormSection>
+                </div>
+              </FormSection>
+
+              <FormSection title="Optimization Parameters">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Iterations</p>
+                      <p className="text-[10px] text-gray-400">optimization rounds (more = better but slower)</p>
+                    </div>
+                    <Stepper value={config.opt_iterations ?? 5} min={2} max={20}
+                      onChange={v => set('opt_iterations', v)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Variants per iteration</p>
+                      <p className="text-[10px] text-gray-400">structural modifications per round</p>
+                    </div>
+                    <Stepper value={config.opt_variants_per_iteration ?? 50} min={10} max={100}
+                      onChange={v => set('opt_variants_per_iteration', v)} />
+                  </div>
+                </div>
+              </FormSection>
+
+              <div className="bg-pink-50 border border-pink-100 rounded-xl p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-pink-600">Estimated scope</span>
+                  <span className="text-sm font-bold text-pink-700 tabular-nums">{estTotal}</span>
+                </div>
+                <p className="text-[10px] text-gray-400">
+                  Generates variants, docks, scores with multi-objective function, keeps top 5, iterates. Best molecules stored.
+                </p>
+              </div>
+            </>
+          )}
+
+          {/* Batch mode: Method selection */}
+          {!isOptimization && (
+            <FormSection title="Method">
+              <div className="space-y-2">
+                {methods.map(m => (
+                  <button
+                    key={m.value}
+                    onClick={() => m.implemented ? set('method', m.value) : null}
+                    disabled={!m.implemented}
+                    className={`w-full flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
+                      !m.implemented
+                        ? 'border-gray-100 bg-gray-50/50 opacity-60 cursor-not-allowed'
+                        : config.method === m.value
+                          ? 'border-pink-400 bg-pink-50'
+                          : 'border-gray-100 hover:border-pink-200 hover:bg-pink-50/20'
+                    }`}
+                  >
+                    <div className={`w-2.5 h-2.5 rounded-full mt-1.5 border-2 flex-shrink-0 ${
+                      config.method === m.value && m.implemented ? 'border-pink-500 bg-pink-500' : 'border-gray-300'
+                    }`} />
+                    <div className="flex-1">
+                      <p className={`text-sm font-semibold flex items-center gap-2 ${config.method === m.value && m.implemented ? 'text-pink-700' : 'text-gray-800'}`}>
+                        {m.label}
+                        {!m.implemented && (
+                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 border border-amber-200">
+                            Coming Soon
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-sm text-gray-400 mt-0.5">{m.desc}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </FormSection>
+          )}
 
           {/* Molecule mode: ScaffoldAnalyzer */}
           {mode === 'molecule' && config.molecule_smiles && (
@@ -1065,101 +1292,107 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
           )}
 
           {/* Batch mode: Parameters */}
-          <FormSection title="Generation Parameters">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Iterations</p>
-                  <p className="text-[10px] text-gray-400">rounds of generation</p>
+          {!isOptimization && (
+            <>
+              <FormSection title="Generation Parameters">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Iterations</p>
+                      <p className="text-[10px] text-gray-400">rounds of generation</p>
+                    </div>
+                    <Stepper value={iters} min={1} max={5}
+                      onChange={v => set('iterations', v)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Variants per iteration</p>
+                      <p className="text-[10px] text-gray-400">new molecules per round</p>
+                    </div>
+                    <Stepper value={vars} min={3} max={20}
+                      onChange={v => set('variants_per_iteration', v)} />
+                  </div>
                 </div>
-                <Stepper value={iters} min={1} max={5}
-                  onChange={v => set('iterations', v)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Variants per iteration</p>
-                  <p className="text-[10px] text-gray-400">new molecules per round</p>
-                </div>
-                <Stepper value={vars} min={3} max={20}
-                  onChange={v => set('variants_per_iteration', v)} />
-              </div>
-            </div>
-          </FormSection>
+              </FormSection>
 
-          {/* Filters */}
-          <FormSection title="Quality filters">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Min QED</p>
-                  <p className="text-[10px] text-gray-400">drug-likeness threshold (0-1)</p>
+              {/* Filters */}
+              <FormSection title="Quality filters">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Min QED</p>
+                      <p className="text-[10px] text-gray-400">drug-likeness threshold (0-1)</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min="0" max="0.9" step="0.05"
+                        value={config.qed_min ?? 0.4}
+                        onChange={e => set('qed_min', parseFloat(e.target.value))}
+                        className="w-24 h-1.5 accent-pink-500"
+                      />
+                      <span className="text-sm font-mono font-semibold text-gray-700 w-8 text-right">
+                        {(config.qed_min ?? 0.4).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Lipinski Rule of 5</p>
+                      <p className="text-[10px] text-gray-400">enforce drug-like properties</p>
+                    </div>
+                    <input type="checkbox" checked={config.lipinski !== false}
+                      onChange={() => set('lipinski', !config.lipinski)}
+                      className="accent-pink-500 w-4 h-4" />
+                  </label>
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">PAINS filter</p>
+                      <p className="text-[10px] text-gray-400">reject pan-assay interference compounds</p>
+                    </div>
+                    <input type="checkbox" checked={config.pains_filter !== false}
+                      onChange={() => set('pains_filter', !config.pains_filter)}
+                      className="accent-pink-500 w-4 h-4" />
+                  </label>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range" min="0" max="0.9" step="0.05"
-                    value={config.qed_min ?? 0.4}
-                    onChange={e => set('qed_min', parseFloat(e.target.value))}
-                    className="w-24 h-1.5 accent-pink-500"
-                  />
-                  <span className="text-sm font-mono font-semibold text-gray-700 w-8 text-right">
-                    {(config.qed_min ?? 0.4).toFixed(2)}
-                  </span>
-                </div>
+              </FormSection>
+
+              {/* Estimate preview */}
+              <div className="bg-pink-50 border border-pink-100 rounded-xl p-3 flex items-center justify-between">
+                <span className="text-sm text-pink-600">Estimated output</span>
+                <span className="text-sm font-bold text-pink-700 tabular-nums">{estTotal}</span>
               </div>
-              <label className="flex items-center justify-between cursor-pointer">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Lipinski Rule of 5</p>
-                  <p className="text-[10px] text-gray-400">enforce drug-like properties</p>
-                </div>
-                <input type="checkbox" checked={config.lipinski !== false}
-                  onChange={() => set('lipinski', !config.lipinski)}
-                  className="accent-pink-500 w-4 h-4" />
-              </label>
-              <label className="flex items-center justify-between cursor-pointer">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">PAINS filter</p>
-                  <p className="text-[10px] text-gray-400">reject pan-assay interference compounds</p>
-                </div>
-                <input type="checkbox" checked={config.pains_filter !== false}
-                  onChange={() => set('pains_filter', !config.pains_filter)}
-                  className="accent-pink-500 w-4 h-4" />
-              </label>
-            </div>
-          </FormSection>
 
-          {/* Estimate preview */}
-          <div className="bg-pink-50 border border-pink-100 rounded-xl p-3 flex items-center justify-between">
-            <span className="text-sm text-pink-600">Estimated output</span>
-            <span className="text-sm font-bold text-pink-700 tabular-nums">
-              ~{estTotal} molecules
-            </span>
-          </div>
-
-          <FormSection title="Include analyses">
-            <div className="flex flex-wrap gap-2">
-              {[
-                { key: 'include_docking', label: 'Docking' },
-                { key: 'include_admet',   label: 'ADMET' },
-                { key: 'include_scoring', label: 'Scoring' },
-              ].map(item => (
-                <label key={item.key}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border cursor-pointer text-sm font-semibold transition-all ${
-                    config[item.key]
-                      ? 'border-pink-300 bg-pink-50 text-pink-700'
-                      : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={!!config[item.key]}
-                    onChange={() => set(item.key, !config[item.key])}
-                    className="accent-pink-500"
-                  />
-                  {item.label}
-                </label>
-              ))}
-            </div>
-          </FormSection>
+              <FormSection title="Post-generation analyses">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { key: 'include_docking', label: 'Docking' },
+                    { key: 'include_admet',   label: 'ADMET' },
+                    { key: 'include_scoring', label: 'Scoring' },
+                  ].map(item => {
+                    const checked = config[item.key] !== false
+                    return (
+                      <label key={item.key}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold cursor-pointer transition-all ${
+                          checked
+                            ? 'border-pink-300 bg-pink-50 text-pink-700'
+                            : 'border-gray-200 text-gray-400 hover:border-pink-200'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => set(item.key, !checked)}
+                          className="accent-pink-500"
+                        />
+                        {item.label}
+                      </label>
+                    )
+                  })}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">Auto-run docking/ADMET/scoring on generated molecules</p>
+              </FormSection>
+            </>
+          )}
         </div>
       )
     }
@@ -1289,8 +1522,16 @@ function ConfirmationView({ runType, config, selectedCount }) {
     configLines.push(`Analyses: ${a.join(', ') || 'none selected'}`)
   }
   if (runType === 'generation') {
-    configLines.push(`Method: ${config.method}`)
-    configLines.push(`${config.iterations ?? 3} iterations x ${config.variants_per_iteration ?? 5} variants = ~${(config.iterations ?? 3) * (config.variants_per_iteration ?? 5)} molecules`)
+    if (config.mode === 'optimization') {
+      configLines.push('Mode: Lead Optimization (multi-iteration)')
+      const w = config.weights || {}
+      const wLabels = Object.entries(w).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${(v * 100).toFixed(0)}%`).join(', ')
+      configLines.push(`Weights: ${wLabels}`)
+      configLines.push(`${config.opt_iterations ?? 5} iterations x ${config.opt_variants_per_iteration ?? 50} variants/iter`)
+    } else {
+      configLines.push(`Method: ${config.method}`)
+      configLines.push(`${config.iterations ?? 3} iterations x ${config.variants_per_iteration ?? 5} variants = ~${(config.iterations ?? 3) * (config.variants_per_iteration ?? 5)} molecules`)
+    }
   }
   if (runType === 'clustering') {
     configLines.push(`Method: ${config.method}, cutoff: ${Number(config.cutoff ?? 0.5).toFixed(2)}`)
@@ -1406,8 +1647,18 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
         payload.input_molecule_ids = [...selectedMoleculeIds]
       }
     }
-    if (selectedType === 'generation' && selectedMoleculeIds?.size > 0) {
-      payload.input_molecule_ids = [...selectedMoleculeIds]
+    if (selectedType === 'generation') {
+      if (selectedMoleculeIds?.size > 0) {
+        payload.input_molecule_ids = [...selectedMoleculeIds]
+      }
+      // Map optimization-specific config keys for backend
+      if (config.mode === 'optimization') {
+        payload.config = {
+          ...config,
+          iterations: config.opt_iterations ?? 5,
+          variants_per_iteration: config.opt_variants_per_iteration ?? 50,
+        }
+      }
     }
     if (onSubmit) onSubmit(payload)
     handleClose()

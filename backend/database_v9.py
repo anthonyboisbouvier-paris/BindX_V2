@@ -36,6 +36,7 @@ engine_v9 = create_async_engine(
     DATABASE_V9_URL,
     pool_pre_ping=True,
     pool_size=5,
+    max_overflow=5,
     pool_recycle=300,
     echo=False,
 ) if DATABASE_V9_URL else None

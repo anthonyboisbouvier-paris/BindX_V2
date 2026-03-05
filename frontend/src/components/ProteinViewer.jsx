@@ -353,7 +353,7 @@ function ZoneCard({ zone, isDarkBg, isEditing, onUpdate, onToggleVisibility, onT
 }
 
 // Props: pdbUrl, pdbData, selectedPocket, uniprotFeatures, height, onDiagnostic, ligandSmiles
-export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480, onDiagnostic, ligandSmiles }) {
+export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480, onDiagnostic, ligandSmiles, dockedMolblock }) {
   const wrapperRef = useRef(null)
   const containerRef = useRef(null)
   const viewerRef = useRef(null)
@@ -363,21 +363,30 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
   const [error, setError] = useState(null)
   const [ready, setReady] = useState(false)
   const [style, setStyle] = useState('cartoon')
-  const [colorMode, setColorMode] = useState('ss')
-  const [customColor, setCustomColor] = useState('#4a9eff')
-  const [bgColor, setBgColor] = useState('#0f1923')
+  const [colorMode, setColorMode] = useState('custom')
+  const [customColor, setCustomColor] = useState('#00e6a0')
+  const [bgColor] = useState('#0f1923')
+  const [showPocket, setShowPocket] = useState(true)
   const [pocketColor, setPocketColor] = useState('#f59e0b')
-  const [ligandStyle, setLigandStyle] = useState('ball+stick') // 'ball+stick' | 'stick' | 'sphere' | 'line' | 'off'
+  const [ligandStyle, setLigandStyle] = useState('off') // 'ball+stick' | 'stick' | 'sphere' | 'line' | 'off'
+  const [showDockedLigand, setShowDockedLigand] = useState(true) // show docked pose when available
+  const [showRefLigand, setShowRefLigand] = useState(true) // show co-crystallized reference ligand
   const [showProtein, setShowProtein] = useState(true)
   const [pocketRadius, setPocketRadius] = useState(5)
-  const [pocketOpacity, setPocketOpacity] = useState(0.75)
-  const [pocketStyle, setPocketStyle] = useState('surface')
-  const [spinning, setSpinning] = useState(true)
+  const [pocketOpacity, setPocketOpacity] = useState(0.70)
+  const [pocketStyle, setPocketStyle] = useState('sphere+stick')
+  const [spinning, setSpinning] = useState(false)
   const [showDomains, setShowDomains] = useState(false)
   const [showActiveSites, setShowActiveSites] = useState(true)
   const [showBindingSites, setShowBindingSites] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showColorPanel, setShowColorPanel] = useState(false)
+  const [showPocketPanel, setShowPocketPanel] = useState(false)
+  const colorPanelRef = useRef(null)
+  const colorBtnRef = useRef(null)
+  const pocketPanelRef = useRef(null)
+  const pocketBtnRef = useRef(null)
 
   // Expert tools state
   const [labelMode, setLabelMode] = useState(false) // click → show residue label
@@ -431,6 +440,21 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     return () => document.removeEventListener('mousedown', handler)
   }, [showSettings])
 
+  // Click-outside handler for color panel
+  useEffect(() => {
+    if (!showColorPanel) return
+    const handler = (e) => {
+      if (
+        colorPanelRef.current && !colorPanelRef.current.contains(e.target) &&
+        colorBtnRef.current && !colorBtnRef.current.contains(e.target)
+      ) {
+        setShowColorPanel(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showColorPanel])
+
   // Click-outside handler for zones panel
   useEffect(() => {
     if (!showZonesPanel) return
@@ -445,6 +469,21 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showZonesPanel])
+
+  // Click-outside handler for pocket panel
+  useEffect(() => {
+    if (!showPocketPanel) return
+    const handler = (e) => {
+      if (
+        pocketPanelRef.current && !pocketPanelRef.current.contains(e.target) &&
+        pocketBtnRef.current && !pocketBtnRef.current.contains(e.target)
+      ) {
+        setShowPocketPanel(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showPocketPanel])
 
   // Keep refs in sync for click handler
   useEffect(() => { zoneEditModeRef.current = zoneEditMode }, [zoneEditMode])
@@ -795,22 +834,47 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       if (ligAtoms.length === 0) diag.warnings.push('No ligand (HETATM) atoms found in this structure.')
     } catch (_) {}
 
-    // Step 2: Re-apply ligand style only for non-solvent HETATM (using setStyle, not addStyle)
-    if (effectiveLigandStyle !== 'off') {
+    // Step 2: Co-crystallized (reference) ligand — shown as default colorscheme
+    // When docked ligand is present, make reference ligand gray/transparent for comparison
+    const hasDockedLigand = dockedMolblock && showDockedLigand
+    if (effectiveLigandStyle !== 'off' && showRefLigand) {
       const ligSel = { hetflag: true, not: { resn: [...SOLVENT_RESNAMES] }, model: protein }
+      const refOpacity = hasDockedLigand ? 0.4 : 1.0
+      const refColor = hasDockedLigand ? '#9ca3af' : undefined // gray when comparing
       const ligSpec = (() => {
         switch (effectiveLigandStyle) {
-          case 'stick':   return { stick: { colorscheme: 'default', radius: 0.15, opacity: 1.0 } }
-          case 'sphere':  return { sphere: { colorscheme: 'default', scale: 1.0, opacity: 0.9 } }
-          case 'line':    return { line: { colorscheme: 'default', linewidth: 2 } }
-          default:        return { stick: { colorscheme: 'default', radius: 0.2, opacity: 1.0 }, sphere: { colorscheme: 'default', radius: 0.4, opacity: 0.8 } }
+          case 'stick':   return { stick: { color: refColor, colorscheme: refColor ? undefined : 'default', radius: 0.15, opacity: refOpacity } }
+          case 'sphere':  return { sphere: { color: refColor, colorscheme: refColor ? undefined : 'default', scale: 1.0, opacity: refOpacity * 0.9 } }
+          case 'line':    return { line: { color: refColor, colorscheme: refColor ? undefined : 'default', linewidth: 2 } }
+          case 'cross':   return { cross: { color: refColor, colorscheme: refColor ? undefined : 'default', linewidth: 2, opacity: refOpacity } }
+          case 'surface': return { stick: { color: refColor, colorscheme: refColor ? undefined : 'default', radius: 0.12, opacity: refOpacity * 0.5 } }
+          default:        return { stick: { color: refColor, colorscheme: refColor ? undefined : 'default', radius: 0.2, opacity: refOpacity }, sphere: { color: refColor, colorscheme: refColor ? undefined : 'default', radius: 0.4, opacity: refOpacity * 0.8 } }
         }
       })()
       viewer.setStyle(ligSel, ligSpec)
+      // Add translucent surface for ligand in surface mode
+      if (effectiveLigandStyle === 'surface') {
+        doAddSurface({ opacity: refOpacity * 0.7, color: refColor || '#06d6a0' }, ligSel)
+      }
+    }
+
+    // Step 3: Docked ligand — render from molblock as a separate model
+    if (dockedMolblock && showDockedLigand) {
+      try {
+        const format = dockedMolblock.includes('$$$$') || dockedMolblock.includes('V2000') || dockedMolblock.includes('V3000') ? 'sdf' : 'pdb'
+        const dockedModel = viewer.addModel(dockedMolblock, format)
+        viewer.setStyle({ model: dockedModel }, {
+          stick: { color: '#06d6a0', radius: 0.2, opacity: 1.0 },
+          sphere: { color: '#06d6a0', radius: 0.4, opacity: 0.9 },
+        })
+        diag.dockedLigandRendered = true
+      } catch (err) {
+        diag.warnings.push('Failed to render docked ligand: ' + err.message)
+      }
     }
 
     // Pocket overlay
-    if (selectedPocket) {
+    if (selectedPocket && showPocket) {
       const residues = selectedPocket.residues || []
       diag.pocketResiduesRaw = residues.length
       diag.pocketRenderMode = pocketStyle
@@ -1067,7 +1131,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     // Report diagnostic to parent
     if (onDiagnosticRef.current) onDiagnosticRef.current(diag)
 
-  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, ligandStyle, showProtein, customZones])
+  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, showPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, ligandStyle, showProtein, customZones, dockedMolblock, showDockedLigand, showRefLigand])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -1251,35 +1315,6 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
           ))}
         </div>
 
-        <div className="w-px h-5 bg-gray-600/40" />
-
-        <select
-          value={colorMode}
-          onChange={e => setColorMode(e.target.value)}
-          className={`text-[11px] border rounded-md px-1.5 py-1 max-w-[130px] ${
-            isDarkBg
-              ? 'bg-[#0f1923] text-gray-300 border-gray-600'
-              : 'bg-white text-gray-700 border-gray-300'
-          }`}
-        >
-          {COLOR_GROUPS.map(group => (
-            <optgroup key={group.label} label={group.label}>
-              {group.options.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-
-        {colorMode === 'custom' && (
-          <input
-            type="color"
-            value={customColor}
-            onChange={e => setCustomColor(e.target.value)}
-            className="w-5 h-5 rounded border-0 cursor-pointer"
-            title="Pick protein color"
-          />
-        )}
       </div>
 
       {/* Toolbar — Row 2: Tool icons */}
@@ -1350,7 +1385,64 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             </svg>
           </button>
 
-          {/* Settings gear */}
+          {/* Pocket config (jean pocket icon) */}
+          {selectedPocket && (
+            <div className="relative">
+              <button ref={pocketBtnRef} onClick={() => setShowPocketPanel(v => !v)} title="Pocket settings"
+                className={`p-1.5 rounded-md transition-colors ${showPocketPanel ? 'bg-amber-500 text-white' : isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 6h16v3a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" />
+                  <path d="M4 9v9a2 2 0 002 2h12a2 2 0 002-2V9" />
+                  <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                </svg>
+              </button>
+              {showPocketPanel && (
+                <div ref={pocketPanelRef} className={`absolute right-0 top-full mt-1 z-30 rounded-lg shadow-lg border p-3 min-w-[240px] space-y-3 ${
+                  isDarkBg ? 'bg-[#1a2d42] border-gray-600' : 'bg-white border-gray-200'
+                }`}>
+                  <p className={`text-xs font-semibold mb-1 ${isDarkBg ? 'text-gray-300' : 'text-gray-600'}`}>Pocket Display</p>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    {POCKET_COLORS.map(pc => (
+                      <button key={pc.value} onClick={() => setPocketColor(pc.value)} title={pc.label}
+                        className={`w-5 h-5 rounded-full border-2 transition-all ${pocketColor === pc.value ? 'border-blue-500 scale-110' : 'border-gray-500/50 hover:border-gray-400'}`}
+                        style={{ backgroundColor: pc.value }} />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1 mb-2">
+                    {[
+                      { v: 'sphere+stick', l: 'Sphere' },
+                      { v: 'surface', l: 'Surface' },
+                      { v: 'stick', l: 'Ball+Stick' },
+                    ].map(ps => (
+                      <button key={ps.v} onClick={() => setPocketStyle(ps.v)}
+                        className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                          pocketStyle === ps.v ? 'bg-amber-500 text-white'
+                            : isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                        }`}>
+                        {ps.l}
+                      </button>
+                    ))}
+                  </div>
+                  {pocketStyle === 'sphere+stick' && (
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className={`text-xs w-12 ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>Radius</span>
+                      <input type="range" min="2" max="12" step="0.5" value={pocketRadius}
+                        onChange={e => setPocketRadius(parseFloat(e.target.value))} className="flex-1 h-1 accent-amber-500" />
+                      <span className={`text-xs w-6 text-right ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>{pocketRadius}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs w-12 ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>Opacity</span>
+                    <input type="range" min="0.05" max="0.8" step="0.05" value={pocketOpacity}
+                      onChange={e => setPocketOpacity(parseFloat(e.target.value))} className="flex-1 h-1 accent-amber-500" />
+                    <span className={`text-xs w-6 text-right ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>{Math.round(pocketOpacity * 100)}%</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Settings (clear labels/distances/selection) */}
           <div className="relative">
             <button ref={settingsBtnRef} onClick={() => setShowSettings(v => !v)} title="Viewer settings"
               className={`p-1.5 rounded-md transition-colors ${showSettings ? 'bg-blue-600 text-white' : isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
@@ -1360,64 +1452,10 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
               </svg>
             </button>
             {showSettings && (
-              <div ref={settingsRef} className={`absolute right-0 top-full mt-1 z-30 rounded-lg shadow-lg border p-3 min-w-[240px] space-y-3 ${
+              <div ref={settingsRef} className={`absolute right-0 top-full mt-1 z-30 rounded-lg shadow-lg border p-3 min-w-[200px] space-y-2 ${
                 isDarkBg ? 'bg-[#1a2d42] border-gray-600' : 'bg-white border-gray-200'
               }`}>
-                {/* Background */}
-                <div>
-                  <p className={`text-xs font-semibold mb-1.5 ${isDarkBg ? 'text-gray-300' : 'text-gray-600'}`}>Background</p>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {BG_PRESETS.map(bg => (
-                      <button key={bg.value} onClick={() => setBgColor(bg.value)} title={bg.label}
-                        className={`w-6 h-6 rounded-full border-2 transition-all ${bgColor === bg.value ? 'border-blue-500 scale-110' : 'border-gray-400 hover:border-gray-300'}`}
-                        style={{ backgroundColor: bg.value }} />
-                    ))}
-                  </div>
-                </div>
-                {/* Pocket options */}
-                {selectedPocket && (
-                  <div className={`pt-2 border-t ${isDarkBg ? 'border-gray-600' : 'border-gray-200'}`}>
-                    <p className={`text-xs font-semibold mb-1.5 ${isDarkBg ? 'text-gray-300' : 'text-gray-600'}`}>Pocket Display</p>
-                    <div className="flex items-center gap-1.5 mb-2">
-                      {POCKET_COLORS.map(pc => (
-                        <button key={pc.value} onClick={() => setPocketColor(pc.value)} title={pc.label}
-                          className={`w-5 h-5 rounded-full border-2 transition-all ${pocketColor === pc.value ? 'border-blue-500 scale-110' : 'border-gray-500/50 hover:border-gray-400'}`}
-                          style={{ backgroundColor: pc.value }} />
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1 mb-2">
-                      {[
-                        { v: 'sphere+stick', l: 'Sphere' },
-                        { v: 'surface', l: 'Surface' },
-                        { v: 'stick', l: 'Ball+Stick' },
-                      ].map(ps => (
-                        <button key={ps.v} onClick={() => setPocketStyle(ps.v)}
-                          className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                            pocketStyle === ps.v ? 'bg-amber-500 text-white'
-                              : isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                          }`}>
-                          {ps.l}
-                        </button>
-                      ))}
-                    </div>
-                    {pocketStyle === 'sphere+stick' && (
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className={`text-xs w-12 ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>Radius</span>
-                        <input type="range" min="2" max="12" step="0.5" value={pocketRadius}
-                          onChange={e => setPocketRadius(parseFloat(e.target.value))} className="flex-1 h-1 accent-amber-500" />
-                        <span className={`text-xs w-6 text-right ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>{pocketRadius}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs w-12 ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>Opacity</span>
-                      <input type="range" min="0.05" max="0.8" step="0.05" value={pocketOpacity}
-                        onChange={e => setPocketOpacity(parseFloat(e.target.value))} className="flex-1 h-1 accent-amber-500" />
-                      <span className={`text-xs w-6 text-right ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>{Math.round(pocketOpacity * 100)}%</span>
-                    </div>
-                  </div>
-                )}
-                {/* Clear buttons */}
-                <div className={`pt-2 border-t flex flex-wrap gap-1.5 ${isDarkBg ? 'border-gray-600' : 'border-gray-200'}`}>
+                <div className="flex flex-wrap gap-1.5">
                   <button onClick={clearLabels}
                     className={`px-2 py-0.5 text-xs rounded border transition-colors ${isDarkBg ? 'border-gray-600 text-gray-400 hover:text-white hover:bg-white/10' : 'border-gray-300 text-gray-500 hover:bg-gray-100'}`}>
                     Clear labels
@@ -1443,6 +1481,54 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
             </svg>
           </button>
+
+          {/* Spacer to push color + fullscreen to right */}
+          <div className="flex-1" />
+
+          {/* Color scheme (palette icon → popup) */}
+          <div className="relative">
+            <button ref={colorBtnRef} onClick={() => setShowColorPanel(v => !v)} title="Protein color"
+              className={`p-1.5 rounded-md transition-colors ${showColorPanel ? 'bg-blue-600 text-white' : isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+              </svg>
+            </button>
+            {showColorPanel && (
+              <div ref={colorPanelRef} className={`absolute right-0 top-full mt-1 z-30 rounded-lg shadow-lg border p-3 min-w-[200px] space-y-2 ${
+                isDarkBg ? 'bg-[#1a2d42] border-gray-600' : 'bg-white border-gray-200'
+              }`}>
+                <p className={`text-xs font-semibold mb-1 ${isDarkBg ? 'text-gray-300' : 'text-gray-600'}`}>Protein Color</p>
+                {COLOR_GROUPS.map(group => (
+                  <div key={group.label}>
+                    <p className={`text-[10px] uppercase tracking-wider mb-1 ${isDarkBg ? 'text-gray-500' : 'text-gray-400'}`}>{group.label}</p>
+                    <div className="flex flex-wrap gap-1 mb-1.5">
+                      {group.options.map(opt => (
+                        <button key={opt.value} onClick={() => { setColorMode(opt.value); if (opt.value !== 'custom') setShowColorPanel(false) }}
+                          className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                            colorMode === opt.value ? 'bg-blue-600 text-white'
+                              : isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                          }`}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {colorMode === 'custom' && (
+                  <div className="flex items-center gap-2 pt-1 border-t border-gray-600/30">
+                    <span className={`text-xs ${isDarkBg ? 'text-gray-400' : 'text-gray-500'}`}>Color</span>
+                    <input
+                      type="color"
+                      value={customColor}
+                      onChange={e => setCustomColor(e.target.value)}
+                      className="w-6 h-6 rounded border-0 cursor-pointer"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <button onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
             className={`p-1.5 rounded-md transition-colors ${isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
@@ -1600,9 +1686,14 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
           <span className="w-2.5 h-2.5 rounded-full bg-blue-400" style={{ opacity: showProtein ? 1 : 0.3 }} /> Protein
         </button>
         {selectedPocket && (
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pocketColor }} /> Pocket
-          </span>
+          <button
+            onClick={() => setShowPocket(v => !v)}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
+              showPocket ? 'bg-amber-900/30 border-amber-500/50 text-amber-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
+            }`}
+          >
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pocketColor, opacity: showPocket ? 1 : 0.3 }} /> Pocket
+          </button>
         )}
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" style={{ opacity: ligandStyle !== 'off' ? 1 : 0.3 }} />
@@ -1619,10 +1710,32 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             <option value="ball+stick" className="bg-gray-800 text-gray-300">Ligand: Ball+Stick</option>
             <option value="stick" className="bg-gray-800 text-gray-300">Ligand: Stick</option>
             <option value="sphere" className="bg-gray-800 text-gray-300">Ligand: Sphere</option>
+            <option value="surface" className="bg-gray-800 text-gray-300">Ligand: Surface</option>
+            <option value="cross" className="bg-gray-800 text-gray-300">Ligand: Cross</option>
             <option value="line" className="bg-gray-800 text-gray-300">Ligand: Line</option>
             <option value="ligand-only" className="bg-gray-800 text-gray-300">Ligand Only (no protein)</option>
           </select>
         </span>
+        {dockedMolblock && (
+          <button
+            onClick={() => setShowDockedLigand(v => !v)}
+            className={`flex items-center gap-1.5 text-xs transition-colors ${showDockedLigand ? 'text-emerald-300' : (isDarkBg ? 'text-gray-500' : 'text-gray-400')}`}
+            title="Toggle docked ligand pose"
+          >
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#06d6a0', opacity: showDockedLigand ? 1 : 0.3 }} />
+            Docked
+          </button>
+        )}
+        {dockedMolblock && (
+          <button
+            onClick={() => setShowRefLigand(v => !v)}
+            className={`flex items-center gap-1.5 text-xs transition-colors ${showRefLigand ? (isDarkBg ? 'text-gray-300' : 'text-gray-600') : (isDarkBg ? 'text-gray-600' : 'text-gray-400')}`}
+            title="Toggle reference (co-crystallized) ligand"
+          >
+            <span className="w-2.5 h-2.5 rounded-full bg-gray-400" style={{ opacity: showRefLigand ? 1 : 0.3 }} />
+            Reference
+          </button>
+        )}
         {selectedResidues.length > 0 && (
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" /> Selected
@@ -1667,13 +1780,6 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             <span style={{ color: zone.color }}>{zone.name}</span>
           </span>
         ))}
-        <span className={`ml-auto hidden sm:inline ${isDarkBg ? 'text-gray-500' : 'text-gray-400'}`}>
-          {zoneEditMode
-            ? 'Click residues to add/remove from zone'
-            : labelMode || distanceMode
-              ? 'Click atoms to interact'
-              : 'Drag: rotate | Scroll: zoom | Right-click: pan | Click: select residue'}
-        </span>
       </div>
 
     </div>

@@ -17,6 +17,7 @@ import {
   v9CreateCampaign,
   v9UpdateCampaign,
   v9CreatePhase,
+  v9DeletePhase,
   v9FreezePhase,
   v9UnfreezePhase,
   v9ListRuns,
@@ -130,6 +131,14 @@ const useWorkspaceStore = create((set, get) => ({
     const result = await v9UnfreezePhase(phaseId)
     await get().refreshProjects()
     return result
+  },
+
+  deletePhase: async (phaseId) => {
+    if (!get()._isAuthenticated) return
+    await v9DeletePhase(phaseId)
+    // Clear current phase immediately to stop polling on deleted phase
+    set({ currentPhaseId: null, moleculePages: [], currentPhaseRuns: [] })
+    await get().refreshProjects()
   },
 
   // ===== Navigation =====

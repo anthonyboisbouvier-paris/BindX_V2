@@ -52,6 +52,11 @@ def dock_batch_gpu(
     size: list[float],
     exhaustiveness: int = 8,
     num_modes: int = 9,
+    energy_range: float = 3.0,
+    cnn_scoring: str = "rescore",
+    seed: int = 0,
+    autobox_add: float = 4.0,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """Send a batch of ligands to RunPod GPU for GNINA docking.
 
@@ -66,9 +71,17 @@ def dock_batch_gpu(
     size : list[float]
         [sx, sy, sz] dimensions of the search box.
     exhaustiveness : int
-        GNINA search exhaustiveness.
+        GNINA search exhaustiveness (8-256).
     num_modes : int
         Number of docking poses per molecule.
+    energy_range : float
+        Max energy difference from best pose (kcal/mol).
+    cnn_scoring : str
+        CNN scoring mode: "rescore" (fast) or "refinement" (better poses).
+    seed : int
+        Random seed for reproducibility (0 = random).
+    autobox_add : float
+        Padding around pocket center (Angstroms).
 
     Returns
     -------
@@ -97,10 +110,10 @@ def dock_batch_gpu(
             "size_z": size[2],
             "exhaustiveness": exhaustiveness,
             "num_modes": num_modes,
-            "cnn_scoring": "rescore",
-            # Use default CNN ensemble (5 models) — do NOT specify a single
-            # model. Matches CPU config per McNutt et al. 2021.
-            "seed": 0,
+            "energy_range": energy_range,
+            "cnn_scoring": cnn_scoring,
+            "autobox_add": autobox_add,
+            "seed": seed,
             "min_rmsd_filter": 1.0,
         }
     }
@@ -124,12 +137,13 @@ def dock_batch_gpu(
         status_url = f"https://api.runpod.ai/v2/{endpoint_id}/status/{job_id}"
         start_time = time.time()
         cold_start_warned = False
+        in_progress_logged = False
 
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout:
                 logger.warning("RunPod job %s timed out after %ds", job_id, timeout)
-                return {"error": "timeout", "results": []}
+                return {"error": f"timeout ({timeout}s)", "results": []}
 
             time.sleep(5)
 
@@ -137,6 +151,9 @@ def dock_batch_gpu(
                 poll = requests.get(status_url, headers=headers, timeout=15)
                 poll.raise_for_status()
                 status_data = poll.json()
+            except requests.exceptions.ConnectionError:
+                logger.warning("RunPod poll: connection error (retrying)")
+                continue
             except Exception as poll_err:
                 logger.warning("RunPod poll error: %s", poll_err)
                 continue
@@ -161,12 +178,25 @@ def dock_batch_gpu(
             if status == "FAILED":
                 error_msg = status_data.get("error", "unknown error")
                 logger.error("RunPod job %s FAILED: %s", job_id, error_msg)
-                return {"error": f"handler_failed: {error_msg}", "results": []}
+                return {"error": f"GPU handler error: {error_msg}", "results": []}
 
-            # Cold start warning
-            if status == "IN_QUEUE" and elapsed > 30 and not cold_start_warned:
+            # Cold start: GPU is warming up (typically 15-60s)
+            if status == "IN_QUEUE" and elapsed > 15 and not cold_start_warned:
                 logger.info("RunPod job %s: GPU warming up (cold start)...", job_id)
                 cold_start_warned = True
+                if progress_callback:
+                    progress_callback(42, "GPU warming up (cold start)...")
+
+            # In progress: GPU is running
+            if status == "IN_PROGRESS" and not in_progress_logged:
+                logger.info("RunPod job %s: GPU docking in progress...", job_id)
+                in_progress_logged = True
+                if progress_callback:
+                    progress_callback(55, "GPU docking in progress...")
+            elif status == "IN_PROGRESS" and progress_callback:
+                # Update progress based on elapsed time (estimate)
+                pct = min(85, 55 + int(elapsed / 10))
+                progress_callback(pct, f"GPU docking... ({int(elapsed)}s)")
 
     except requests.exceptions.RequestException as e:
         logger.error("RunPod network error: %s", e)
@@ -188,6 +218,11 @@ def dock_all_runpod_batch(
     progress_callback: Optional[Callable[[int, str], None]] = None,
     size: tuple[float, float, float] = (20.0, 20.0, 20.0),
     exhaustiveness: int = 8,
+    num_modes: int = 9,
+    energy_range: float = 3.0,
+    cnn_scoring: str = "rescore",
+    seed: int = 0,
+    autobox_add: float = 4.0,
 ) -> list[dict]:
     """Dock all ligands via RunPod GPU in batch mode.
 
@@ -316,11 +351,20 @@ def dock_all_runpod_batch(
             center=list(center),
             size=list(size),
             exhaustiveness=exhaustiveness,
+            num_modes=num_modes,
+            energy_range=energy_range,
+            cnn_scoring=cnn_scoring,
+            seed=seed,
+            autobox_add=autobox_add,
+            progress_callback=progress_callback,
         )
 
         if gpu_result.get("error"):
-            logger.error("GPU batch %d failed: %s", batch_idx + 1, gpu_result["error"])
-            return []  # Signal failure so caller falls back to CPU
+            error = gpu_result["error"]
+            logger.error("GPU batch %d failed: %s", batch_idx + 1, error)
+            if progress_callback:
+                progress_callback(0, f"GPU error: {error}")
+            raise RuntimeError(f"GPU docking batch {batch_idx + 1} failed: {error}")
 
         # --- 4. Parse results ---
         batch_results_raw = gpu_result.get("results", [])
@@ -378,14 +422,41 @@ def dock_all_runpod_batch(
                 "pose_pdbqt_path": None,  # GPU doesn't return local file paths
             })
 
-    # --- 5. Save docked SDF if available ---
-    if gpu_result.get("docked_sdf"):
+    # --- 5. Extract per-molecule pose molblocks from docked SDF ---
+    docked_sdf_content = gpu_result.get("docked_sdf", "")
+    if docked_sdf_content:
         try:
+            # Save full docked SDF to disk
             sdf_path = work_dir / "docked_gpu.sdf"
-            sdf_path.write_text(gpu_result["docked_sdf"])
+            sdf_path.write_text(docked_sdf_content)
             logger.info("GPU: saved docked SDF to %s", sdf_path)
+
+            # Parse into individual molecule entries and group by name
+            # GNINA output: multiple poses per molecule, best pose first
+            entries = docked_sdf_content.split("$$$$")
+            name_to_molblock: dict[str, str] = {}
+            for entry in entries:
+                entry = entry.strip()
+                if not entry:
+                    continue
+                # First line of an SDF molblock is the molecule name
+                first_line = entry.split("\n", 1)[0].strip()
+                mol_name = first_line if first_line else ""
+                # Keep only the first (best) pose per molecule name
+                if mol_name and mol_name not in name_to_molblock:
+                    name_to_molblock[mol_name] = entry + "\n$$$$\n"
+
+            # Attach pose molblock to each result
+            attached = 0
+            for result in all_results:
+                name = result.get("name", "")
+                if name in name_to_molblock:
+                    result["pose_molblock"] = name_to_molblock[name]
+                    attached += 1
+            logger.info("GPU: attached %d/%d pose molblocks from docked SDF", attached, len(all_results))
+
         except Exception as e:
-            logger.warning("GPU: could not save docked SDF: %s", e)
+            logger.warning("GPU: could not parse docked SDF for poses: %s", e)
 
     # --- 6. Consensus ranking ---
     if all_results:

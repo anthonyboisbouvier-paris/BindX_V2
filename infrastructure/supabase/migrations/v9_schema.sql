@@ -60,7 +60,7 @@ CREATE TABLE runs (
   phase_id UUID REFERENCES phases(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK (type IN ('import', 'calculation', 'generation')),
   calculation_types TEXT[],
-  status TEXT DEFAULT 'created' CHECK (status IN ('created', 'queued', 'running', 'completed', 'failed')),
+  status TEXT DEFAULT 'created' CHECK (status IN ('created', 'queued', 'running', 'completed', 'failed', 'cancelled')),
   config JSONB NOT NULL,
   input_molecule_ids UUID[],
   input_source TEXT,

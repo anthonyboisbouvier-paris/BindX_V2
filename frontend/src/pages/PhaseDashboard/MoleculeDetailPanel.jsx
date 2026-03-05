@@ -270,23 +270,42 @@ function SafetyTab({ mol, details }) {
         </div>
       )}
 
-      {/* Off-target */}
+      {/* Off-target panel */}
       {safety.off_target?.length > 0 && (
         <div>
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Off-Target Risks</p>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Off-Target Panel ({safety.off_target_summary?.n_safe ?? '?'}/{safety.off_target_summary?.n_total ?? '?'} safe)</p>
+            {safety.off_target_summary?.selectivity_score != null && (
+              <span className={`text-[10px] font-bold tabular-nums ${safety.off_target_summary.selectivity_score >= 0.7 ? 'text-green-600' : safety.off_target_summary.selectivity_score >= 0.4 ? 'text-amber-600' : 'text-red-600'}`}>
+                Selectivity {(safety.off_target_summary.selectivity_score * 100).toFixed(0)}%
+              </span>
+            )}
+          </div>
           <div className="space-y-1.5">
             {safety.off_target.map((ot, i) => (
               <div key={i} className="flex items-center justify-between bg-gray-50 rounded-lg px-2.5 py-1.5">
                 <div>
                   <p className="text-sm font-medium text-gray-700">{ot.target}</p>
-                  <p className="text-[10px] text-gray-400">{ot.family} · similarity {(ot.similarity * 100).toFixed(0)}%</p>
+                  <p className="text-[10px] text-gray-400">
+                    {ot.risk_description && <span>{ot.risk_description} · </span>}
+                    {ot.score != null && <span>score {ot.score.toFixed(1)} kcal/mol (threshold {ot.threshold})</span>}
+                    {ot.family && <span>{ot.family} · similarity {((ot.similarity || 0) * 100).toFixed(0)}%</span>}
+                  </p>
                 </div>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${riskColor(ot.risk)}`}>
-                  {ot.risk}
+                  {ot.status || ot.risk}
                 </span>
               </div>
             ))}
           </div>
+          {safety.off_target_summary?.warnings?.length > 0 && (
+            <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+              <p className="text-[10px] font-semibold text-amber-700 mb-0.5">Warnings</p>
+              {safety.off_target_summary.warnings.map((w, i) => (
+                <p key={i} className="text-[10px] text-amber-600">{w}</p>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -594,6 +613,37 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
   const details = useMemo(() => {
     const props = molecule.properties || {}
     const retro = props.retrosynthesis
+    const ot = props.off_target
+    // Build safety section: merge safety run + off_target run data
+    const safetyRun = props.safety || {}
+    const safetyObj = {
+      herg_risk: safetyRun.herg_risk ?? molecule.herg_risk ?? null,
+      ames_risk: safetyRun.ames_mutagenicity ?? molecule.ames_mutagenicity ?? null,
+      hepatotox_risk: safetyRun.hepatotoxicity ?? molecule.hepatotoxicity ?? null,
+      pains_pass: safetyRun.pains_alert != null ? !safetyRun.pains_alert : (molecule.pains_alert != null ? !molecule.pains_alert : null),
+      pains_alerts: safetyRun.pains_alerts || [],
+      brenk_alerts: safetyRun.brenk_alerts || [],
+    }
+    // Inject off-target panel results (from off_target run)
+    if (ot?.results) {
+      safetyObj.off_target = Object.entries(ot.results).map(([name, data]) => ({
+        target: name,
+        score: data.score,
+        threshold: data.threshold,
+        status: data.status,
+        risk: data.status === 'risk' ? 'high' : 'low',
+        risk_description: data.risk_description,
+      }))
+      safetyObj.off_target_summary = {
+        selectivity_score: ot.selectivity_score,
+        n_safe: ot.n_safe,
+        n_total: ot.n_total,
+        warnings: ot.warnings || [],
+      }
+    }
+    const hasSafety = safetyObj.herg_risk != null || safetyObj.ames_risk != null ||
+                      safetyObj.hepatotox_risk != null || safetyObj.pains_pass != null ||
+                      safetyObj.off_target?.length > 0
     return {
       interactions: props.enrichment || null,
       synthesis: retro ? {
@@ -602,6 +652,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
         num_steps: retro.n_steps ?? retro.n_synth_steps ?? null,
         steps: retro.steps || [],
       } : null,
+      safety: hasSafety ? safetyObj : null,
     }
   }, [molecule])
 
@@ -641,6 +692,19 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
           {molecule.generation_level > 0 && (
             <Badge variant="purple" size="sm">Gen {molecule.generation_level}</Badge>
           )}
+          {molecule.parent_molecule_id && molecules && (() => {
+            const parent = molecules.find(m => m.id === molecule.parent_molecule_id)
+            if (!parent) return null
+            return (
+              <button
+                onClick={() => onRowClick(parent)}
+                className="text-[10px] text-purple-500 hover:text-purple-700 transition-colors"
+                title={`Parent: ${parent.name || parent.id}`}
+              >
+                ← {parent.name || 'Parent'}
+              </button>
+            )
+          })()}
           {molecule.bookmarked && (
             <Badge variant="yellow" size="sm">Bookmarked</Badge>
           )}
@@ -709,6 +773,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
                   pdbUrl={pdbUrl}
                   selectedPocket={selectedPocket}
                   height={280}
+                  dockedMolblock={molecule.properties?.docking?.pose_molblock || null}
                 />
               )}
 

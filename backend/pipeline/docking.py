@@ -1,17 +1,15 @@
 """
 DockIt pipeline -- Molecular docking with GNINA / AutoDock Vina.
 
-Wraps GNINA (CNN-scored docking, preferred) and ``vina`` CLI, with a
-mock fallback for environments where neither is installed.
+Wraps GNINA (CNN-scored docking, preferred) and ``vina`` CLI.
+Raises RuntimeError if no docking engine is available.
 
 V5bis: GNINA support (CNN scoring), consensus ranking, 3-score system.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import random
 import re
 import shutil
 import subprocess
@@ -36,7 +34,7 @@ def _check_gnina() -> bool:
         if _GNINA_AVAILABLE:
             logger.info("GNINA found: %s", gnina_bin)
         else:
-            logger.info("GNINA not found; will try Vina or mock")
+            logger.info("GNINA not found")
     return _GNINA_AVAILABLE
 
 
@@ -371,9 +369,9 @@ def run_docking(
     """Dock a single ligand against a receptor.
 
     Engine selection:
-      - ``"gnina"``: Only try GNINA, fall back to mock if unavailable.
-      - ``"vina"``: Only try Vina, fall back to mock if unavailable.
-      - ``"auto"`` (default): Try GNINA -> Vina -> mock.
+      - ``"gnina"``: Only try GNINA, raise RuntimeError if unavailable.
+      - ``"vina"``: Only try Vina, raise RuntimeError if unavailable.
+      - ``"auto"`` (default): Try GNINA -> Vina, raise if neither available.
 
     Parameters
     ----------
@@ -395,7 +393,7 @@ def run_docking(
     dict
         Keys: ``affinity`` (float, kcal/mol), ``pose_pdbqt_path`` (Path or None),
         ``vina_score`` (float), ``cnn_score`` (float), ``cnn_affinity`` (float),
-        ``docking_engine`` (str: "gnina", "vina", or "mock").
+        ``docking_engine`` (str: "gnina" or "vina").
     """
     engine = docking_engine.lower().strip() if docking_engine else "auto"
 
@@ -405,31 +403,49 @@ def run_docking(
     if engine == "gnina_gpu":
         engine = "gnina"
 
-    # ----- Engine: gnina (only GNINA, then mock) -----
+    # ----- Engine: gnina (only GNINA) -----
     if engine == "gnina":
-        if _check_gnina():
-            gnina_result = _try_gnina_single(
-                receptor_pdbqt, ligand_pdbqt, center, size, exhaustiveness
+        if not _check_gnina():
+            raise RuntimeError(
+                "GNINA is not installed. Install GNINA or use a different "
+                "docking engine (vina, gnina_gpu)."
             )
-            if gnina_result is not None:
-                return gnina_result
-        logger.warning("GNINA requested but unavailable or failed; falling back to mock")
-        return _run_mock_docking(ligand_pdbqt)
+        gnina_result = _try_gnina_single(
+            receptor_pdbqt, ligand_pdbqt, center, size, exhaustiveness
+        )
+        if gnina_result is not None:
+            return gnina_result
+        raise RuntimeError(
+            "GNINA docking failed for this ligand. Check the receptor "
+            "and ligand preparation, or try a different docking engine."
+        )
 
-    # ----- Engine: vina (only Vina, then mock) -----
+    # ----- Engine: vina (only Vina) -----
     if engine == "vina":
-        if _check_vina():
-            result = _run_vina_real(
-                receptor_pdbqt, ligand_pdbqt, center, size, exhaustiveness
+        if not _check_vina():
+            raise RuntimeError(
+                "AutoDock Vina is not installed. Install Vina or use a "
+                "different docking engine (gnina, gnina_gpu)."
             )
-            if result is not None:
-                return result
-        logger.warning("Vina requested but unavailable or failed; falling back to mock")
-        return _run_mock_docking(ligand_pdbqt)
+        result = _run_vina_real(
+            receptor_pdbqt, ligand_pdbqt, center, size, exhaustiveness
+        )
+        if result is not None:
+            return result
+        raise RuntimeError(
+            "AutoDock Vina docking failed for this ligand. Check the "
+            "receptor and ligand preparation."
+        )
 
-    # ----- Engine: auto (GNINA -> Vina -> mock) -----
+    # ----- Engine: diffdock (not yet implemented) -----
+    if engine == "diffdock":
+        raise RuntimeError(
+            "DiffDock is not yet available. "
+            "Please use GNINA (GPU or CPU) or AutoDock Vina."
+        )
+
+    # ----- Engine: auto (GNINA -> Vina) -----
     if _check_gnina():
-        # GNINA works with PDB receptor and SDF ligand, but can also use PDBQT
         gnina_result = _try_gnina_single(
             receptor_pdbqt, ligand_pdbqt, center, size, exhaustiveness
         )
@@ -442,10 +458,10 @@ def run_docking(
         )
         if result is not None:
             return result
-        logger.warning("Real Vina run failed; falling back to mock")
 
-    # ----- Mock fallback -----
-    return _run_mock_docking(ligand_pdbqt, center=center)
+    raise RuntimeError(
+        "No docking engine available. Install GNINA or AutoDock Vina."
+    )
 
 
 def _extract_first_model_sdf(path: Path) -> None:
@@ -668,68 +684,6 @@ def _parse_vina_affinity_from_pdbqt(pdbqt_path: Path) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
-# Mock docking with 3-score system (V5bis)
-# ---------------------------------------------------------------------------
-
-def _run_mock_docking(ligand_pdbqt: Path, center: tuple = None) -> dict:
-    """Generate a mock docking result with 3 GNINA-style scores.
-
-    Uses deterministic hash-based generation so repeated runs produce
-    the same results for the same input.
-
-    Mock docking does NOT produce a valid 3D pose — no pose file is
-    generated because coordinates would be scientifically meaningless.
-    Frontend shows 2D structure only when pose_pdbqt_path is None.
-
-    Parameters
-    ----------
-    ligand_pdbqt : Path
-        Ligand file used for hash-based score generation.
-    center : tuple, optional
-        Ignored (kept for API compat).
-
-    Returns
-    -------
-    dict
-        Mock result with ``affinity``, ``vina_score``, ``cnn_score``,
-        ``cnn_affinity``, ``pose_pdbqt_path`` (None), ``docking_engine``.
-    """
-    # Use hash of ligand stem for deterministic scores
-    stem = ligand_pdbqt.stem
-    seed = int(hashlib.md5(stem.encode()).hexdigest()[:8], 16)
-    rng = random.Random(seed)
-
-    # Vina-style affinity
-    vina_score = round(rng.uniform(-12.0, -4.0), 1)
-
-    # CNN score (pose confidence 0-1)
-    seed2 = int(hashlib.md5(stem.encode()).hexdigest()[8:16], 16)
-    rng2 = random.Random(seed2)
-    cnn_score = round(rng2.uniform(0.3, 0.95), 3)
-
-    # CNN affinity (pK units)
-    seed3 = int(hashlib.md5(stem.encode()).hexdigest()[16:24], 16)
-    rng3 = random.Random(seed3)
-    cnn_affinity = round(rng3.uniform(5.0, 9.5), 2)
-
-    # Mock docking: NO pose file — coordinates would be meaningless
-    pose_path = None
-
-    logger.debug(
-        "Mock docking for %s: vina=%.1f cnn_score=%.3f cnn_aff=%.2f",
-        stem, vina_score, cnn_score, cnn_affinity,
-    )
-    return {
-        "affinity": vina_score,
-        "pose_pdbqt_path": pose_path,
-        "vina_score": vina_score,
-        "cnn_score": cnn_score,
-        "cnn_affinity": cnn_affinity,
-        "docking_engine": "mock",
-    }
-
-
-# ---------------------------------------------------------------------------
 # Consensus ranking (V5bis)
 # ---------------------------------------------------------------------------
 
@@ -774,6 +728,11 @@ def consensus_rank(molecules: list[dict]) -> list[dict]:
     cnn_rank: dict[int, int] = {idx: rank + 1 for rank, idx in enumerate(by_cnn)}
     aff_rank: dict[int, int] = {idx: rank + 1 for rank, idx in enumerate(by_cnn_aff)}
 
+    # ECR (Exponential Consensus Ranking) — Fabian et al., J. Chem. Inf. Model. 2006
+    # sigma = 5% of dataset size (robust, independent of exact value per P3 reference)
+    import math
+    sigma = max(1, n * 0.05)
+
     for i, mol in enumerate(molecules):
         r1 = vina_rank[i]
         r2 = cnn_rank[i]
@@ -782,6 +741,15 @@ def consensus_rank(molecules: list[dict]) -> list[dict]:
         mol["rank_vina"] = r1
         mol["rank_cnn_score"] = r2
         mol["rank_cnn_affinity"] = r3
+
+        # ECR score: sum of exponential decay — higher = better ranked
+        ecr = (
+            math.exp(-r1 / sigma)
+            + math.exp(-r2 / sigma)
+            + math.exp(-r3 / sigma)
+        )
+        # Convert to rank-like metric (lower = better) for backward compat
+        mol["consensus_ecr"] = round(ecr, 4)
         mol["consensus_rank"] = round((r1 + r2 + r3) / 3, 2)
 
         # Robustness filter: in top 50 of at least 2/3 methods
@@ -789,8 +757,8 @@ def consensus_rank(molecules: list[dict]) -> list[dict]:
         in_top = sum(1 for r in [r1, r2, r3] if r <= top50)
         mol["consensus_robust"] = in_top >= 2
 
-    # Sort by consensus_rank (lower = better)
-    molecules.sort(key=lambda m: m.get("consensus_rank", float("inf")))
+    # Sort by ECR (higher = better), then by consensus_rank as tiebreaker
+    molecules.sort(key=lambda m: (-m.get("consensus_ecr", 0), m.get("consensus_rank", float("inf"))))
     return molecules
 
 
@@ -811,9 +779,9 @@ def dock_all_ligands(
     """Prepare, dock, and consensus-rank all ligands.
 
     Engine selection is delegated to :func:`run_docking`:
-      - ``"gnina"``: Only try GNINA, fall back to mock if unavailable.
-      - ``"vina"``: Only try Vina, fall back to mock if unavailable.
-      - ``"auto"`` (default): Try GNINA -> Vina -> mock.
+      - ``"gnina"``: Only try GNINA, raise RuntimeError if unavailable.
+      - ``"vina"``: Only try Vina, raise RuntimeError if unavailable.
+      - ``"auto"`` (default): Try GNINA -> Vina, raise if neither available.
 
     Parameters
     ----------
@@ -845,32 +813,62 @@ def dock_all_ligands(
     ligand_dir = work_dir / "ligands"
     ligand_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- GPU batch docking (gnina_gpu or auto with GPU available) ---
-    engine = docking_engine.lower().strip() if docking_engine else "auto"
+    engine = docking_engine.lower().strip() if docking_engine else "gnina_gpu"
+
+    if engine == "diffdock":
+        raise RuntimeError(
+            "DiffDock is not yet available. "
+            "Please use GNINA (GPU or CPU) or AutoDock Vina."
+        )
+
+    # --- GPU batch docking ---
     if engine in ("gnina_gpu", "auto"):
         try:
             from pipeline.docking_gpu import is_gpu_available, dock_all_runpod_batch
-            if engine == "gnina_gpu" or (engine == "auto" and is_gpu_available()):
-                if is_gpu_available():
-                    logger.info("Attempting GPU batch docking (%d ligands)", len(ligands))
-                    gpu_results = dock_all_runpod_batch(
-                        receptor_pdbqt=receptor_pdbqt,
-                        ligands=ligands,
-                        center=center,
-                        work_dir=work_dir,
-                        progress_callback=progress_callback,
-                        size=size,
-                        exhaustiveness=exhaustiveness,
+            gpu_ok = is_gpu_available()
+
+            if engine == "gnina_gpu" and not gpu_ok:
+                raise RuntimeError(
+                    "GPU docking requested but RunPod is not configured. "
+                    "Set RUNPOD_API_KEY in your environment, or switch to "
+                    "GNINA (CPU) or AutoDock Vina in the docking settings."
+                )
+
+            if gpu_ok:
+                logger.info("GPU batch docking: %d ligands (engine=%s)", len(ligands), engine)
+                if progress_callback:
+                    progress_callback(35, "Submitting to GPU (RunPod)...")
+
+                gpu_results = dock_all_runpod_batch(
+                    receptor_pdbqt=receptor_pdbqt,
+                    ligands=ligands,
+                    center=center,
+                    work_dir=work_dir,
+                    progress_callback=progress_callback,
+                    size=size,
+                    exhaustiveness=exhaustiveness,
+                )
+                if gpu_results:
+                    logger.info("GPU docking succeeded: %d results", len(gpu_results))
+                    return gpu_results
+
+                # GPU returned empty — only fall back if auto mode
+                if engine == "gnina_gpu":
+                    raise RuntimeError(
+                        "GPU docking returned no results. Check that the RunPod "
+                        "endpoint is running and the receptor/ligands are valid."
                     )
-                    if gpu_results:
-                        logger.info("GPU batch docking succeeded: %d results", len(gpu_results))
-                        return gpu_results
-                    logger.warning("GPU batch returned empty results, falling back to local")
-                else:
-                    if engine == "gnina_gpu":
-                        logger.warning("gnina_gpu requested but RUNPOD_API_KEY not set, falling back to local")
+                logger.warning("GPU returned empty results, falling back to local")
+
+        except RuntimeError:
+            raise  # Re-raise explicit errors (don't swallow them)
         except Exception as exc:
-            logger.warning("GPU batch docking failed: %s, falling back to local", exc)
+            if engine == "gnina_gpu":
+                raise RuntimeError(
+                    f"GPU docking failed: {exc}. "
+                    "Check RunPod dashboard or try GNINA (CPU)."
+                ) from exc
+            logger.warning("GPU batch failed: %s, falling back to local", exc)
 
     results: list[dict] = []
     total = len(ligands)

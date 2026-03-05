@@ -7,7 +7,7 @@ Absorption, Distribution, Metabolism, Excretion, and Toxicity.
 Strategies (in order):
   1. ADMET-AI library (``admet_ai.ADMETModel``) for ML-based predictions.
   2. RDKit physicochemical rules as heuristic proxies.
-  3. Hash-based deterministic mock when no cheminformatics tools are available.
+  3. Raises RuntimeError if no tools are available.
 
 V5bis: adds applicability domain checking (check_applicability_domain).
 """
@@ -63,7 +63,7 @@ def predict_admet(smiles_list: list[str]) -> list[dict]:
     """Predict ADMET properties for a list of molecules.
 
     Tries the real ADMET-AI model first, then falls back to RDKit-based
-    heuristics, and finally to a deterministic hash-based mock.
+    heuristics. Raises RuntimeError if no tools are available.
 
     Parameters
     ----------
@@ -106,11 +106,11 @@ def predict_admet(smiles_list: list[str]) -> list[dict]:
         results = _add_applicability_domain(results)
         return results
 
-    # --- Strategy 3: Hash-based deterministic mock ---
-    logger.warning("No cheminformatics tools available; using hash-based ADMET mock")
-    results = _mock_admet(smiles_list)
-    results = _add_applicability_domain(results)
-    return results
+    # --- No tools available ---
+    raise RuntimeError(
+        "No ADMET prediction tool available. "
+        "Install RDKit (pip install rdkit-pypi) or ADMET-AI."
+    )
 
 
 def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
@@ -138,6 +138,16 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
     score: float = 0.5  # baseline
     flags: list[str] = []
 
+    def _val(d: dict, key: str, default: float = 0.5) -> float:
+        """Get a float value from dict, treating None as default."""
+        v = d.get(key, default)
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
     absorption = admet.get("absorption", {})
     distribution = admet.get("distribution", {})
     metabolism = admet.get("metabolism", {})
@@ -145,27 +155,27 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
     toxicity = admet.get("toxicity", {})
 
     # --- Absorption rewards/penalties ---
-    oral_bioavail = absorption.get("oral_bioavailability", 0.5)
+    oral_bioavail = _val(absorption, "oral_bioavailability", 0.5)
     if oral_bioavail > 0.5:
         score += 0.10
     elif oral_bioavail < 0.3:
         score -= 0.05
         flags.append("warning: low oral bioavailability predicted")
 
-    solubility = absorption.get("solubility", 0.5)
+    solubility = _val(absorption, "solubility", 0.5)
     if solubility < 0.3:
         score -= 0.05
         flags.append("warning: poor aqueous solubility")
 
-    pgp = absorption.get("pgp_substrate", 0.5)
+    pgp = _val(absorption, "pgp_substrate", 0.5)
     if pgp > 0.7:
         score -= 0.05
         flags.append("warning: likely P-gp substrate (efflux risk)")
 
     # --- Distribution ---
-    bbb = distribution.get("bbb_permeability", 0.5)
+    bbb = _val(distribution, "bbb_permeability", 0.5)
     # BBB permeability is informational, not inherently good or bad
-    ppb = distribution.get("plasma_protein_binding", 0.5)
+    ppb = _val(distribution, "plasma_protein_binding", 0.5)
     if ppb > 0.9:
         score -= 0.03
         flags.append("info: high plasma protein binding (>90%)")
@@ -180,7 +190,7 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
     ]
     cyp_count = 0
     for key, label in cyp_inhibitors:
-        val = metabolism.get(key, 0.0)
+        val = _val(metabolism, key, 0.0)
         if val > 0.5:
             cyp_count += 1
 
@@ -192,17 +202,17 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
         flags.append(f"info: inhibits {cyp_count}/5 CYP enzymes")
 
     # --- Excretion ---
-    clearance = excretion.get("clearance", 0.5)
+    clearance = _val(excretion, "clearance", 0.5)
     if clearance > 0.7:
         score -= 0.05
         flags.append("warning: high clearance predicted (short duration)")
-    half_life = excretion.get("half_life", 0.5)
+    half_life = _val(excretion, "half_life", 0.5)
     if half_life < 0.3:
         score -= 0.03
         flags.append("info: short predicted half-life")
 
     # --- Toxicity (major penalties) ---
-    herg = toxicity.get("herg_inhibition", 0.0)
+    herg = _val(toxicity, "herg_inhibition", 0.0)
     if herg > 0.5:
         score -= 0.20
         flags.append("ALERT: hERG inhibition risk (cardiotoxicity)")
@@ -210,7 +220,7 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
         score -= 0.05
         flags.append("warning: hERG inhibition borderline")
 
-    ames = toxicity.get("ames_mutagenicity", 0.0)
+    ames = _val(toxicity, "ames_mutagenicity", 0.0)
     if ames > 0.5:
         score -= 0.20
         flags.append("ALERT: Ames mutagenicity positive")
@@ -218,7 +228,7 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
         score -= 0.05
         flags.append("warning: Ames mutagenicity borderline")
 
-    hepatotox = toxicity.get("hepatotoxicity", 0.0)
+    hepatotox = _val(toxicity, "hepatotoxicity", 0.0)
     if hepatotox > 0.5:
         score -= 0.15
         flags.append("ALERT: hepatotoxicity risk")
@@ -226,12 +236,12 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
         score -= 0.05
         flags.append("warning: hepatotoxicity borderline")
 
-    skin = toxicity.get("skin_sensitization", 0.0)
+    skin = _val(toxicity, "skin_sensitization", 0.0)
     if skin > 0.5:
         score -= 0.05
         flags.append("warning: skin sensitization risk")
 
-    carcino = toxicity.get("carcinogenicity", 0.0)
+    carcino = _val(toxicity, "carcinogenicity", 0.0)
     if carcino > 0.5:
         score -= 0.15
         flags.append("ALERT: carcinogenicity risk")
@@ -1006,71 +1016,6 @@ def _count_smarts_matches(mol: object, smarts_list: list[str], Chem: object) -> 
         except Exception:
             continue
     return count
-
-
-# =====================================================================
-# STRATEGY 3: HASH-BASED DETERMINISTIC MOCK
-# =====================================================================
-
-def _mock_admet(smiles_list: list[str]) -> list[dict]:
-    """Generate deterministic mock ADMET predictions from SMILES hashes.
-
-    Produces reproducible values per molecule without any cheminformatics
-    dependency. Useful for offline development and testing.
-    """
-    results: list[dict] = []
-
-    for smi in smiles_list:
-        # Deterministic pseudo-random from SMILES hash
-        h = hashlib.sha256(smi.encode("utf-8")).hexdigest()
-
-        def _hval(offset: int) -> float:
-            """Extract a float in [0, 1] from hex digest at given offset."""
-            segment = h[(offset * 2) % len(h):(offset * 2 + 4) % len(h)]
-            if not segment:
-                segment = h[:4]
-            return int(segment, 16) / 0xFFFF
-
-        admet = {
-            "absorption": {
-                "oral_bioavailability": round(_hval(0) * 0.5 + 0.3, 3),
-                "intestinal_permeability": round(_hval(1) * 0.5 + 0.3, 3),
-                "solubility": round(_hval(2) * 0.6 + 0.2, 3),
-                "pgp_substrate": round(_hval(3) * 0.6 + 0.1, 3),
-            },
-            "distribution": {
-                "plasma_protein_binding": round(_hval(4) * 0.5 + 0.3, 3),
-                "bbb_permeability": round(_hval(5) * 0.6 + 0.2, 3),
-                "vd": round(_hval(6) * 0.5 + 0.25, 3),
-            },
-            "metabolism": {
-                "cyp1a2_inhibitor": round(_hval(7) * 0.5, 3),
-                "cyp2c9_inhibitor": round(_hval(8) * 0.5, 3),
-                "cyp2c19_inhibitor": round(_hval(9) * 0.5, 3),
-                "cyp2d6_inhibitor": round(_hval(10) * 0.5, 3),
-                "cyp3a4_inhibitor": round(_hval(11) * 0.5, 3),
-            },
-            "excretion": {
-                "clearance": round(_hval(12) * 0.5 + 0.25, 3),
-                "half_life": round(_hval(13) * 0.5 + 0.25, 3),
-            },
-            "toxicity": {
-                "herg_inhibition": round(_hval(14) * 0.4, 3),
-                "ames_mutagenicity": round(_hval(15) * 0.4, 3),
-                "hepatotoxicity": round(_hval(16) * 0.4, 3),
-                "skin_sensitization": round(_hval(17) * 0.3, 3),
-                "carcinogenicity": round(_hval(18) * 0.3, 3),
-            },
-        }
-
-        composite, flags, color = compute_admet_composite(admet)
-        admet["smiles"] = smi
-        admet["composite_score"] = composite
-        admet["flags"] = flags
-        admet["color_code"] = color
-        results.append(admet)
-
-    return results
 
 
 # =====================================================================

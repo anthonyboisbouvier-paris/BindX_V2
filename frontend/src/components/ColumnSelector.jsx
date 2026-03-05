@@ -1,23 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react'
-
-// ---------------------------------------------------------------------------
-// Column groups for organized display
-// ---------------------------------------------------------------------------
-const GROUPS = [
-  { label: 'Identity',       keys: ['name', 'smiles', 'source_run_id'] },
-  { label: 'Docking Scores', keys: ['docking_score', 'cnn_score', 'cnn_affinity', 'cnn_vs'] },
-  { label: 'Drug Properties',keys: ['logP', 'MW', 'HBD', 'HBA', 'TPSA', 'QED', 'lipinski_pass'] },
-  { label: 'ADMET',          keys: ['solubility', 'BBB', 'hERG', 'metabolic_stability'] },
-  { label: 'Scoring',        keys: ['composite_score'] },
-  { label: 'Analysis',       keys: ['cluster_id', 'scaffold', 'interactions_count'] },
-  { label: 'Generation',     keys: ['generation_level', 'parent_molecule_id'] },
-]
+import React, { useState, useRef, useEffect, useMemo } from 'react'
+import { GROUP_META } from '../lib/columns.js'
 
 const TYPE_COLORS = {
   number:  'text-blue-500 bg-blue-50',
   text:    'text-gray-500 bg-gray-100',
   boolean: 'text-green-600 bg-green-50',
   smiles:  'text-purple-500 bg-purple-50',
+  source:  'text-gray-500 bg-gray-100',
 }
 
 // ---------------------------------------------------------------------------
@@ -35,6 +24,25 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
   const buttonRef = useRef(null)
 
   const visibleSet = new Set(visibleKeys)
+
+  // Auto-generate groups from column definitions, ordered by GROUP_META
+  const groups = useMemo(() => {
+    const groupOrder = Object.keys(GROUP_META)
+    const map = new Map()
+    for (const col of allColumns) {
+      const g = col.group || 'molecule'
+      if (!map.has(g)) map.set(g, [])
+      map.get(g).push(col.key)
+    }
+    return groupOrder
+      .filter(g => map.has(g))
+      .map(g => ({
+        group: g,
+        label: GROUP_META[g]?.label || g,
+        keys: map.get(g),
+        meta: GROUP_META[g] || GROUP_META.molecule,
+      }))
+  }, [allColumns])
 
   // Close panel on outside click
   useEffect(() => {
@@ -91,7 +99,8 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
       const col = allColumns.find(c => c.key === k)
       return col && (
         col.label.toLowerCase().includes(searchLower) ||
-        col.key.toLowerCase().includes(searchLower)
+        col.key.toLowerCase().includes(searchLower) ||
+        (group.label && group.label.toLowerCase().includes(searchLower))
       )
     })
 
@@ -125,8 +134,8 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
       {open && (
         <div
           ref={panelRef}
-          className="absolute left-0 top-full mt-1.5 z-50 bg-white border border-gray-200 rounded-xl shadow-xl w-76"
-          style={{ width: '300px' }}
+          className="absolute left-0 top-full mt-1.5 z-50 bg-white border border-gray-200 rounded-xl shadow-xl"
+          style={{ width: '340px' }}
         >
           {/* Panel header */}
           <div className="flex items-center justify-between px-3 pt-3 pb-2 border-b border-gray-100">
@@ -145,6 +154,34 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
               >
                 Show all
               </button>
+            </div>
+          </div>
+
+          {/* Group toggle chips */}
+          <div className="px-3 py-2 border-b border-gray-100">
+            <div className="flex flex-wrap gap-1">
+              {groups.map(group => {
+                const groupVisible = group.keys.filter(k => visibleSet.has(k)).length
+                const allOn = groupVisible === group.keys.length
+                const someOn = groupVisible > 0 && !allOn
+                return (
+                  <button
+                    key={group.group}
+                    onClick={() => toggleGroup(group.keys, !allOn)}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all duration-100 ${
+                      allOn
+                        ? `${group.meta.bg} ${group.meta.text} ${group.meta.border}`
+                        : someOn
+                          ? `bg-white ${group.meta.text} border-gray-200 opacity-80`
+                          : 'bg-white text-gray-400 border-gray-200 opacity-60'
+                    }`}
+                    title={allOn ? `Hide all ${group.label} columns` : `Show all ${group.label} columns`}
+                  >
+                    {someOn && <span className="w-1 h-1 rounded-full bg-current opacity-60" />}
+                    {group.label}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
@@ -177,20 +214,18 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
 
           {/* Column groups */}
           <div className="overflow-y-auto max-h-72 py-1">
-            {GROUPS.map(group => {
+            {groups.map(group => {
               const keys = getGroupKeys(group)
               if (!keys.length) return null
-              const isCollapsed = collapsedGroups.has(group.label) && !searchLower
+              const isCollapsed = collapsedGroups.has(group.group) && !searchLower
               const groupVisible = keys.filter(k => visibleSet.has(k)).length
-              const allGroupVisible = groupVisible === keys.length
-              const someGroupVisible = groupVisible > 0 && groupVisible < keys.length
 
               return (
-                <div key={group.label} className="border-b border-gray-50 last:border-b-0">
+                <div key={group.group} className="border-b border-gray-50 last:border-b-0">
                   {/* Group header */}
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50/80">
+                  <div className={`flex items-center gap-1.5 px-3 py-1.5 ${group.meta.bg}`}>
                     <button
-                      onClick={() => toggleGroupCollapse(group.label)}
+                      onClick={() => toggleGroupCollapse(group.group)}
                       className="flex-1 flex items-center gap-1.5 text-left"
                       disabled={!!searchLower}
                     >
@@ -200,7 +235,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
                       >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
-                      <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${group.meta.text}`}>
                         {group.label}
                       </span>
                       <span className="text-[9px] text-gray-400 tabular-nums">
@@ -254,7 +289,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
                                 <span className="text-[9px] text-gray-300">({col.unit})</span>
                               )}
                               <span className={`text-[8px] font-semibold px-1 py-0.5 rounded uppercase ${typeColor}`}>
-                                {col.type === 'boolean' ? 'bool' : col.type}
+                                {col.type === 'boolean' ? 'bool' : col.type === 'source' ? 'text' : col.type}
                               </span>
                             </div>
                           </label>
@@ -265,7 +300,7 @@ export default function ColumnSelector({ allColumns = [], visibleKeys = [], onCh
                 </div>
               )
             })}
-            {searchLower && GROUPS.every(g => getGroupKeys(g).length === 0) && (
+            {searchLower && groups.every(g => getGroupKeys(g).length === 0) && (
               <div className="py-6 text-center text-xs text-gray-400">
                 No columns matching "{search}"
               </div>

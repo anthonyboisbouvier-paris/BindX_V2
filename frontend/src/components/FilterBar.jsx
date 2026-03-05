@@ -164,6 +164,8 @@ function InlineFilterConfig({ col, molecules, onApply, onCancel }) {
 // ---------------------------------------------------------------------------
 // Main FilterBar
 // ---------------------------------------------------------------------------
+export { QUICK_FILTERS, InlineFilterConfig }
+
 export default function FilterBar({
   molecules = [],
   columns = [],

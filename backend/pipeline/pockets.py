@@ -8,13 +8,12 @@ Detection strategies (in priority order):
   4. Geometric heuristic (no external tools)
   5. Centroid fallback (last resort)
 
-V5bis: P2Rank support, ligand pocket extraction, enhanced mock with probability scores.
+V5bis: P2Rank support, ligand pocket extraction, probability scores.
 """
 
 from __future__ import annotations
 
 import csv
-import hashlib
 import logging
 import re
 import shutil
@@ -33,6 +32,7 @@ def detect_pockets(
     pdb_path: Path,
     work_dir: Path,
     ligand_id: Optional[str] = None,
+    structure_source: str = "",
 ) -> list[dict]:
     """Detect binding pockets on a protein structure.
 
@@ -74,7 +74,11 @@ def detect_pockets(
             logger.warning("Ligand pocket extraction failed for %s: %s", ligand_id, exc)
 
     # ----- Strategy 2: P2Rank ML-based detection -----
-    p2rank_pockets = detect_pockets_p2rank(str(pdb_path), str(work_dir / "p2rank_out"))
+    try:
+        p2rank_pockets = detect_pockets_p2rank(str(pdb_path), str(work_dir / "p2rank_out"), structure_source=structure_source)
+    except RuntimeError as exc:
+        logger.warning("P2Rank unavailable: %s", exc)
+        p2rank_pockets = []
     if p2rank_pockets:
         # Merge with existing pockets (avoid duplicates near ligand pocket)
         for pp in p2rank_pockets:
@@ -126,8 +130,8 @@ def detect_pockets(
 # P2Rank ML pocket detection (V5bis)
 # ---------------------------------------------------------------------------
 
-def detect_pockets_p2rank(pdb_path: str, output_dir: str) -> list[dict]:
-    """Detect binding pockets using P2Rank ML (preferred) or mock fallback.
+def detect_pockets_p2rank(pdb_path: str, output_dir: str, structure_source: str = "") -> list[dict]:
+    """Detect binding pockets using P2Rank ML.
 
     P2Rank predicts pockets using a machine-learning model trained on
     known binding sites. Its output CSV contains columns: name, rank, score,
@@ -140,6 +144,10 @@ def detect_pockets_p2rank(pdb_path: str, output_dir: str) -> list[dict]:
         Path to the input PDB file.
     output_dir : str
         Directory for P2Rank output files.
+    structure_source : str
+        Source of the structure (e.g. "alphafold", "esmfold").
+        If alphafold/esmfold/cryo-em/nmr, uses P2Rank ``-c alphafold``
+        config which interprets B-factor as pLDDT confidence scores.
 
     Returns
     -------
@@ -155,12 +163,21 @@ def detect_pockets_p2rank(pdb_path: str, output_dir: str) -> list[dict]:
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+    # Use -c alphafold config for predicted structures (P2Rank §P15)
+    # These structures store pLDDT in B-factor column instead of crystallographic B-factor
+    use_alphafold_config = structure_source.lower() in ("alphafold", "esmfold", "cryo-em", "nmr")
+
     # Try P2Rank first
     if Path(p2rank_bin).exists():
         try:
-            logger.info("Running P2Rank on %s ...", pdb_path)
+            cmd = [p2rank_bin, "predict", "-f", pdb_path, "-o", output_dir]
+            if use_alphafold_config:
+                cmd.extend(["-c", "alphafold"])
+                logger.info("Running P2Rank with -c alphafold on %s ...", pdb_path)
+            else:
+                logger.info("Running P2Rank on %s ...", pdb_path)
             result = subprocess.run(
-                [p2rank_bin, "predict", "-f", pdb_path, "-o", output_dir],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -199,11 +216,12 @@ def detect_pockets_p2rank(pdb_path: str, output_dir: str) -> list[dict]:
         except Exception as exc:
             logger.warning("P2Rank failed: %s, falling back", exc)
     else:
-        logger.info("P2Rank not installed at %s; using mock P2Rank detection", p2rank_bin)
+        logger.warning("P2Rank not installed at %s", p2rank_bin)
 
-    # ----- Mock P2Rank fallback -----
-    # Generate deterministic mock pockets with P2Rank-style probability scores
-    return _mock_p2rank_pockets(pdb_path)
+    raise RuntimeError(
+        "P2Rank failed or is not installed. "
+        "Install P2Rank or use co-crystallized ligand detection."
+    )
 
 
 def _parse_p2rank_csv(csv_path: Path) -> list[dict]:
@@ -261,74 +279,6 @@ def _parse_p2rank_csv(csv_path: Path) -> list[dict]:
     except Exception as exc:
         logger.warning("Error parsing P2Rank CSV %s: %s", csv_path, exc)
 
-    return pockets
-
-
-def _mock_p2rank_pockets(pdb_path: str) -> list[dict]:
-    """Generate mock pockets with P2Rank-style probability scores.
-
-    Uses deterministic hash-based generation so repeated runs produce
-    the same results for the same input.
-
-    Parameters
-    ----------
-    pdb_path : str
-        Path to the PDB file (used for atom coordinate parsing and hashing).
-
-    Returns
-    -------
-    list[dict]
-        Mock pockets with ``probability`` field (0-1) and ``method: "p2rank_mock"``.
-    """
-    atoms = _parse_pdb_atoms(Path(pdb_path))
-    if len(atoms) < 10:
-        return []
-
-    # Use file path hash for deterministic results
-    seed_hash = hashlib.md5(pdb_path.encode()).hexdigest()
-
-    # Compute protein centroid
-    xs = [a[0] for a in atoms]
-    ys = [a[1] for a in atoms]
-    zs = [a[2] for a in atoms]
-    cx = sum(xs) / len(xs)
-    cy = sum(ys) / len(ys)
-    cz = sum(zs) / len(zs)
-
-    # Generate 3-5 mock pockets at different octants
-    import random
-    rng = random.Random(int(seed_hash[:8], 16))
-
-    n_pockets = rng.randint(3, 5)
-    pockets: list[dict] = []
-
-    for i in range(n_pockets):
-        # Offset from centroid
-        offset_x = rng.uniform(-8, 8)
-        offset_y = rng.uniform(-8, 8)
-        offset_z = rng.uniform(-8, 8)
-
-        # Probability decreases with rank
-        base_prob = 0.95 - i * 0.15
-        prob = max(0.1, base_prob + rng.uniform(-0.05, 0.05))
-
-        pockets.append({
-            "center": (
-                round(cx + offset_x, 3),
-                round(cy + offset_y, 3),
-                round(cz + offset_z, 3),
-            ),
-            "score": round(prob, 4),
-            "probability": round(prob, 4),
-            "p2rank_score": round(prob * 20, 2),
-            "rank": i + 1,
-            "method": "p2rank_mock",
-            "residues": [],
-            "volume": round(rng.uniform(200, 800), 1),
-        })
-
-    pockets.sort(key=lambda p: p["probability"], reverse=True)
-    logger.info("Generated %d mock P2Rank pockets", len(pockets))
     return pockets
 
 

@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
+import React, { useState, useCallback } from 'react'
+import InfoTip from './InfoTip.jsx'
 
 // ---------------------------------------------------------------------------
 // Operator definitions per column type
@@ -133,15 +134,16 @@ export default function AdvancedFilterBuilder({ columns, onFilterChange, isOpen,
     ['number', 'text', 'boolean', 'smiles'].includes(c.type)
   )
 
-  // Emit filter whenever rules or mode change
-  const prevFilterRef = useRef(null)
-  useEffect(() => {
+  // Apply filters manually on button click
+  const handleApply = useCallback(() => {
     const fn = buildFilterFn(rules, mode)
-    // Avoid calling if both null
-    if (fn === null && prevFilterRef.current === null) return
-    prevFilterRef.current = fn
     onFilterChange(fn)
-  }, [rules, mode, onFilterChange])
+    if (onToggle) onToggle()
+  }, [rules, mode, onFilterChange, onToggle])
+
+  const handleClose = useCallback(() => {
+    if (onToggle) onToggle()
+  }, [onToggle])
 
   const handleColumnChange = useCallback((ruleId, colKey) => {
     setRules(prev => prev.map(r => {
@@ -197,7 +199,10 @@ export default function AdvancedFilterBuilder({ columns, onFilterChange, isOpen,
       {/* Header row: title + AND/OR toggle + clear */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-xs font-semibold text-gray-700">Advanced Filter</span>
+          <span className="text-xs font-semibold text-gray-700">
+            Advanced Filter
+            <InfoTip text="Build custom filter rules. AND = all conditions must match. OR = at least one must match. Click Apply to filter the table." size="xs" />
+          </span>
 
           {/* AND / OR toggle */}
           <div className="flex rounded-lg overflow-hidden border border-gray-200">
@@ -316,6 +321,22 @@ export default function AdvancedFilterBuilder({ columns, onFilterChange, isOpen,
         </svg>
         Add rule
       </button>
+
+      {/* Apply / Close footer */}
+      <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+        <button
+          onClick={handleClose}
+          className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+        >
+          Close
+        </button>
+        <button
+          onClick={handleApply}
+          className="px-4 py-1.5 text-xs font-medium bg-bx-surface text-white rounded-lg hover:bg-bx-elevated transition-colors"
+        >
+          Apply filter
+        </button>
+      </div>
     </div>
   )
 }

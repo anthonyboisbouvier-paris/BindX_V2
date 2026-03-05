@@ -87,11 +87,14 @@ def compute_properties(smiles: str) -> dict:
         "hbd": None,
         "hba": None,
         "rotatable_bonds": None,
+        "heavy_atom_count": None,
+        "inchikey": None,
+        "ro3_pass": None,
     }
 
     try:
         from rdkit import Chem
-        from rdkit.Chem import Descriptors, QED, rdMolDescriptors
+        from rdkit.Chem import Descriptors, QED, rdMolDescriptors, inchi
 
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
@@ -104,11 +107,27 @@ def compute_properties(smiles: str) -> dict:
         props["hbd"] = rdMolDescriptors.CalcNumHBD(mol)
         props["hba"] = rdMolDescriptors.CalcNumHBA(mol)
         props["rotatable_bonds"] = rdMolDescriptors.CalcNumRotatableBonds(mol)
+        props["heavy_atom_count"] = mol.GetNumHeavyAtoms()
 
         try:
             props["qed"] = round(QED.qed(mol), 3)
         except Exception:
             props["qed"] = 0.5  # Safe default
+
+        # InChIKey — unique molecular identifier
+        try:
+            props["inchikey"] = inchi.MolToInchiKey(mol)
+        except Exception:
+            pass
+
+        # Rule of Three (fragment screening): MW<300, cLogP≤3, HBD≤3, HBA≤3, RotB≤3
+        props["ro3_pass"] = (
+            (props["MW"] or 999) < 300
+            and (props["logP"] or 99) <= 3.0
+            and (props["hbd"] or 99) <= 3
+            and (props["hba"] or 99) <= 3
+            and (props["rotatable_bonds"] or 99) <= 3
+        )
 
     except ImportError:
         logger.warning("RDKit not available; returning empty properties")
@@ -116,6 +135,109 @@ def compute_properties(smiles: str) -> dict:
         logger.warning("Property computation error for %s: %s", smiles[:60], exc)
 
     return props
+
+
+def compute_ligand_efficiency(docking_score: float, heavy_atom_count: int) -> Optional[float]:
+    """Compute Ligand Efficiency: LE = |docking_score| / heavy_atom_count.
+
+    Higher LE = better per-atom binding. Good drugs: LE >= 0.3 kcal/mol/atom.
+    Reference: Hopkins et al., Drug Discov. Today 2004, 9, 430-431.
+    """
+    if heavy_atom_count is None or heavy_atom_count <= 0:
+        return None
+    if docking_score is None:
+        return None
+    try:
+        le = abs(float(docking_score)) / int(heavy_atom_count)
+        return round(le, 3)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# CNS MPO Score (Pfizer Multi-Parameter Optimization, P11 reference)
+# ---------------------------------------------------------------------------
+
+def compute_cns_mpo(props: dict) -> Optional[float]:
+    """Compute the CNS Multi-Parameter Optimization score (Pfizer).
+
+    Score range is 0-6 (sum of 6 component scores, each 0-1).
+    Threshold: >= 4.0 is considered CNS drug-like.
+
+    Components: ClogP, ClogD (≈logP), MW, TPSA, HBD, pKa.
+    Since pKa and ClogD are not always available, we use logP as proxy
+    for both ClogP and ClogD, and default pKa to 8.0 (neutral).
+
+    Reference: Wager et al., ACS Chem. Neurosci. 2010, 1, 435-449.
+    """
+    logp = props.get("logP")
+    mw = props.get("MW")
+    tpsa = props.get("tpsa") or props.get("TPSA")
+    hbd = props.get("hbd") or props.get("HBD")
+
+    if logp is None or mw is None:
+        return None
+
+    # Component 1: ClogP (score 1.0 if ≤3, 0.0 if ≥5, linear between)
+    clogp_score = max(0.0, min(1.0, (5.0 - logp) / 2.0)) if logp is not None else 0.5
+
+    # Component 2: ClogD (use logP as proxy; score 1.0 if ≤2, 0.0 if ≥4)
+    clogd_score = max(0.0, min(1.0, (4.0 - logp) / 2.0)) if logp is not None else 0.5
+
+    # Component 3: MW (score 1.0 if ≤360, 0.0 if ≥500)
+    mw_score = max(0.0, min(1.0, (500.0 - mw) / 140.0)) if mw is not None else 0.5
+
+    # Component 4: TPSA (score 1.0 if 40-90, 0.0 if <20 or >120)
+    if tpsa is not None:
+        if 40 <= tpsa <= 90:
+            tpsa_score = 1.0
+        elif tpsa < 40:
+            tpsa_score = max(0.0, tpsa / 40.0)
+        else:  # tpsa > 90
+            tpsa_score = max(0.0, (120.0 - tpsa) / 30.0)
+    else:
+        tpsa_score = 0.5
+
+    # Component 5: HBD (score 1.0 if ≤0.5, 0.0 if ≥3.5)
+    hbd_val = float(hbd) if hbd is not None else 1.0
+    hbd_score = max(0.0, min(1.0, (3.5 - hbd_val) / 3.0))
+
+    # Component 6: pKa (default 8.0 = neutral; score 1.0 if ≤8, 0.0 if ≥10)
+    pka = 8.0  # Default (not computed by RDKit; use neutral assumption)
+    pka_score = max(0.0, min(1.0, (10.0 - pka) / 2.0))
+
+    total = clogp_score + clogd_score + mw_score + tpsa_score + hbd_score + pka_score
+    return round(total, 2)
+
+
+# ---------------------------------------------------------------------------
+# Druglikeness rules: Pfizer 3/75, GSK 4/400 (P11/P16 reference)
+# ---------------------------------------------------------------------------
+
+def compute_druglikeness_rules(props: dict) -> dict:
+    """Compute additional druglikeness rules beyond Lipinski.
+
+    Returns dict with boolean flags:
+      - pfizer_alert: logP > 3 AND TPSA < 75 → high toxicity risk
+      - gsk_alert: logP > 4 AND MW > 400 → poor oral absorption risk
+    """
+    logp = props.get("logP")
+    mw = props.get("MW")
+    tpsa = props.get("tpsa") or props.get("TPSA")
+
+    pfizer_alert = False
+    gsk_alert = False
+
+    if logp is not None and tpsa is not None:
+        pfizer_alert = logp > 3.0 and tpsa < 75.0
+
+    if logp is not None and mw is not None:
+        gsk_alert = logp > 4.0 and mw > 400.0
+
+    return {
+        "pfizer_alert": pfizer_alert,
+        "gsk_alert": gsk_alert,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +277,34 @@ def compute_pains_alert(smiles: str) -> bool:
         return False
     except Exception as exc:
         logger.debug("PAINS check failed for %s: %s", smiles[:60], exc)
+        return False
+
+
+def compute_brenk_alert(smiles: str) -> bool:
+    """Check if a molecule matches any Brenk structural alert pattern.
+
+    Uses RDKit's built-in FilterCatalog with 105 Brenk patterns covering
+    reactivity, toxicity, and metabolic liabilities.
+
+    Reference: Brenk et al., ChemMedChem 2008, 3, 435-444.
+    """
+    try:
+        from rdkit import Chem
+        from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
+
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return False
+
+        params = FilterCatalogParams()
+        params.AddCatalog(FilterCatalogParams.FilterCatalogs.BRENK)
+        catalog = FilterCatalog(params)
+        return catalog.HasMatch(mol)
+
+    except ImportError:
+        return False
+    except Exception as exc:
+        logger.debug("Brenk check failed for %s: %s", smiles[:60], exc)
         return False
 
 
@@ -246,26 +396,30 @@ def compute_sa_score(smiles: str) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 def compute_composite_score(
-    affinity: float,
+    affinity: Optional[float] = None,
     qed: Optional[float] = None,
     logp: Optional[float] = None,
-) -> float:
+) -> Optional[float]:
     """Compute a weighted composite docking score.
 
     Higher is better.  Docking affinity is the dominant term so that
     known target-specific binders rank above generic druglike molecules.
 
+    Returns None if affinity is not available (docking not run yet),
+    because the score would be meaningless without the dominant term.
+
     Formula
     -------
     ``0.65 * norm_affinity + 0.20 * qed + 0.15 * logp_penalty``
 
-    - ``norm_affinity``: ``min(-14, affinity) / -14`` clamped to [0, 1].
+    - ``norm_affinity``: ``max(-14, affinity) / -14`` clamped to [0, 1].
     - ``logp_penalty``: Gaussian-like centered at 2.5 (sigma 2.5).
 
     Parameters
     ----------
-    affinity : float
+    affinity : float or None
         Binding affinity in kcal/mol (negative = better).
+        None means docking has not been run → returns None.
     qed : float or None
         Quantitative Estimate of Drug-likeness [0, 1].
     logp : float or None
@@ -273,13 +427,16 @@ def compute_composite_score(
 
     Returns
     -------
-    float
-        Composite score in approximately [0, 1].
+    float or None
+        Composite score in approximately [0, 1], or None if no affinity.
     """
+    if affinity is None:
+        return None
+
     import math
 
     # Normalise affinity: cap at -14 kcal/mol, map to [0, 1]
-    capped = min(-14.0, affinity) if affinity < 0 else affinity
+    capped = max(-14.0, affinity) if affinity < 0 else affinity
     norm_affinity = max(0.0, min(1.0, capped / -14.0))
 
     # QED (default 0.5 if unknown)
@@ -300,23 +457,25 @@ def compute_composite_score(
 # ---------------------------------------------------------------------------
 
 def compute_composite_score_v2(
-    affinity: float,
+    affinity: Optional[float] = None,
     admet_score: Optional[float] = None,
     qed: Optional[float] = None,
     novelty: Optional[float] = None,
-) -> float:
+) -> Optional[float]:
     """Compute the V2 weighted composite score.
 
     Formula: vina * 0.55 + admet * 0.20 + drug_likeness * 0.15 + novelty * 0.10
 
-    Docking affinity is the dominant term.
+    Returns None if affinity is not available (docking not run yet),
+    because the score would be meaningless without the dominant term (55%).
 
     Parameters
     ----------
-    affinity : float
+    affinity : float or None
         Binding affinity in kcal/mol (negative = better).
+        None means docking has not been run → returns None.
     admet_score : float or None
-        ADMET composite score [0, 1].
+        ADMET composite score [0, 1]. None if ADMET not run.
     qed : float or None
         Drug-likeness QED [0, 1].
     novelty : float or None
@@ -324,10 +483,13 @@ def compute_composite_score_v2(
 
     Returns
     -------
-    float
-        Composite V2 score in [0, 1].
+    float or None
+        Composite V2 score in [0, 1], or None if no affinity.
     """
-    capped = min(-14.0, affinity) if affinity < 0 else affinity
+    if affinity is None:
+        return None
+
+    capped = max(-14.0, affinity) if affinity < 0 else affinity
     norm_affinity = max(0.0, min(1.0, capped / -14.0))
 
     admet_val = admet_score if admet_score is not None else 0.5
@@ -403,7 +565,7 @@ def score_results(docking_results: list[dict]) -> list[dict]:
     """
     for entry in docking_results:
         smiles = entry.get("smiles", "")
-        affinity = entry.get("affinity", 0.0)
+        affinity = entry.get("affinity")  # None if docking not run
 
         # Compute properties
         props = compute_properties(smiles)
@@ -413,7 +575,7 @@ def score_results(docking_results: list[dict]) -> list[dict]:
         entry["pains_alert"] = compute_pains_alert(smiles)
         entry["sa_score"] = compute_sa_score(smiles)
 
-        # Composite score
+        # Composite score — None if no docking affinity
         entry["composite_score"] = compute_composite_score(
             affinity,
             qed=props.get("qed"),
@@ -423,8 +585,11 @@ def score_results(docking_results: list[dict]) -> list[dict]:
         # 2D SVG
         entry["svg_2d"] = generate_2d_svg(smiles)
 
-    # Sort by composite score descending
-    docking_results.sort(key=lambda r: r.get("composite_score", 0.0), reverse=True)
+    # Sort by composite score descending (None sorts last)
+    docking_results.sort(
+        key=lambda r: r.get("composite_score") if r.get("composite_score") is not None else -999,
+        reverse=True,
+    )
     return docking_results
 
 
@@ -456,7 +621,7 @@ def score_results_v2(
 
     for entry in docking_results:
         smiles = entry.get("smiles", "")
-        affinity = entry.get("affinity", 0.0)
+        affinity = entry.get("affinity")  # None if docking not run
 
         # Compute basic properties
         props = compute_properties(smiles)
@@ -473,13 +638,13 @@ def score_results_v2(
         admet_data = admet_by_smiles.get(smiles)
         if admet_data:
             entry["admet"] = admet_data
-            admet_composite = admet_data.get("composite_score", 0.5)
+            admet_composite = admet_data.get("composite_score")
         else:
             admet_composite = None
 
         novelty = entry.get("novelty_score")
 
-        # V2 composite score
+        # V2 composite score — None if no docking affinity
         entry["composite_score"] = compute_composite_score_v2(
             affinity,
             admet_score=admet_composite,
@@ -487,7 +652,11 @@ def score_results_v2(
             novelty=novelty,
         )
 
-    docking_results.sort(key=lambda r: r.get("composite_score", 0.0), reverse=True)
+    # Sort by composite score descending (None sorts last)
+    docking_results.sort(
+        key=lambda r: r.get("composite_score") if r.get("composite_score") is not None else -999,
+        reverse=True,
+    )
     return docking_results
 
 

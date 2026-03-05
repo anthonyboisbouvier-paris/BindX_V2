@@ -333,13 +333,32 @@ export default function RunHistory({ runs = [], onCancel, onArchive }) {
                       )}
                       {/* Run logs */}
                       {run.logs && run.logs.length > 0 && (
-                        <div className="mt-1 max-h-24 overflow-y-auto bg-gray-900 rounded-md px-2 py-1.5 text-[10px] font-mono text-gray-300 space-y-0.5 scrollbar-thin">
-                          {run.logs.map((log, li) => (
-                            <div key={li} className={`${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-amber-400' : 'text-gray-400'}`}>
-                              {log.timestamp && <span className="text-gray-600 mr-1">{new Date(log.timestamp).toLocaleTimeString()}</span>}
-                              {log.message || String(log)}
-                            </div>
-                          ))}
+                        <div className="mt-1 relative group/logs">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const text = run.logs.map(l => {
+                                const ts = l.created_at ? new Date(l.created_at).toLocaleTimeString() : ''
+                                return `${ts} [${(l.level || 'info').toUpperCase()}] ${l.message || ''}`
+                              }).join('\n')
+                              navigator.clipboard.writeText(text)
+                            }}
+                            className="absolute top-1 right-1 z-10 opacity-0 group-hover/logs:opacity-100 text-[9px] text-gray-500 hover:text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded transition-opacity"
+                            title="Copy logs"
+                          >
+                            Copy
+                          </button>
+                          <div className="max-h-48 overflow-y-auto bg-gray-900 rounded-md px-2 py-1.5 text-[10px] font-mono text-gray-300 space-y-0.5 scrollbar-thin">
+                            {run.logs.map((log, li) => (
+                              <div key={li} className={`flex gap-1.5 ${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-amber-400' : 'text-gray-400'}`}>
+                                {(log.created_at || log.timestamp) && (
+                                  <span className="text-gray-600 flex-shrink-0">{new Date(log.created_at || log.timestamp).toLocaleTimeString()}</span>
+                                )}
+                                <span className="flex-shrink-0 text-gray-600">[{(log.level || 'info').toUpperCase().slice(0, 4)}]</span>
+                                <span>{log.message || String(log)}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                       {run.current_step && !run.logs?.length && (

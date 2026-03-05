@@ -169,20 +169,6 @@ function ProjectTree({ project, projectId, currentPhaseId, getPhaseStatus }) {
         <span className="flex-1 truncate font-medium">{project.name}</span>
       </NavLink>
 
-      {/* Target info row */}
-      {(uniprotId || geneName) && (
-        <div className="ml-3 border-l border-white/[.07] pl-2 mt-1">
-          <div className="px-2 py-1 flex items-center gap-1.5 flex-wrap">
-            <svg className="w-3 h-3 text-bx-dim shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-            </svg>
-            {geneName && <span className="text-[10px] text-white/50">{geneName}</span>}
-            {uniprotId && <span className="text-[10px] font-mono text-bx-cyan">{uniprotId}</span>}
-          </div>
-        </div>
-      )}
-
       {campaign ? (
         <div className="ml-3 border-l border-white/[.07] pl-2 mt-1">
           {/* Campaign header — not a link, just a label */}

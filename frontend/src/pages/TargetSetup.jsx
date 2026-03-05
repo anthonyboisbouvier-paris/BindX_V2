@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
-import { previewTarget, detectPockets } from '../api.js'
+import { previewTarget, detectPockets, v9PredictStructure } from '../api.js'
 import ProteinViewer from '../components/ProteinViewer.jsx'
 import ViewerDiagnostic from '../components/ViewerDiagnostic.jsx'
 import BindXLogo from '../components/BindXLogo.jsx'
@@ -356,7 +356,7 @@ export default function TargetSetup() {
       // Step 3: Detect pockets via backend
       setLoadingStep('Detecting binding pockets (P2Rank)...')
       const ligandId = pdbInfo.ligands?.[0] || null
-      const pocketsResult = await detectPockets(pdbInfo.download_url, pdbInfo.pdb_id, ligandId)
+      const pocketsResult = await detectPockets(pdbInfo.download_url, pdbInfo.pdb_id, ligandId, pdbInfo.source || '')
       const pockets = pocketsResult.pockets || []
 
       // Build structure entry
@@ -470,7 +470,7 @@ export default function TargetSetup() {
     setPocketsLoading(true)
     setSelectedPocketIdx(0)
     try {
-      const result = await detectPockets(url, structure?.label || 'structure', structure?.ligand_id)
+      const result = await detectPockets(url, structure?.label || 'structure', structure?.ligand_id, structure?.source || '')
       setPocketsCache(prev => ({ ...prev, [url]: result.pockets || [] }))
     } catch (err) {
       console.warn('[TargetSetup] Pocket detection failed:', err.message)
@@ -604,17 +604,65 @@ export default function TargetSetup() {
               placeholder=">protein_name&#10;MTEYKLVVVGAGGVGKSALTIQLIQNHFVDE..."
               rows={5}
               className="w-full px-4 py-3 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-bx-mint/20 focus:border-bx-surface font-mono resize-none"
-              disabled={true}
+              disabled={loading}
             />
-            <div className="bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 space-y-2">
-              <p className="text-sm text-amber-700 font-medium">Structure prediction from FASTA sequence</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-amber-600">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={async () => {
+                  if (!fastaInput.trim()) return
+                  setLoading(true)
+                  setError(null)
+                  setLoadingStep('Predicting structure with ESMFold...')
+                  try {
+                    const result = await v9PredictStructure(fastaInput)
+                    // Create a blob URL from the PDB text
+                    const blob = new Blob([result.pdb_text], { type: 'chemical/x-pdb' })
+                    const pdbBlobUrl = URL.createObjectURL(blob)
+                    setPreviewData({
+                      structures: [{
+                        pdb_id: 'esmfold_prediction',
+                        source: 'esmfold',
+                        method: result.method,
+                        resolution: null,
+                        pdb_url: pdbBlobUrl,
+                      }],
+                      uniprot_id: null,
+                    })
+                    setSelectedStructureIdx(0)
+                    setPdbUrl(pdbBlobUrl)
+                    toast.success(`Structure predicted: ${result.sequence_length} residues`)
+                  } catch (e) {
+                    setError(e.response?.data?.detail || e.message || 'Prediction failed')
+                  } finally {
+                    setLoading(false)
+                    setLoadingStep(null)
+                  }
+                }}
+                disabled={loading || !fastaInput.trim()}
+                className={`px-5 py-2.5 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 ${
+                  loading || !fastaInput.trim()
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-purple-600 text-white hover:bg-purple-700'
+                }`}
+              >
+                {loading ? (
+                  <>
+                    <BindXLogo variant="loading" size={16} />
+                    Predicting...
+                  </>
+                ) : 'Predict with ESMFold'}
+              </button>
+              <span className="text-xs text-gray-400">~1-3 min for typical proteins</span>
+            </div>
+            <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 space-y-2">
+              <p className="text-sm text-blue-700 font-medium">Structure prediction from FASTA sequence</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-blue-600">
                 <div className="flex items-start gap-2">
-                  <span className="text-amber-400 mt-0.5">&#9679;</span>
-                  <span><strong>ESMFold</strong> — Fast prediction (~2 min). Requires GPU backend. <em>Coming soon.</em></span>
+                  <span className="text-blue-400 mt-0.5">&#9679;</span>
+                  <span><strong>ESMFold</strong> — Fast prediction (~2 min). Uses Meta's ESMFold API. Max 2000 residues.</span>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="text-amber-400 mt-0.5">&#9679;</span>
+                  <span className="text-blue-400 mt-0.5">&#9679;</span>
                   <span><strong>AlphaFold</strong> — Pre-computed structures are auto-fetched when using UniProt ID input.</span>
                 </div>
               </div>
@@ -749,19 +797,18 @@ export default function TargetSetup() {
 
             {/* Right: Structure selection + Pockets */}
             <div className="space-y-5">
-              {/* Structure selection — show available structures (hide ESMFold until supported) */}
-              {previewData.structures?.filter(s => s.source !== 'esmfold').length > 0 && (
+              {/* Structure selection — show available structures */}
+              {previewData.structures?.length > 0 && (
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-2">
                     Available Structures
                     <span className="ml-1.5 text-xs font-normal text-gray-400">
-                      ({previewData.structures.filter(s => s.source !== 'esmfold').length})
+                      ({previewData.structures.length})
                     </span>
                   </h3>
                   <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
-                    {previewData.structures.filter(s => s.source !== 'esmfold').map((s, i) => {
-                      // Find the real index in the full structures array for selection
-                      const realIdx = previewData.structures.indexOf(s)
+                    {previewData.structures.map((s, i) => {
+                      const realIdx = i
                       return (
                       <button
                         key={i}
@@ -784,9 +831,11 @@ export default function TargetSetup() {
                             <span className={`text-sm px-1.5 py-0.5 rounded ${
                               s.source === 'alphafold'
                                 ? 'bg-purple-100 text-purple-700'
+                                : s.source === 'esmfold'
+                                ? 'bg-green-100 text-green-700'
                                 : 'bg-gray-100 text-gray-500'
                             }`}>
-                              {s.source === 'alphafold' ? 'AlphaFold' : (s.method || 'Experimental')}
+                              {s.source === 'alphafold' ? 'AlphaFold' : s.source === 'esmfold' ? 'ESMFold' : (s.method || 'Experimental')}
                             </span>
                           </div>
                           {s.resolution && (

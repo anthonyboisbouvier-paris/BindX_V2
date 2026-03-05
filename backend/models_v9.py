@@ -152,6 +152,11 @@ class MoleculeORM_V9(BaseV9):
     generation_level: Mapped[int] = mapped_column(Integer, default=0)
     parent_molecule_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("molecules.id"))
     ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Annotations
+    user_comment: Mapped[Optional[str]] = mapped_column(Text)
+    ai_comment: Mapped[Optional[str]] = mapped_column(Text)
+    tags: Mapped[Optional[list]] = mapped_column(ARRAY(Text), default=list)
+    invalidated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
 
     # Relationships

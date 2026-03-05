@@ -346,6 +346,7 @@ def _detect_pockets_from_url(
     download_url: str,
     label: str,
     ligand_id: Optional[str] = None,
+    structure_source: str = "",
 ) -> list[dict]:
     """Download a PDB file from *download_url* and run pocket detection."""
     if not download_url:
@@ -371,6 +372,7 @@ def _detect_pockets_from_url(
                 pdb_path=pdb_path,
                 work_dir=tmp_path,
                 ligand_id=ligand_id,
+                structure_source=structure_source,
             )
 
             formatted: list[dict] = []
@@ -434,11 +436,12 @@ async def detect_pockets_endpoint(body: dict) -> dict:
 
     label = body.get("label", "structure")
     ligand_id = body.get("ligand_id")
+    structure_source = body.get("structure_source", "")
 
     loop = asyncio.get_event_loop()
     try:
         pockets = await loop.run_in_executor(
-            _preview_pool, _detect_pockets_from_url, download_url, label, ligand_id,
+            _preview_pool, _detect_pockets_from_url, download_url, label, ligand_id, structure_source,
         )
     except Exception as exc:
         logger.warning("Pocket detection endpoint failed: %s", exc)

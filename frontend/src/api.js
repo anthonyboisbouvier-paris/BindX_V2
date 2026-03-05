@@ -77,18 +77,25 @@ export async function previewTarget(uniprotId) {
   return response.data
 }
 
-export async function detectPockets(downloadUrl, label, ligandId) {
+export async function detectPockets(downloadUrl, label, ligandId, structureSource) {
   const response = await apiClient.post('/detect-pockets', {
     download_url: downloadUrl,
     label: label || 'structure',
     ligand_id: ligandId || null,
+    structure_source: structureSource || '',
   }, { timeout: 120000 })
   return response.data
 }
 
 export async function analyzeScaffold(smiles) {
-  const response = await apiClient.post('/molecule/analyze-scaffold', { smiles })
-  return response.data
+  // Try V9 endpoint first, fall back to legacy
+  try {
+    const response = await apiClient.post('/v9/scaffold-analysis', { smiles })
+    return response.data
+  } catch {
+    const response = await apiClient.post('/molecule/analyze-scaffold', { smiles })
+    return response.data
+  }
 }
 
 export async function queryAgent(agentName, context, projectId) {
@@ -165,6 +172,10 @@ export async function v9GetPhase(phaseId) {
 export async function v9UpdatePhase(phaseId, data) {
   const response = await apiClient.put(`/v9/phases/${phaseId}`, data)
   return response.data
+}
+
+export async function v9DeletePhase(phaseId) {
+  await apiClient.delete(`/v9/phases/${phaseId}`)
 }
 
 export async function v9FreezePhase(phaseId) {
@@ -262,12 +273,27 @@ export async function v9BookmarkBatch(phaseId, moleculeIds, bookmarked) {
   return response.data
 }
 
+export async function v9UpdateAnnotations(moleculeId, annotations) {
+  const response = await apiClient.patch(`/v9/molecules/${moleculeId}/annotations`, annotations)
+  return response.data
+}
+
 // ---------------------------------------------------------------------------
 // V9: Utilities
 // ---------------------------------------------------------------------------
 
 export async function v9SmilesToMolblock(smiles) {
   const response = await apiClient.post('/v9/molecule/smiles-to-3d', { smiles })
+  return response.data
+}
+
+export async function v9PredictStructure(sequence) {
+  const response = await apiClient.post('/v9/predict-structure', { sequence }, { timeout: 300000 })
+  return response.data
+}
+
+export async function v9GpuHealth() {
+  const response = await apiClient.get('/v9/health/gpu')
   return response.data
 }
 

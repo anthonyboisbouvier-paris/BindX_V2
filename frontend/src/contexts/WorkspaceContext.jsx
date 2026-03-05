@@ -185,6 +185,7 @@ export function useWorkspace() {
     // Phase actions
     freezePhase: store.freezePhase,
     unfreezePhase: store.unfreezePhase,
+    deletePhase: store.deletePhase,
     getPhaseStatus: store.getPhaseStatus,
 
     // Runs & Molecules actions

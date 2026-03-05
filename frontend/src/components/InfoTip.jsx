@@ -100,54 +100,120 @@ export default function InfoTip({ text, variant = 'dark', size = 'sm', className
 
 // ---------------------------------------------------------------------------
 // Tooltip dictionary — centralized explanations for all concepts
+// English, accessible, scientifically accurate. 2-4 sentences per entry.
+// Explains HOW each value is computed (which columns/properties feed into it).
 // ---------------------------------------------------------------------------
 export const TIPS = {
-  // Column tooltips
-  docking_score: 'Docking score from GNINA. Lower (more negative) = stronger predicted binding affinity. Typically ranges from -12 to 0 kcal/mol.',
-  cnn_score: 'Convolutional Neural Network pose score (0-1). Higher = more likely to be the correct binding pose. Above 0.7 is good.',
-  cnn_affinity: 'CNN-predicted binding affinity in pKd. Higher = stronger binding. Above 6 is considered good.',
-  cnn_vs: 'CNN Virtual Screening score. A composite ranking metric combining pose quality and affinity.',
-  composite_score: 'Weighted composite score combining docking, ADMET, and drug-likeness. Higher = better overall drug candidate.',
-  smiles: 'SMILES (Simplified Molecular Input Line Entry System). A text notation for chemical structure.',
-  MW: 'Molecular Weight in Daltons. Drug-like molecules typically fall between 150-500 Da (Lipinski Ro5).',
-  logP: 'Octanol-water partition coefficient. Measures lipophilicity. Ideal range: -0.4 to 5.6 (Lipinski: ≤5).',
-  HBD: 'Hydrogen Bond Donors. Number of OH and NH groups. Lipinski limit: ≤5.',
-  HBA: 'Hydrogen Bond Acceptors. Number of O and N atoms. Lipinski limit: ≤10.',
-  TPSA: 'Topological Polar Surface Area (Å²). Predicts oral absorption and BBB penetration. Below 140 Å² for oral drugs.',
-  QED: 'Quantitative Estimate of Drug-likeness (0-1). Higher = more drug-like. Above 0.5 is generally favorable.',
-  solubility: 'Predicted aqueous solubility. Higher is better for oral bioavailability.',
-  BBB: 'Blood-Brain Barrier permeability prediction. Higher score = more likely to cross the BBB.',
-  hERG: 'hERG channel inhibition risk. High values indicate potential cardiac toxicity (QT prolongation).',
-  metabolic_stability: 'Predicted metabolic stability. Higher = longer half-life, less rapid clearance.',
-  oral_bioavailability: 'Predicted fraction of drug reaching systemic circulation after oral administration.',
-  lipinski_pass: 'Lipinski Rule of 5: MW ≤ 500, logP ≤ 5, HBD ≤ 5, HBA ≤ 10. Predicts oral absorption.',
-  safety_color_code: 'Overall safety assessment. Green = low risk, Yellow = moderate caution, Red = high concern.',
-  cluster_id: 'Chemical cluster assignment from structural similarity analysis (Butina clustering).',
-  generation_level: 'Number of generative design iterations from the original scaffold.',
-  interactions_count: 'Total number of protein-ligand interactions detected by ProLIF analysis.',
+  // --- Columns: Docking ---
+  docking_score: 'Predicted binding energy between the molecule and the protein pocket (kcal/mol). Computed by GNINA using CNN scoring on the docked pose. More negative = stronger binding. Good candidates typically score below -7 kcal/mol.',
+  cnn_score: 'Neural network pose confidence score (0-1). GNINA\'s CNN evaluates whether the molecule is correctly oriented in the binding pocket. Above 0.7, the pose is considered reliable.',
+  cnn_affinity: 'CNN-predicted binding affinity expressed as pKd. Computed by GNINA\'s deep learning model from the 3D docked pose. Higher values mean stronger binding; above 6 is promising.',
+  cnn_vs: 'Virtual screening score combining pose quality (cnn_score) and predicted affinity (cnn_affinity). Used to rank molecules in large-scale screening campaigns.',
+  consensus_ecr: 'Exponential Consensus Ranking: aggregates multiple docking scores (docking_score, cnn_score, cnn_affinity) into a single ranking. Higher values indicate consistently good ranking across all scoring methods.',
 
-  // Run types
-  run_import: 'Import molecules from external databases (ChEMBL, ZINC), file upload (SDF/CSV), or from a previous phase\'s bookmarked hits.',
-  run_docking: 'Molecular docking using GNINA (GPU-accelerated). Predicts binding pose and affinity of molecules in the target\'s binding pocket.',
-  run_admet: 'ADMET property prediction (Absorption, Distribution, Metabolism, Excretion, Toxicity). Evaluates drug-likeness and safety profiles.',
-  run_scoring: 'Composite scoring: combines docking scores, ADMET properties, and drug-likeness into a single weighted ranking.',
-  run_enrichment: 'Enrichment analysis: ProLIF interaction fingerprints, clustering, and structural analysis.',
-  run_generation: 'AI-driven molecule generation. Creates novel analogs via scaffold hopping, fragment linking, or R-group exploration.',
-  run_clustering: 'Chemical clustering using Butina algorithm on molecular fingerprints. Groups similar molecules together.',
+  // --- Columns: ADMET ---
+  logP: 'Lipophilicity measure — the molecule\'s ability to cross lipid membranes. Computed from the molecular structure (atom contributions). Ideal range: -0.4 to 5. Above 5, poor absorption and increased toxicity risk.',
+  MW: 'Molecular weight in Daltons. Computed directly from the molecular formula. Oral drugs are typically 150-500 Da. Above 500, intestinal absorption drops significantly (Lipinski Rule of 5).',
+  HBD: 'Number of hydrogen bond donors (OH and NH groups). Counted from the molecular structure. Lipinski\'s Rule of 5 recommends a maximum of 5 for good oral absorption.',
+  HBA: 'Number of hydrogen bond acceptors (O and N atoms). Counted from the molecular structure. Lipinski recommends a maximum of 10. Excess acceptors reduce membrane permeability.',
+  TPSA: 'Topological Polar Surface Area in Angstroms squared. Calculated from the sum of polar atom surfaces (O, N, attached H). Below 140 for oral drugs; below 90 for blood-brain barrier penetration.',
+  QED: 'Quantitative Estimate of Drug-likeness (0-1). Combines MW, logP, HBD, HBA, TPSA, rotatable bonds, aromatic rings, and alerts into a single score. Above 0.5 indicates a favorable drug-like profile.',
+  solubility: 'Predicted aqueous solubility. Estimated from molecular descriptors (logP, MW, aromatic ring count). Essential for drug dissolution and absorption. Higher values are better.',
+  BBB: 'Blood-Brain Barrier penetration prediction. Computed from logP, TPSA, MW, and HBD. High score = molecule can reach the brain. Desirable for neurological targets, undesirable otherwise.',
+  hERG: 'Predicted hERG potassium channel inhibition risk. Computed from molecular descriptors. High values signal cardiac toxicity risk (QT prolongation). One of the most critical safety endpoints in drug development.',
+  metabolic_stability: 'Predicted resistance to liver metabolism (CYP enzyme degradation). Higher values mean the molecule persists longer in the body, allowing for less frequent dosing.',
+  oral_bioavailability: 'Fraction of the drug reaching systemic circulation after oral administration (0-100%). Predicted from absorption and first-pass metabolism models. Above 30% is generally acceptable.',
+  lipinski_pass: 'Lipinski\'s Rule of 5: checks if MW <= 500, logP <= 5, HBD <= 5, HBA <= 10. All four properties are read from the corresponding dashboard columns. Pass = the molecule is likely orally bioavailable.',
+  plasma_protein_binding: 'Fraction bound to blood plasma proteins. Predicted from molecular descriptors. Highly bound molecules (>95%) have less free drug available to reach the target, potentially reducing efficacy.',
+  cns_mpo: 'CNS Multi-Parameter Optimization score (0-6). Computed from logP, TPSA, MW, HBD, pKa, and CLint. Each property contributes 0-1 points. Above 4 indicates good CNS drug potential.',
+  pfizer_alert: 'Pfizer 3/75 alert: flags molecules with logP > 3 AND TPSA < 75 (both from dashboard columns). This lipophilic + low-polarity profile is associated with increased toxicity risk.',
+  gsk_alert: 'GSK 4/400 alert: flags molecules with logP > 4 AND MW > 400 (both from dashboard columns). This profile is associated with higher clinical failure rates.',
+  heavy_atom_count: 'Number of non-hydrogen atoms. Counted directly from the molecular structure. Typical drugs contain 15-35 heavy atoms. Used to compute ligand efficiency (docking_score / heavy_atom_count).',
+  sa_score: 'Synthetic Accessibility score (1-10). Computed from molecular complexity, ring systems, and stereocenters. Lower = easier to synthesize. Below 4 is considered readily accessible.',
+  ro3_pass: 'Rule of 3 for fragments: checks MW <= 300, logP <= 3, HBD <= 3, HBA <= 3. Used to evaluate whether a molecule is a good starting fragment for optimization campaigns.',
 
-  // Concepts
-  pareto: 'Pareto front analysis: identifies molecules that are optimal across two competing objectives (e.g., potency vs. selectivity). Points on the Pareto front cannot be improved on one axis without worsening the other.',
-  bookmark: 'Bookmarked molecules are flagged as hits of interest. They can be promoted to the next phase of the drug discovery pipeline.',
-  freeze: 'Freezing a phase locks its data. Bookmarked molecules are preserved for the next phase. Unfreezing is possible but requires confirmation.',
-  phase_a: 'Hit Discovery: Initial screening to find molecules that bind to the target. Uses large libraries and fast filtering.',
-  phase_b: 'Hit-to-Lead: Refine initial hits with detailed analysis. Evaluate ADMET, selectivity, and SAR relationships.',
-  phase_c: 'Lead Optimization: Optimize lead compounds for potency, selectivity, and drug-like properties. Final candidates for preclinical.',
-  campaign: 'A campaign groups phases for one target-pocket combination. It defines the screening strategy and scoring weights.',
-  pocket: 'A binding pocket is a cavity on the protein surface where a drug molecule can bind. Identified by P2Rank or manual selection.',
+  // --- Columns: Scoring ---
+  composite_score: 'Weighted composite score combining docking_score, QED, and ADMET properties into a single ranking (0-100). Weights are configurable per campaign. Higher = better overall candidate. Computed from dashboard columns.',
+  ligand_efficiency: 'Ligand Efficiency = -docking_score / heavy_atom_count. Normalizes binding affinity by molecular size. Allows fair comparison between molecules of different sizes. Higher is better.',
 
-  // Annotation columns
-  tags: 'Custom tags for organizing and categorizing molecules. Add labels like "promising", "backup", "review" to track your analysis.',
-  invalidated: 'Mark a molecule as invalid (e.g., PAINS alert, synthesis issue, reviewer decision). Invalidated rows are dimmed in the table.',
-  user_comment: 'Free-text notes for your analysis. Add observations, reminders, or decisions directly in the table.',
-  ai_comment: 'AI-generated notes from the agent analysis. Automatically filled when the AI Agent reviews molecules.',
+  // --- Columns: Enrichment ---
+  interactions_count: 'Total number of protein-ligand interactions detected by ProLIF analysis (H-bonds, hydrophobic contacts, salt bridges, pi-stacking). More interactions generally indicate a more stable and specific binding mode.',
+  scaffold: 'Murcko scaffold: the core ring system and linker chains after removing all side chains. Computed using RDKit\'s MurckoScaffold decomposition. Used to group molecules by chemical family.',
+
+  // --- Columns: Clustering ---
+  cluster_id: 'Chemical cluster number assigned by Butina clustering algorithm. Molecules are grouped by Tanimoto similarity of Morgan fingerprints (radius 2). Same cluster = similar chemical scaffold.',
+  scaffold_smiles: 'SMILES notation of the scaffold shared by molecules in this cluster. Represents the common chemical motif of the group.',
+  tanimoto_to_centroid: 'Tanimoto similarity (0-1) between this molecule\'s Morgan fingerprint and the cluster centroid. Closer to 1 = more representative of the chemical group.',
+  is_representative: 'Whether this molecule is the centroid (most representative) of its cluster. Computed as the molecule with highest average similarity to all other cluster members. Useful for selecting one exemplar per group.',
+
+  // --- Columns: Off-target ---
+  selectivity_score: 'Selectivity score (0-1). Computed by comparing the docking score on the intended target vs. scores on anti-targets (hERG, CYP450, etc.). Higher = more selective for the intended target.',
+  off_target_hits: 'Number of off-target proteins with significant predicted binding. Computed from docking against a panel of anti-targets. Fewer hits = more specific and safer molecule.',
+  selectivity_ratio: 'Ratio of target affinity to the best off-target affinity (docking_score_target / docking_score_best_off_target). A ratio above 10 indicates excellent selectivity.',
+
+  // --- Columns: Confidence ---
+  confidence_score: 'Overall confidence score (0-1). Aggregates reliability indicators: PAINS alerts, Brenk alerts, applicability domain check, and prediction convergence across pipeline steps. Low score = interpret results with caution.',
+  pains_alert: 'PAINS (Pan-Assay Interference Compounds) alert. Detected by matching the molecule\'s structure against known problematic substructure patterns. These molecules are prone to false positives in biological assays.',
+  applicability_domain: 'Whether the molecule falls within the training domain of the prediction models. Computed by comparing molecular descriptors to the models\' training set. Outside the domain = less reliable predictions.',
+  brenk_alert: 'Brenk structural alert: detects reactive or unstable chemical groups known to cause problems in drug development. Computed by substructure matching against Brenk\'s published filter list. An alert does not disqualify but warrants attention.',
+
+  // --- Columns: Retrosynthesis ---
+  n_synth_steps: 'Number of synthetic steps needed to make this molecule from commercially available reagents. Computed by AI retrosynthesis (AiZynthFinder). Fewer steps = faster and cheaper synthesis.',
+  synth_confidence: 'Confidence in the proposed synthesis route feasibility (0-1). Computed by the retrosynthesis AI based on route plausibility and reaction precedent. Above 0.7 = realistic route; below 0.3 = uncertain.',
+  synth_cost_estimate: 'Estimated synthesis cost: low, medium, or high. Derived from number of steps (n_synth_steps), reagent availability (reagents_available), and reaction complexity.',
+  reagents_available: 'Whether all required starting materials are commercially available. Checked against supplier catalogs by the retrosynthesis pipeline. If not, additional preparation steps are needed.',
+
+  // --- Columns: Safety ---
+  herg_risk: 'hERG channel inhibition risk (0-1). Predicted from molecular descriptors related to cation-pi interactions and lipophilicity. This potassium channel regulates heartbeat; risk >0.5 can cause fatal arrhythmias. Elimination criterion in pharma.',
+  ames_mutagenicity: 'Ames mutagenicity test prediction. Computed by matching structural alerts and ML models trained on Ames test data. A positive result is a serious safety red flag indicating potential DNA damage.',
+  hepatotoxicity: 'Liver toxicity risk (0-1). Predicted from molecular descriptors using models trained on DILI (Drug-Induced Liver Injury) datasets. High score signals danger of hepatic damage.',
+  skin_sensitization: 'Skin sensitization risk. Predicted from reactive group detection and molecular descriptors. A positive result means the molecule could trigger allergic reactions on skin contact.',
+  carcinogenicity: 'Carcinogenicity risk (0-1). Predicted from structural alerts and ML models trained on rodent carcinogenicity data. Any significant score should be investigated as a priority.',
+  safety_color_code: 'Overall safety summary. Computed from herg_risk, ames_mutagenicity, hepatotoxicity, skin_sensitization, and carcinogenicity columns. Green = safe profile, Yellow = moderate signals, Red = at least one critical risk.',
+
+  // --- Columns: Activity Cliffs ---
+  is_cliff: 'Activity cliff flag: two molecules with high structural similarity (Tanimoto > 0.85) but very different activity. Computed by comparing docking_score differences vs. fingerprint similarity across all pairs.',
+  sali_max: 'Maximum SALI (Structure-Activity Landscape Index). Computed as |activity_diff| / (1 - similarity) for the most contrasting neighbor pair. Higher values indicate a sharper activity cliff.',
+  n_cliffs: 'Number of cliff pairs involving this molecule. Computed from pairwise SALI analysis. High count means the molecule sits in a sensitive region of the structure-activity landscape.',
+
+  // --- Columns: Pharmacophore ---
+  pharmacophore_features: 'Number of pharmacophoric features detected (H-bond donors/acceptors, hydrophobic zones, charges, aromatic rings). Computed from the 3D molecular structure. More features = richer target interaction potential.',
+  pharmacophore_similarity: 'Pharmacophore similarity to the reference model (0-1). Computed by aligning 3D pharmacophore features with the best-known active compounds. High score = same 3D interaction pattern as proven hits.',
+
+  // --- Columns: Generation ---
+  generation_level: 'Generation number: how many rounds of generative AI design since the original molecule. Generation 0 = imported molecule, 1 = first optimization cycle, 2 = second cycle, etc.',
+  parent_molecule_id: 'ID of the parent molecule from which this one was derived by generative design. Allows tracing the chemical genealogy across optimization cycles.',
+
+  // --- Columns: Identity ---
+  smiles: 'SMILES: universal text notation for chemical structures. Each molecule has a unique SMILES encoding its atoms, bonds, and stereochemistry. Used as the primary molecular identifier.',
+  inchikey: 'InChIKey: a unique 27-character hash identifier for each molecule. Enables lookup across global databases (PubChem, ChEMBL, ZINC). Computed deterministically from the molecular structure.',
+
+  // --- Run types ---
+  run_import: 'Imports molecules from databases (ChEMBL, ZINC), files (SDF/CSV), or bookmarked hits from a previous phase. This is the first step of every phase to populate the molecule table.',
+  run_docking: 'Molecular docking with GNINA (GPU-accelerated). Simulates how each molecule fits into the protein binding pocket and predicts binding energy. Produces docking_score, cnn_score, cnn_affinity columns.',
+  run_admet: 'Predicts ADMET properties: Absorption, Distribution, Metabolism, Excretion, Toxicity. Computes logP, MW, HBD, HBA, TPSA, QED, solubility, BBB, hERG, and Lipinski columns from the molecular structure.',
+  run_scoring: 'Computes a weighted composite score combining docking_score, QED, and ADMET properties into a single 0-100 ranking. Also computes ligand_efficiency from docking_score and heavy_atom_count.',
+  run_enrichment: 'Enrichment analysis: identifies protein-ligand interactions using ProLIF (interactions_count), extracts Murcko scaffolds (scaffold column), and analyzes structural diversity.',
+  run_generation: 'AI de novo generation. Creates new molecules by modifying top hits: fragment replacement, R-group exploration, scaffold hopping. Produces new molecules with generation_level and parent_molecule_id.',
+  run_clustering: 'Chemical clustering using Butina algorithm on Morgan fingerprints (Tanimoto similarity). Groups similar molecules to identify chemical series and ensure structural diversity in the selection.',
+  run_off_target: 'Off-target selectivity: docks molecules against anti-target proteins (hERG, CYP450, etc.) to verify they don\'t bind unintended targets. Produces selectivity_score, off_target_hits, selectivity_ratio.',
+  run_confidence: 'Confidence analysis: evaluates prediction reliability via PAINS alerts, Brenk filters, applicability domain checks, and cross-method convergence. Produces confidence_score and alert columns.',
+  run_retrosynthesis: 'AI retrosynthesis: plans the chemical synthesis route, estimates step count (n_synth_steps), cost (synth_cost_estimate), confidence, and checks reagent availability.',
+  run_safety: 'Full safety profile: hERG risk (cardiac), Ames mutagenicity, hepatotoxicity, skin sensitization, and carcinogenicity. Aggregated into a color-coded safety summary (safety_color_code).',
+
+  // --- Concepts ---
+  pareto: 'Pareto front analysis: identifies optimal molecules when two objectives compete (e.g., potency vs. selectivity). Points on the front cannot be improved on one axis without degrading the other. Select any two numeric columns as axes.',
+  bookmark: 'Bookmarked molecules are flagged as hits of interest. They can be promoted to the next pipeline phase via the "Next Phase" action. Bookmarks are preserved when the phase is frozen.',
+  freeze: 'Freezing a phase locks its data. Bookmarked molecules are preserved for the next phase. Unfreezing is possible but requires confirmation, especially if downstream phases have runs.',
+  phase_a: 'Hit Discovery: initial screening to find molecules that bind the target. Uses large compound libraries and rapid filtering (docking + ADMET) to identify first hits from thousands of candidates.',
+  phase_b: 'Hit-to-Lead: refines initial hits with detailed analysis. Evaluates ADMET, off-target selectivity, and structure-activity relationships to select the most promising lead compounds.',
+  phase_c: 'Lead Optimization: optimizes leads for potency, selectivity, and drug-like properties. Uses generative AI, retrosynthesis, and safety profiling. Best candidates advance to preclinical studies.',
+  campaign: 'A campaign groups all phases for one target + pocket combination. It defines the screening strategy and the composite score weights used to rank molecules.',
+  pocket: 'Binding pocket: a cavity on the protein surface where a drug molecule can bind. Automatically detected by P2Rank or manually selected from the 3D structure during target setup.',
+
+  // --- Annotation columns ---
+  tags: 'Custom tags to organize your molecules. Add labels like "promising", "backup", "review needed" to structure your analysis workflow.',
+  invalidated: 'Marks a molecule as invalid (e.g., PAINS alert, synthesis issue, reviewer decision). Invalidated rows are visually dimmed in the table but not deleted.',
+  user_comment: 'Free-text notes for your analysis. Add observations, reminders, or decisions directly in the table. Visible to all project members.',
+  ai_comment: 'Notes generated by the AI agent during automated analysis. Populated when the Campaign Agent reviews molecules and identifies patterns or concerns.',
 }

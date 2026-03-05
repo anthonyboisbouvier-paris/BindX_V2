@@ -278,6 +278,13 @@ class RunListItem(BaseModel):
 # Molecule schemas
 # ---------------------------------------------------------------------------
 
+class MoleculeAnnotationUpdate(BaseModel):
+    """Partial update for molecule annotations (user_comment, tags, invalidated)."""
+    user_comment: Optional[str] = None
+    tags: Optional[List[str]] = None
+    invalidated: Optional[bool] = None
+
+
 class MoleculeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -291,6 +298,10 @@ class MoleculeResponse(BaseModel):
     generation_level: int = 0
     parent_molecule_id: Optional[uuid.UUID] = None
     ai_generated: bool = False
+    user_comment: Optional[str] = None
+    ai_comment: Optional[str] = None
+    tags: Optional[List[str]] = None
+    invalidated: bool = False
     created_at: datetime
     properties: Optional[dict] = None  # {prop_name: value}
 

@@ -66,7 +66,7 @@ function PhaseProgress({ campaigns }) {
   ]
 
   return (
-    <div className="w-full flex items-start justify-between px-2 py-2.5 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg border border-gray-100">
+    <div className="w-full flex items-start justify-between px-2 py-2.5 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg border border-gray-100" style={{ '--circle-center': '14px' }}>
       {types.map((type, i) => {
         const status = phaseStatus(type)
         const isLast = i === types.length - 1
@@ -95,9 +95,9 @@ function PhaseProgress({ campaigns }) {
               </span>
             </div>
             {!isLast && (
-              <div className={`flex-1 h-0.5 self-center mt-1 mx-1 rounded transition-all duration-500 ${
+              <div className={`flex-1 h-0.5 mx-1 rounded transition-all duration-500 ${
                 isDone ? `bg-gradient-to-r ${pc.line}` : 'bg-gray-200'
-              }`} />
+              }`} style={{ marginTop: 'var(--circle-center)' }} />
             )}
           </React.Fragment>
         )
@@ -140,7 +140,7 @@ function ProjectCard({ project, onClick, onDelete, searchQuery, colorIndex = 0 }
       className="group bg-white rounded-card border border-bx-light-border shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 text-left w-full overflow-hidden focus:outline-none focus:ring-2 focus:ring-bx-mint/20 focus:ring-offset-2"
     >
       {/* Top accent bar — visible only on active/hover */}
-      <div className={`h-[3px] w-full transition-all ${
+      <div className={`h-1 w-full transition-all ${
         totalMolecules > 0 && project.status === 'active'
           ? 'bg-gradient-to-r from-bx-mint to-bx-cyan'
           : 'bg-transparent group-hover:bg-bx-mint/30'

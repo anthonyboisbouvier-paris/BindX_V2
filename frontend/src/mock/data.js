@@ -422,10 +422,10 @@ export const MOCK_PROJECTS = [
 // All possible columns a molecule can have, with metadata
 
 export const ALL_COLUMNS = [
-  // Identity
-  { key: 'name', label: 'Name', type: 'text', group: 'identity', width: 140, sortable: true },
-  { key: 'smiles', label: 'SMILES', type: 'smiles', group: 'identity', width: 200, sortable: false },
-  { key: 'source_run_id', label: 'Source', type: 'text', group: 'identity', width: 80, sortable: true },
+  // Molecule
+  { key: 'name', label: 'Name', type: 'text', group: 'molecule', width: 140, sortable: true },
+  { key: 'smiles', label: 'SMILES', type: 'smiles', group: 'molecule', width: 200, sortable: false },
+  { key: 'source_run_id', label: 'Source', type: 'source', group: 'molecule', width: 110, sortable: true },
   // Docking
   { key: 'docking_score', label: 'Docking', type: 'number', group: 'docking', unit: 'kcal/mol', width: 90, sortable: true, colorScale: 'lower-better' },
   { key: 'cnn_score', label: 'CNN Score', type: 'number', group: 'docking', width: 90, sortable: true, colorScale: 'higher-better' },

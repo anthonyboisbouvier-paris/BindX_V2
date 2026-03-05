@@ -7,10 +7,11 @@ Auto-creates a "Default Campaign" on project creation.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -171,3 +172,22 @@ async def delete_project(
     """Delete a project and all its children (cascade)."""
     project = await get_project_owned(project_id, user_id, db)
     await db.delete(project)
+
+
+@router.post("/projects/{project_id}/preview-target")
+async def preview_target_v9(
+    project_id: UUID,
+    body: dict = Body(...),
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """V9-native target preview. Delegates to the V8 legacy logic but scoped to project ownership."""
+    await get_project_owned(project_id, user_id, db)
+
+    uniprot_id = body.get("uniprot_id", "").strip().upper()
+    if not uniprot_id:
+        raise HTTPException(status_code=400, detail="uniprot_id is required")
+
+    # Reuse the V8 preview-target logic
+    from routers.v8_legacy import preview_target
+    return await preview_target({"uniprot_id": uniprot_id})

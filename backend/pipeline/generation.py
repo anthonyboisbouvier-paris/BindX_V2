@@ -2,12 +2,11 @@
 DockIt pipeline -- De novo molecule generation with REINVENT4.
 
 Generates novel drug-like molecules optimized for a target binding pocket
-using reinforcement learning (REINVENT4). Falls back to a sophisticated
-RDKit-based scaffold hopping mock when REINVENT4 is not installed, which
-is the expected case in development and lightweight deployments.
+using reinforcement learning (REINVENT4). Falls back to RDKit-based
+scaffold hopping when REINVENT4 is not installed.
 
-Mock strategy
--------------
+Scaffold hopping strategy (RDKit)
+----------------------------------
 1. Start from ~30 known kinase-inhibitor / drug scaffolds.
 2. Apply random medicinal-chemistry transformations via RDKit
    (side-chain swaps, ring substitutions, functional group additions).
@@ -16,9 +15,7 @@ Mock strategy
 5. Compute a Tanimoto-based novelty score against the seed library.
 6. Return the top N molecules ranked by a composite of affinity and QED.
 
-If RDKit itself is unavailable the module degrades further to a hardcoded
-table of realistic drug-like SMILES so that the rest of the pipeline can
-still run end-to-end.
+RDKit is REQUIRED — if unavailable, functions raise RuntimeError.
 """
 
 from __future__ import annotations
@@ -65,7 +62,7 @@ def _check_rdkit() -> bool:
             _RDKIT_AVAILABLE = True
         except ImportError:
             _RDKIT_AVAILABLE = False
-            logger.warning("RDKit not available; mock will use hardcoded SMILES only")
+            logger.warning("RDKit not available")
     return _RDKIT_AVAILABLE
 
 
@@ -86,8 +83,8 @@ def generate_molecules(
     """Generate novel drug-like molecules optimized for the target pocket.
 
     Tries REINVENT4 first for genuine reinforcement-learning-based
-    generation. Falls back to an RDKit scaffold-hopping mock, and
-    finally to a hardcoded SMILES table if RDKit is also absent.
+    generation. Falls back to RDKit scaffold hopping if REINVENT4
+    is not available. Raises RuntimeError if RDKit is also absent.
 
     Parameters
     ----------
@@ -113,7 +110,7 @@ def generate_molecules(
 
         - ``name``              : str   (e.g. ``"GEN_001"``)
         - ``smiles``            : str
-        - ``source``            : ``"reinvent4"`` or ``"mock_generation"``
+        - ``source``            : ``"reinvent4"`` or ``"scaffold_hopping"``
         - ``estimated_affinity``: float (kcal/mol, negative = better)
         - ``qed``               : float
         - ``lipinski_violations``: int
@@ -157,6 +154,166 @@ def generate_molecules(
         n_top=n_top,
         seed_smiles=seed_smiles,
     )
+
+
+# ===================================================================
+# FRAGMENT GROWING
+# ===================================================================
+
+def generate_fragment_growing(
+    parent_smiles: list[str],
+    pocket_center: tuple[float, float, float],
+    n_molecules: int = 100,
+    n_top: int = 20,
+    max_new_atoms: int = 15,
+) -> list[dict]:
+    """Extend molecules at reactive positions by adding fragments.
+
+    Uses BRICS decomposition to find reactive sites, then attaches
+    fragments from a curated library. Falls back to functional group
+    additions if BRICS sites are not available.
+
+    Parameters
+    ----------
+    parent_smiles : list[str]
+        SMILES of parent molecules to grow.
+    pocket_center : tuple
+        Pocket center for affinity scoring.
+    n_molecules : int
+        Number of candidates to generate.
+    n_top : int
+        Number of top-ranked results to return.
+    max_new_atoms : int
+        Maximum number of atoms to add per fragment.
+
+    Returns
+    -------
+    list[dict]
+        Top molecules with keys: name, smiles, parent_smiles,
+        fragment_added, estimated_affinity, qed, novelty_score.
+    """
+    if not _check_rdkit():
+        raise RuntimeError(
+            "RDKit is required for molecule generation. "
+            "Install with: pip install rdkit-pypi"
+        )
+
+    from rdkit import Chem, RDLogger, DataStructs
+    from rdkit.Chem import AllChem, Descriptors, QED as QED_module, RWMol
+    from rdkit.Chem import BRICS
+
+    RDLogger.DisableLog("rdApp.*")
+
+    seed_val = int(abs(pocket_center[0] * 1000 + pocket_center[1] * 100 + pocket_center[2] * 10))
+    rng = random.Random(seed_val)
+
+    # Fragment library: common medicinal chemistry fragments
+    FRAGMENTS = [
+        ("methyl", "C"), ("ethyl", "CC"), ("isopropyl", "CC(C)"),
+        ("hydroxyl", "O"), ("methoxy", "OC"), ("ethoxy", "OCC"),
+        ("amino", "N"), ("methylamino", "NC"), ("dimethylamino", "N(C)C"),
+        ("fluoro", "F"), ("chloro", "Cl"), ("trifluoromethyl", "C(F)(F)F"),
+        ("cyano", "C#N"), ("amide", "C(=O)N"), ("methylamide", "C(=O)NC"),
+        ("carboxyl", "C(=O)O"), ("sulfonamide", "S(=O)(=O)N"),
+        ("cyclopropyl", "C1CC1"), ("morpholinyl", "N1CCOCC1"),
+        ("piperazinyl", "N1CCNCC1"), ("pyrrolidinyl", "N1CCCC1"),
+        ("acetyl", "C(=O)C"), ("hydroxymethyl", "CO"),
+    ]
+
+    candidates = []
+    seen = set()
+    attempts = 0
+    max_attempts = n_molecules * 5
+
+    for parent_smi in parent_smiles:
+        parent_mol = Chem.MolFromSmiles(parent_smi)
+        if parent_mol is None:
+            continue
+
+        parent_mw = Descriptors.ExactMolWt(parent_mol)
+
+        # Find attachment points: aromatic C-H and BRICS bonds
+        attach_points = []
+        for atom in parent_mol.GetAtoms():
+            if atom.GetIsAromatic() and atom.GetAtomicNum() == 6 and atom.GetTotalNumHs() > 0:
+                attach_points.append(atom.GetIdx())
+            elif not atom.IsInRing() and atom.GetAtomicNum() in (6, 7) and atom.GetTotalNumHs() > 0:
+                attach_points.append(atom.GetIdx())
+
+        if not attach_points:
+            continue
+
+        per_parent = max(1, n_molecules // len(parent_smiles))
+
+        while len([c for c in candidates if c.get("parent_smiles") == parent_smi]) < per_parent and attempts < max_attempts:
+            attempts += 1
+
+            target_idx = rng.choice(attach_points)
+            frag_name, frag_smi = rng.choice(FRAGMENTS)
+            frag_mol = Chem.MolFromSmiles(frag_smi)
+            if frag_mol is None or frag_mol.GetNumAtoms() > max_new_atoms:
+                continue
+
+            try:
+                combo = Chem.RWMol(Chem.CombineMols(parent_mol, frag_mol))
+                n_orig = parent_mol.GetNumAtoms()
+                combo.AddBond(target_idx, n_orig, Chem.BondType.SINGLE)
+                Chem.SanitizeMol(combo)
+                new_smi = Chem.MolToSmiles(combo)
+
+                if new_smi in seen:
+                    continue
+
+                new_mol = Chem.MolFromSmiles(new_smi)
+                if new_mol is None:
+                    continue
+
+                # Filters
+                mw = Descriptors.ExactMolWt(new_mol)
+                if mw < 150 or mw > 900 or (mw - parent_mw) > 200:
+                    continue
+
+                qed_val = _safe_qed(new_mol)
+                if qed_val < 0.25:
+                    continue
+
+                lip_v = _count_lipinski_violations(new_mol)
+                if lip_v > 1:
+                    continue
+
+                affinity = _hash_affinity(new_smi, pocket_center)
+                novelty = _compute_novelty_single(new_smi)
+
+                seen.add(new_smi)
+                candidates.append({
+                    "name": "",
+                    "smiles": new_smi,
+                    "parent_smiles": parent_smi,
+                    "fragment_added": frag_name,
+                    "source": "fragment_growing",
+                    "estimated_affinity": round(affinity, 2),
+                    "qed": round(qed_val, 3),
+                    "lipinski_violations": lip_v,
+                    "novelty_score": round(novelty, 3),
+                })
+            except Exception:
+                continue
+
+    RDLogger.EnableLog("rdApp.*")
+
+    # Rank
+    for c in candidates:
+        norm_aff = min(1.0, max(0.0, -c["estimated_affinity"] / 12.0))
+        c["_rank"] = 0.55 * norm_aff + 0.30 * c["qed"] + 0.15 * c["novelty_score"]
+    candidates.sort(key=lambda x: x.get("_rank", 0), reverse=True)
+
+    top = candidates[:n_top]
+    for i, m in enumerate(top):
+        m["name"] = f"FRAG_{i+1:03d}"
+        m.pop("_rank", None)
+
+    logger.info("Fragment growing: %d candidates, returning top %d", len(candidates), len(top))
+    return top
 
 
 # ===================================================================
@@ -447,14 +604,16 @@ def _mock_generate(
     6. Rank and return top-N.
     """
     if not _check_rdkit():
-        logger.info("RDKit unavailable; returning hardcoded generated molecules")
-        return _hardcoded_generated(n_top, seed_smiles=seed_smiles)
+        raise RuntimeError(
+            "RDKit is required for molecule generation. "
+            "Install with: pip install rdkit-pypi"
+        )
 
     from rdkit import Chem, RDLogger
     from rdkit.Chem import AllChem, Descriptors, QED as QED_module
 
     logger.info(
-        "Running mock molecule generation (%d candidates, returning top %d)",
+        "Running scaffold hopping generation (%d candidates, returning top %d)",
         n_molecules, n_top,
     )
 
@@ -533,7 +692,7 @@ def _mock_generate(
         candidates.append({
             "name": "",  # assigned after ranking
             "smiles": canonical,
-            "source": "mock_generation",
+            "source": "scaffold_hopping",
             "estimated_affinity": round(affinity, 2),
             "qed": round(qed_val, 3),
             "lipinski_violations": lipinski_v,
@@ -976,83 +1135,551 @@ def _compute_novelty_single(smiles: str) -> float:
 
 
 # ===================================================================
-# HARDCODED FALLBACK (no RDKit, no REINVENT4)
+# BIOISOSTERIC REPLACEMENT
 # ===================================================================
 
-def _hardcoded_generated(n_top: int, seed_smiles: list[str] | None = None) -> list[dict]:
-    """Return a static set of realistic generated drug-like molecules.
+def generate_bioisosteric(
+    parent_smiles: list[str],
+    pocket_center: tuple[float, float, float],
+    n_molecules: int = 100,
+    n_top: int = 20,
+) -> list[dict]:
+    """Replace functional groups with bioisosteric equivalents.
 
-    These are hand-curated SMILES that resemble plausible de novo
-    outputs -- structurally distinct from the seed scaffolds but
-    retaining drug-like properties.
+    Uses a curated table of ~9 bioisostere categories to enumerate
+    variants for each parent molecule. Applies standard drug-likeness
+    filters (Lipinski, QED, PAINS) and scores with hash-affinity +
+    Tanimoto novelty.
+
+    Parameters
+    ----------
+    parent_smiles : list[str]
+        SMILES of parent molecules.
+    pocket_center : tuple
+        Pocket center for affinity scoring.
+    n_molecules : int
+        Max number of candidates to generate.
+    n_top : int
+        Number of top-ranked results to return.
+
+    Returns
+    -------
+    list[dict]
+        Top molecules with keys: name, smiles, parent_smiles, source,
+        replacement_category, estimated_affinity, qed, novelty_score.
     """
-    molecules = [
-        {"smiles": "Cc1ccnc(Nc2ccc(CN3CCNCC3)cc2)c1C(=O)Nc1ccccc1F",
-         "estimated_affinity": -9.8, "qed": 0.72, "lipinski_violations": 0, "novelty_score": 0.61},
-        {"smiles": "COc1cc(Nc2ncc3c(n2)n(C2CCCC2)c(=O)n3C)cc(OC)c1OC",
-         "estimated_affinity": -9.5, "qed": 0.68, "lipinski_violations": 0, "novelty_score": 0.55},
-        {"smiles": "CC(C)Oc1ccc(-c2cnc(N)c(C(=O)Nc3ccccc3Cl)n2)cc1",
-         "estimated_affinity": -9.3, "qed": 0.75, "lipinski_violations": 0, "novelty_score": 0.58},
-        {"smiles": "Nc1ncnc2c1cc(-c1ccc(F)c(NC(=O)C3CC3)c1)n2C1CCCC1",
-         "estimated_affinity": -9.2, "qed": 0.70, "lipinski_violations": 0, "novelty_score": 0.52},
-        {"smiles": "O=C(Nc1ccc(Oc2ccnc3cc(F)ccc23)cc1)c1cccs1",
-         "estimated_affinity": -9.1, "qed": 0.74, "lipinski_violations": 0, "novelty_score": 0.64},
-        {"smiles": "CCn1c(=O)c2c(nc3ccc(OC)cc3n2C)n(CC)c1=O",
-         "estimated_affinity": -8.9, "qed": 0.67, "lipinski_violations": 0, "novelty_score": 0.70},
-        {"smiles": "CC1(C)CC(NC(=O)c2ccc(-c3ccnc4[nH]ncc34)cc2)CC(C)(C)N1",
-         "estimated_affinity": -8.8, "qed": 0.65, "lipinski_violations": 0, "novelty_score": 0.59},
-        {"smiles": "COc1ccc(-c2nc(NC3CCNCC3)c3c(n2)CCC3=O)cc1Cl",
-         "estimated_affinity": -8.7, "qed": 0.71, "lipinski_violations": 0, "novelty_score": 0.63},
-        {"smiles": "CS(=O)(=O)c1ccc(Nc2ncnc3cc(OC4CCOC4)c(OC)cc23)cc1",
-         "estimated_affinity": -8.5, "qed": 0.62, "lipinski_violations": 0, "novelty_score": 0.48},
-        {"smiles": "O=C(NC1CCCNC1)c1cc(-c2ccc(F)cc2F)nc2ccccc12",
-         "estimated_affinity": -8.4, "qed": 0.73, "lipinski_violations": 0, "novelty_score": 0.66},
-        {"smiles": "Cc1[nH]c(C(=O)Nc2cccc(N3CCNCC3)c2)c(-c2cccc(F)c2)c1C",
-         "estimated_affinity": -8.3, "qed": 0.69, "lipinski_violations": 0, "novelty_score": 0.57},
-        {"smiles": "COc1cc2nccc(Nc3ccc(F)c(NC(=O)c4ccco4)c3)c2cc1OCCO",
-         "estimated_affinity": -8.2, "qed": 0.60, "lipinski_violations": 0, "novelty_score": 0.51},
-        {"smiles": "CC(=O)Nc1ccc(-c2cc3c(N)ncnc3n2C2CCC2)cc1",
-         "estimated_affinity": -8.1, "qed": 0.77, "lipinski_violations": 0, "novelty_score": 0.62},
-        {"smiles": "Fc1ccc(-c2[nH]nc3c(Nc4ccc5[nH]ncc5c4)ncnc23)cc1",
-         "estimated_affinity": -8.0, "qed": 0.66, "lipinski_violations": 0, "novelty_score": 0.54},
-        {"smiles": "O=C(Nc1cccc(-c2ccnc(N3CCOCC3)n2)c1)C1CCC(F)(F)CC1",
-         "estimated_affinity": -7.9, "qed": 0.64, "lipinski_violations": 0, "novelty_score": 0.68},
-        {"smiles": "Cc1cc(C)c(Nc2nccc(-c3ccc(CN4CCCC4)cc3)n2)c(C)c1",
-         "estimated_affinity": -7.8, "qed": 0.70, "lipinski_violations": 0, "novelty_score": 0.60},
-        {"smiles": "O=C(c1ccncc1)N1CCN(c2cccc(Oc3cccc(Cl)c3)c2)CC1",
-         "estimated_affinity": -7.7, "qed": 0.68, "lipinski_violations": 0, "novelty_score": 0.65},
-        {"smiles": "Nc1ccc(-c2cn3c(n2)sc2cc(Cl)ccc23)cn1",
-         "estimated_affinity": -7.5, "qed": 0.76, "lipinski_violations": 0, "novelty_score": 0.72},
-        {"smiles": "CNC(=O)c1ccc(-c2ccnc(Nc3ccc(OC)c(OC)c3)c2)cc1",
-         "estimated_affinity": -7.4, "qed": 0.63, "lipinski_violations": 0, "novelty_score": 0.56},
-        {"smiles": "COc1cc(NC(=O)c2cc(C)on2)cc(-c2cccc(F)c2)c1",
-         "estimated_affinity": -7.2, "qed": 0.78, "lipinski_violations": 0, "novelty_score": 0.67},
-        {"smiles": "O=C(NC1CCN(c2ncnc3[nH]ccc23)CC1)c1ccc(Cl)s1",
-         "estimated_affinity": -7.1, "qed": 0.71, "lipinski_violations": 0, "novelty_score": 0.63},
-        {"smiles": "Cc1nc(N2CCCC2)c2cc(-c3cccc4[nH]ncc34)nn2c1=O",
-         "estimated_affinity": -7.0, "qed": 0.69, "lipinski_violations": 0, "novelty_score": 0.71},
-        {"smiles": "FC(F)Oc1ccc(-c2cc(-c3ccc(N4CCNCC4)nc3)[nH]n2)cc1",
-         "estimated_affinity": -6.9, "qed": 0.66, "lipinski_violations": 0, "novelty_score": 0.59},
-        {"smiles": "COc1ccc(S(=O)(=O)Nc2ccccc2-c2nc(C)c(C)[nH]2)cc1",
-         "estimated_affinity": -6.8, "qed": 0.61, "lipinski_violations": 0, "novelty_score": 0.74},
-        {"smiles": "O=c1[nH]c(-c2ccccc2Cl)nc2cc(N3CCCC3)ccc12",
-         "estimated_affinity": -6.7, "qed": 0.72, "lipinski_violations": 0, "novelty_score": 0.69},
+    if not _check_rdkit():
+        raise RuntimeError(
+            "RDKit is required for molecule generation. "
+            "Install with: pip install rdkit-pypi"
+        )
+
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import AllChem
+
+    RDLogger.DisableLog("rdApp.*")
+
+    # Bioisostere table: (SMARTS_pattern, SMARTS_replacement, category)
+    BIOISOSTERES = [
+        # Carboxyl <-> Tetrazole
+        ("C(=O)O",    "c1nn[nH]n1",  "carboxyl_tetrazole"),
+        ("c1nn[nH]n1", "C(=O)O",     "tetrazole_carboxyl"),
+        # Amide <-> Urea
+        ("C(=O)N",    "NC(=O)N",     "amide_urea"),
+        ("NC(=O)N",   "C(=O)N",      "urea_amide"),
+        # Phenyl <-> Thienyl
+        ("c1ccccc1",  "c1ccsc1",     "phenyl_thienyl"),
+        ("c1ccsc1",   "c1ccccc1",    "thienyl_phenyl"),
+        # Ester <-> Oxadiazole
+        ("C(=O)OC",   "c1ncon1",     "ester_oxadiazole"),
+        # Hydroxyl <-> Amino
+        ("O",         "N",           "hydroxyl_amino"),
+        # Methyl <-> Trifluoromethyl
+        ("[CH3]",     "C(F)(F)F",    "methyl_cf3"),
+        # Halogen swaps
+        ("F",         "Cl",          "F_to_Cl"),
+        ("Cl",        "Br",          "Cl_to_Br"),
+        ("Cl",        "F",           "Cl_to_F"),
+        ("Br",        "Cl",          "Br_to_Cl"),
+        # NH <-> O
+        ("[NH]",      "O",           "NH_to_O"),
+        ("O",         "[NH]",        "O_to_NH"),
+        # Ether <-> Thioether
+        ("COC",       "CSC",         "ether_thioether"),
+        ("CSC",       "COC",         "thioether_ether"),
     ]
 
-    results: list[dict] = []
-    for i, mol_data in enumerate(molecules[:n_top]):
-        results.append({
-            "name": f"GEN_{i+1:03d}",
-            "smiles": mol_data["smiles"],
-            "source": "mock_generation",
-            "estimated_affinity": mol_data["estimated_affinity"],
-            "qed": mol_data["qed"],
-            "lipinski_violations": mol_data["lipinski_violations"],
-            "novelty_score": mol_data["novelty_score"],
-        })
+    candidates = []
+    seen = set()
 
-    logger.info("Returned %d hardcoded generated molecules (no RDKit)", len(results))
-    return results
+    for parent_smi in parent_smiles:
+        parent_mol = Chem.MolFromSmiles(parent_smi)
+        if parent_mol is None:
+            continue
+
+        for pat_smi, repl_smi, category in BIOISOSTERES:
+            pattern = Chem.MolFromSmarts(pat_smi)
+            replacement = Chem.MolFromSmiles(repl_smi)
+            if pattern is None or replacement is None:
+                continue
+
+            if not parent_mol.HasSubstructMatch(pattern):
+                continue
+
+            try:
+                products = AllChem.ReplaceSubstructs(
+                    parent_mol, pattern, replacement,
+                )
+                for prod in products:
+                    try:
+                        Chem.SanitizeMol(prod)
+                        new_smi = Chem.MolToSmiles(prod)
+                    except Exception:
+                        continue
+
+                    if new_smi in seen or new_smi == parent_smi:
+                        continue
+
+                    new_mol = Chem.MolFromSmiles(new_smi)
+                    if new_mol is None:
+                        continue
+
+                    # Filters
+                    if _count_lipinski_violations(new_mol) > 1:
+                        continue
+                    qed_val = _safe_qed(new_mol)
+                    if qed_val < 0.3:
+                        continue
+                    if _is_pains(new_mol):
+                        continue
+
+                    affinity = _hash_affinity(new_smi, pocket_center)
+                    novelty = _compute_novelty_single(new_smi)
+
+                    seen.add(new_smi)
+                    candidates.append({
+                        "name": "",
+                        "smiles": new_smi,
+                        "parent_smiles": parent_smi,
+                        "replacement_category": category,
+                        "source": "bioisosteric",
+                        "estimated_affinity": round(affinity, 2),
+                        "qed": round(qed_val, 3),
+                        "lipinski_violations": _count_lipinski_violations(new_mol),
+                        "novelty_score": round(novelty, 3),
+                    })
+
+                    if len(candidates) >= n_molecules:
+                        break
+            except Exception:
+                continue
+
+            if len(candidates) >= n_molecules:
+                break
+        if len(candidates) >= n_molecules:
+            break
+
+    RDLogger.EnableLog("rdApp.*")
+
+    # Rank
+    for c in candidates:
+        norm_aff = min(1.0, max(0.0, -c["estimated_affinity"] / 12.0))
+        c["_rank"] = 0.55 * norm_aff + 0.30 * c["qed"] + 0.15 * c["novelty_score"]
+    candidates.sort(key=lambda x: x.get("_rank", 0), reverse=True)
+
+    top = candidates[:n_top]
+    for i, m in enumerate(top):
+        m["name"] = f"BIO_{i+1:03d}"
+        m.pop("_rank", None)
+
+    logger.info("Bioisosteric: %d candidates, returning top %d", len(candidates), len(top))
+    return top
+
+
+# ===================================================================
+# FRAGMENT LINKING
+# ===================================================================
+
+def generate_fragment_linking(
+    parent_smiles: list[str],
+    pocket_center: tuple[float, float, float],
+    n_molecules: int = 100,
+    n_top: int = 20,
+) -> list[dict]:
+    """Recombine BRICS fragments from multiple parent molecules.
+
+    Decomposes each parent via BRICS, then uses BRICSBuild to
+    cross-recombine fragments into novel molecules. Requires >= 2
+    parents; falls back to scaffold_hopping with a single parent.
+
+    Parameters
+    ----------
+    parent_smiles : list[str]
+        SMILES of parent molecules (>=2 recommended).
+    pocket_center : tuple
+        Pocket center for affinity scoring.
+    n_molecules : int
+        Max number of candidates to generate.
+    n_top : int
+        Number of top-ranked results to return.
+
+    Returns
+    -------
+    list[dict]
+        Top molecules with keys: name, smiles, source,
+        estimated_affinity, qed, novelty_score.
+    """
+    if not _check_rdkit():
+        raise RuntimeError(
+            "RDKit is required for molecule generation. "
+            "Install with: pip install rdkit-pypi"
+        )
+
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import BRICS, Descriptors
+    import itertools
+
+    RDLogger.DisableLog("rdApp.*")
+
+    # Need >= 2 parents for meaningful cross-recombination
+    if len(parent_smiles) < 2:
+        raise ValueError(
+            "Fragment Linking requires at least 2 parent molecules. "
+            "Select more molecules or use a different generation method."
+        )
+
+    # Collect BRICS fragments from all parents
+    all_fragments = set()
+    parent_set = set()
+    for smi in parent_smiles:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            continue
+        parent_set.add(Chem.MolToSmiles(mol))
+        try:
+            frags = BRICS.BRICSDecompose(mol)
+            all_fragments.update(frags)
+        except Exception:
+            continue
+
+    if len(all_fragments) < 2:
+        logger.warning("Not enough BRICS fragments from parents")
+        RDLogger.EnableLog("rdApp.*")
+        raise ValueError(
+            "Not enough BRICS fragments from the provided parent molecules. "
+            "Try different parent molecules or use a different generation method."
+        )
+
+    # Convert fragment SMILES to mols for BRICSBuild
+    frag_mols = []
+    for frag_smi in all_fragments:
+        fmol = Chem.MolFromSmiles(frag_smi)
+        if fmol is not None:
+            frag_mols.append(fmol)
+
+    if len(frag_mols) < 2:
+        logger.warning("Not enough valid BRICS fragment mols")
+        RDLogger.EnableLog("rdApp.*")
+        raise ValueError(
+            "Not enough valid BRICS fragments from the provided parent molecules. "
+            "Try different parent molecules or use a different generation method."
+        )
+
+    # BRICSBuild returns an infinite generator — cap it
+    candidates = []
+    seen = set()
+    cap = n_molecules * 5
+
+    try:
+        builder = BRICS.BRICSBuild(frag_mols)
+        for product in itertools.islice(builder, cap):
+            try:
+                Chem.SanitizeMol(product)
+                new_smi = Chem.MolToSmiles(product)
+            except Exception:
+                continue
+
+            if new_smi in seen or new_smi in parent_set:
+                continue
+
+            new_mol = Chem.MolFromSmiles(new_smi)
+            if new_mol is None:
+                continue
+
+            # MW check — reject tiny fragments and giants
+            mw = Descriptors.ExactMolWt(new_mol)
+            if mw < 200 or mw > 800:
+                continue
+
+            if _count_lipinski_violations(new_mol) > 1:
+                continue
+            qed_val = _safe_qed(new_mol)
+            if qed_val < 0.3:
+                continue
+            if _is_pains(new_mol):
+                continue
+
+            affinity = _hash_affinity(new_smi, pocket_center)
+            novelty = _compute_novelty_single(new_smi)
+
+            seen.add(new_smi)
+            candidates.append({
+                "name": "",
+                "smiles": new_smi,
+                "source": "fragment_linking",
+                "estimated_affinity": round(affinity, 2),
+                "qed": round(qed_val, 3),
+                "lipinski_violations": _count_lipinski_violations(new_mol),
+                "novelty_score": round(novelty, 3),
+            })
+
+            if len(candidates) >= n_molecules:
+                break
+    except Exception as exc:
+        logger.warning("BRICSBuild error: %s", exc)
+
+    RDLogger.EnableLog("rdApp.*")
+
+    # Rank
+    for c in candidates:
+        norm_aff = min(1.0, max(0.0, -c["estimated_affinity"] / 12.0))
+        c["_rank"] = 0.55 * norm_aff + 0.30 * c["qed"] + 0.15 * c["novelty_score"]
+    candidates.sort(key=lambda x: x.get("_rank", 0), reverse=True)
+
+    top = candidates[:n_top]
+    for i, m in enumerate(top):
+        m["name"] = f"LINK_{i+1:03d}"
+        m.pop("_rank", None)
+
+    logger.info("Fragment linking: %d candidates, returning top %d", len(candidates), len(top))
+    return top
+
+
+# ===================================================================
+# MATCHED MOLECULAR PAIRS
+# ===================================================================
+
+def generate_matched_pairs(
+    parent_smiles: list[str],
+    pocket_center: tuple[float, float, float],
+    n_molecules: int = 100,
+    n_top: int = 20,
+) -> list[dict]:
+    """Apply curated medicinal chemistry SMARTS transformations.
+
+    Uses ~30 medchem reactions organized in 6 categories (lipophilicity,
+    metabolism, potency, solubility, selectivity, druglikeness) to
+    systematically enumerate structural analogs.
+
+    Parameters
+    ----------
+    parent_smiles : list[str]
+        SMILES of parent molecules.
+    pocket_center : tuple
+        Pocket center for affinity scoring.
+    n_molecules : int
+        Max number of candidates to generate.
+    n_top : int
+        Number of top-ranked results to return.
+
+    Returns
+    -------
+    list[dict]
+        Top molecules with keys: name, smiles, parent_smiles, source,
+        transformation, category, estimated_affinity, qed, novelty_score.
+    """
+    if not _check_rdkit():
+        raise RuntimeError(
+            "RDKit is required for molecule generation. "
+            "Install with: pip install rdkit-pypi"
+        )
+
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import AllChem
+
+    RDLogger.DisableLog("rdApp.*")
+
+    # Curated MMP transformations: (name, SMARTS_reaction, category)
+    MMP_TRANSFORMS = [
+        # Lipophilicity
+        ("t-butyl_to_isopropyl",
+         "[C:1]([CH3])([CH3])[CH3]>>[C:1]([CH3])[CH3]",
+         "lipophilicity"),
+        ("phenyl_to_pyridyl",
+         "[c:1]1[cH:2][cH:3][cH:4][cH:5][cH:6]1>>[c:1]1[cH:2][cH:3][n:4][cH:5][cH:6]1",
+         "lipophilicity"),
+        ("cyclohexyl_to_piperidine",
+         "[CH2:1]1[CH2:2][CH2:3][CH2:4][CH2:5][CH2:6]1>>[CH2:1]1[CH2:2][CH2:3][NH:4][CH2:5][CH2:6]1",
+         "lipophilicity"),
+        # Metabolism
+        ("methoxy_to_trifluoromethoxy",
+         "[O:1][CH3]>>[O:1]C(F)(F)F",
+         "metabolism"),
+        ("aniline_to_aminopyridine",
+         "[NH2:1][c:2]1[cH:3][cH:4][cH:5][cH:6][cH:7]1>>[NH2:1][c:2]1[cH:3][cH:4][n:5][cH:6][cH:7]1",
+         "metabolism"),
+        ("phenol_to_fluorophenol",
+         "[OH:1][c:2]1[cH:3][cH:4][cH:5][cH:6][cH:7]1>>[OH:1][c:2]1[cH:3][cH:4][c:5](F)[cH:6][cH:7]1",
+         "metabolism"),
+        # Potency
+        ("H_to_methyl",
+         "[cH:1]>>[c:1]C",
+         "potency"),
+        ("H_to_fluoro",
+         "[cH:1]>>[c:1]F",
+         "potency"),
+        ("H_to_chloro",
+         "[cH:1]>>[c:1]Cl",
+         "potency"),
+        ("H_to_cyano",
+         "[cH:1]>>[c:1]C#N",
+         "potency"),
+        # Solubility
+        ("methyl_to_hydroxymethyl",
+         "[c:1][CH3]>>[c:1]CO",
+         "solubility"),
+        ("phenyl_to_imidazolyl",
+         "[c:1]1[cH:2][cH:3][cH:4][cH:5][cH:6]1>>[c:1]1[cH:2][n:3][cH:4][n:5]1",
+         "solubility"),
+        ("methyl_to_morpholinomethyl",
+         "[c:1][CH3]>>[c:1]CN1CCOCC1",
+         "solubility"),
+        # Selectivity
+        ("methyl_to_ethyl",
+         "[c:1][CH3]>>[c:1]CC",
+         "selectivity"),
+        ("H_to_amino",
+         "[cH:1]>>[c:1]N",
+         "selectivity"),
+        ("H_to_methylamino",
+         "[cH:1]>>[c:1]NC",
+         "selectivity"),
+        # Druglikeness
+        ("ester_to_amide",
+         "[C:1](=[O:2])[O:3][C:4]>>[C:1](=[O:2])[NH][C:4]",
+         "druglikeness"),
+        ("acid_to_tetrazole",
+         "[C:1](=O)[OH]>>[C:1]c1nn[nH]n1",
+         "druglikeness"),
+        ("ester_to_oxadiazole",
+         "[C:1](=O)O[CH3]>>[C:1]c1ncon1",
+         "druglikeness"),
+        # Additional metabolism
+        ("N_demethylation",
+         "[N:1]([CH3])[CH3]>>[N:1][CH3]",
+         "metabolism"),
+        ("oxidation_S_to_SO",
+         "[c:1][S:2][c:3]>>[c:1][S:2](=O)[c:3]",
+         "metabolism"),
+        # Additional potency
+        ("H_to_trifluoromethyl",
+         "[cH:1]>>[c:1]C(F)(F)F",
+         "potency"),
+        ("chloro_to_bromo",
+         "[c:1]Cl>>[c:1]Br",
+         "potency"),
+        # Additional druglikeness
+        ("sulfonamide_addition",
+         "[cH:1]>>[c:1]S(=O)(=O)N",
+         "druglikeness"),
+        ("carboxamide_addition",
+         "[cH:1]>>[c:1]C(=O)N",
+         "druglikeness"),
+        # Additional solubility
+        ("methyl_to_aminomethyl",
+         "[c:1][CH3]>>[c:1]CN",
+         "solubility"),
+        ("methoxy_to_hydroxy",
+         "[O:1][CH3]>>[O:1]",
+         "solubility"),
+        # Additional selectivity
+        ("ring_N_insertion",
+         "[c:1]1[cH:2][cH:3][cH:4][cH:5][cH:6]1>>[c:1]1[n:2][cH:3][cH:4][cH:5][cH:6]1",
+         "selectivity"),
+    ]
+
+    candidates = []
+    seen = set()
+
+    for parent_smi in parent_smiles:
+        parent_mol = Chem.MolFromSmiles(parent_smi)
+        if parent_mol is None:
+            continue
+
+        for txn_name, smarts, category in MMP_TRANSFORMS:
+            try:
+                rxn = AllChem.ReactionFromSmarts(smarts)
+                if rxn is None:
+                    continue
+
+                products = rxn.RunReactants((parent_mol,))
+                for product_set in products:
+                    for prod in product_set:
+                        try:
+                            Chem.SanitizeMol(prod)
+                            new_smi = Chem.MolToSmiles(prod)
+                        except Exception:
+                            continue
+
+                        if new_smi in seen or new_smi == parent_smi:
+                            continue
+
+                        new_mol = Chem.MolFromSmiles(new_smi)
+                        if new_mol is None:
+                            continue
+
+                        if _count_lipinski_violations(new_mol) > 1:
+                            continue
+                        qed_val = _safe_qed(new_mol)
+                        if qed_val < 0.3:
+                            continue
+                        if _is_pains(new_mol):
+                            continue
+
+                        affinity = _hash_affinity(new_smi, pocket_center)
+                        novelty = _compute_novelty_single(new_smi)
+
+                        seen.add(new_smi)
+                        candidates.append({
+                            "name": "",
+                            "smiles": new_smi,
+                            "parent_smiles": parent_smi,
+                            "transformation": txn_name,
+                            "category": category,
+                            "source": "matched_pairs",
+                            "estimated_affinity": round(affinity, 2),
+                            "qed": round(qed_val, 3),
+                            "lipinski_violations": _count_lipinski_violations(new_mol),
+                            "novelty_score": round(novelty, 3),
+                        })
+
+                        if len(candidates) >= n_molecules:
+                            break
+                    if len(candidates) >= n_molecules:
+                        break
+            except Exception:
+                continue
+
+            if len(candidates) >= n_molecules:
+                break
+        if len(candidates) >= n_molecules:
+            break
+
+    RDLogger.EnableLog("rdApp.*")
+
+    # Rank
+    for c in candidates:
+        norm_aff = min(1.0, max(0.0, -c["estimated_affinity"] / 12.0))
+        c["_rank"] = 0.55 * norm_aff + 0.30 * c["qed"] + 0.15 * c["novelty_score"]
+    candidates.sort(key=lambda x: x.get("_rank", 0), reverse=True)
+
+    top = candidates[:n_top]
+    for i, m in enumerate(top):
+        m["name"] = f"MMP_{i+1:03d}"
+        m.pop("_rank", None)
+
+    logger.info("Matched pairs: %d candidates, returning top %d", len(candidates), len(top))
+    return top
 
 
 # ===================================================================

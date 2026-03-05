@@ -526,30 +526,6 @@ function TargetSummary({ project, onEdit }) {
             </div>
           )}
 
-          {/* Domains + Keywords — under the 3D viewer */}
-          {uniprot.domains?.length > 0 && (
-            <div className="card px-5 py-4">
-              <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Protein Domains</p>
-              <div className="flex flex-wrap gap-1.5">
-                {uniprot.domains.map((d, i) => (
-                  <span key={i} className="text-sm bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
-                    {d.name} ({d.start}-{d.end})
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {uniprot.keywords?.length > 0 && (
-            <div className="card px-5 py-4">
-              <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Keywords</p>
-              <div className="flex flex-wrap gap-1.5">
-                {uniprot.keywords.slice(0, 15).map((k, i) => (
-                  <span key={i} className="text-sm bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{k}</span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Right: Function + Pockets + ChEMBL + Diseases */}
@@ -623,16 +599,50 @@ function TargetSummary({ project, onEdit }) {
             </div>
           )}
 
-          {/* Diseases */}
-          {uniprot.diseases?.length > 0 && (
-            <div className="card px-5 py-4">
-              <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Associated Diseases</p>
-              <div className="flex flex-wrap gap-1.5">
-                {uniprot.diseases.slice(0, 8).map((d, i) => (
-                  <span key={i} className="text-sm bg-red-50 text-red-700 px-2 py-0.5 rounded-md">{d}</span>
-                ))}
+          {/* Details — collapsible: Domains + Keywords + Diseases */}
+          {(uniprot.domains?.length > 0 || uniprot.keywords?.length > 0 || uniprot.diseases?.length > 0) && (
+            <details className="card overflow-hidden group">
+              <summary className="px-5 py-3 flex items-center gap-2 cursor-pointer select-none hover:bg-gray-50 transition-colors">
+                <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Details</span>
+              </summary>
+              <div className="px-5 pb-4 space-y-3">
+                {uniprot.domains?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Protein Domains</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {uniprot.domains.map((d, i) => (
+                        <span key={i} className="text-sm bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
+                          {d.name} ({d.start}-{d.end})
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {uniprot.keywords?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Keywords</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {uniprot.keywords.slice(0, 15).map((k, i) => (
+                        <span key={i} className="text-sm bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{k}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {uniprot.diseases?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Associated Diseases</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {uniprot.diseases.slice(0, 8).map((d, i) => (
+                        <span key={i} className="text-sm bg-red-50 text-red-700 px-2 py-0.5 rounded-md">{d}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            </details>
           )}
         </div>
       </div>

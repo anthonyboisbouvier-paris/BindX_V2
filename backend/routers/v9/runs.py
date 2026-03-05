@@ -32,6 +32,7 @@ VALID_RUN_TYPES = {"import", "calculation", "generation"}
 VALID_CALCULATION_TYPES = {
     "docking", "admet", "scoring", "enrichment", "clustering",
     "off_target", "confidence", "retrosynthesis", "safety",
+    "pharmacophore", "activity_cliffs",
 }
 
 
@@ -84,10 +85,12 @@ async def create_run(
         config = body.config or {}
         has_smiles = bool(config.get("smiles_list"))
         has_phase_source = config.get("source") == "phase_selection" and config.get("source_phase_id")
-        if not has_smiles and not has_phase_source:
+        has_db_source = config.get("source") == "database" and config.get("databases")
+        has_ligand_list = bool(config.get("ligand_list"))
+        if not has_smiles and not has_phase_source and not has_db_source and not has_ligand_list:
             raise HTTPException(
                 status_code=422,
-                detail="config.smiles_list or config.source='phase_selection' required for import runs",
+                detail="config.smiles_list, config.source='phase_selection', or config.source='database' required for import runs",
             )
 
     run = RunORM_V9(
@@ -100,9 +103,9 @@ async def create_run(
         status="created",
     )
     db.add(run)
-    await db.flush()
+    await db.commit()
 
-    # Dispatch Celery task
+    # Dispatch Celery task (after commit so the worker can find the run)
     try:
         from celery_app import celery_app
         celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
@@ -111,7 +114,7 @@ async def create_run(
         logger.warning("Failed to dispatch Celery task for run %s: %s", run.id, e)
         run.status = "failed"
         run.error_message = f"Failed to dispatch task: {e}"
-        await db.flush()
+        await db.commit()
 
     # Reload with logs eagerly loaded (avoid lazy-load crash in async)
     stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))
@@ -149,6 +152,26 @@ async def get_run(
 ):
     """Get run detail with progress."""
     return await get_run_owned(run_id, user_id, db)
+
+
+@router.get("/runs/{run_id}/progress")
+async def get_run_progress(
+    run_id: UUID,
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """Lightweight progress endpoint for polling during run execution."""
+    run = await get_run_owned(run_id, user_id, db)
+    return {
+        "id": run.id,
+        "status": run.status,
+        "progress": run.progress,
+        "current_step": run.current_step,
+        "estimated_duration_seconds": run.estimated_duration_seconds,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "error_message": run.error_message,
+    }
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunResponse)
@@ -237,9 +260,9 @@ async def import_file(
         status="created",
     )
     db.add(run)
-    await db.flush()
+    await db.commit()
 
-    # Dispatch Celery task
+    # Dispatch Celery task (after commit so the worker can find the run)
     try:
         from celery_app import celery_app
         celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
@@ -248,7 +271,7 @@ async def import_file(
         logger.warning("Failed to dispatch Celery task for file run %s: %s", run.id, e)
         run.status = "failed"
         run.error_message = f"Failed to dispatch task: {e}"
-        await db.flush()
+        await db.commit()
 
     # Reload with logs eagerly loaded
     stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))
@@ -274,9 +297,10 @@ async def import_from_database(
     user_id: str = Depends(require_v9_user),
     db: AsyncSession = Depends(get_v9_db),
 ):
-    """Fetch compounds from public databases and create an import run.
+    """Create a database import run. Fetch happens async in Celery worker.
 
     Body: {databases: ["chembl","pubchem",...], uniprot_id, max_per_source}
+    Response is instant — no ligand_list stored in config.
     """
     phase = await get_phase_owned(phase_id, user_id, db)
 
@@ -295,99 +319,32 @@ async def import_from_database(
             f"Valid: {', '.join(sorted(VALID_DATABASES))}",
         )
 
-    uniprot_id = body.get("uniprot_id", "")
-    max_per_source = body.get("max_per_source", 50)
-
-    import asyncio as _asyncio
-
-    def _fetch():
-        all_smiles = []
-        sources_summary = {}
-
-        for db_name in databases:
-            try:
-                if db_name == "chembl" and uniprot_id:
-                    from pipeline.ligands import fetch_chembl_ligands
-                    ligands = fetch_chembl_ligands(uniprot_id, max_count=max_per_source)
-                    all_smiles.extend(ligands)
-                    sources_summary["chembl"] = len(ligands)
-
-                elif db_name == "pubchem" and uniprot_id:
-                    from pipeline.ligands import fetch_pubchem_ligands, resolve_gene_name
-                    gene = resolve_gene_name(uniprot_id)
-                    if gene:
-                        ligands = fetch_pubchem_ligands(gene, max_count=max_per_source)
-                        all_smiles.extend(ligands)
-                        sources_summary["pubchem"] = len(ligands)
-                    else:
-                        sources_summary["pubchem"] = 0
-
-                elif db_name == "zinc":
-                    from pipeline.ligands import fetch_zinc_ligands
-                    ligands = fetch_zinc_ligands(max_count=max_per_source)
-                    all_smiles.extend(ligands)
-                    sources_summary["zinc"] = len(ligands)
-
-                elif db_name == "enamine":
-                    from pipeline.ligands import sample_enamine_real
-                    ligands_raw = sample_enamine_real(n=max_per_source)
-                    for smi in ligands_raw:
-                        if isinstance(smi, dict):
-                            all_smiles.append(smi)
-                        else:
-                            all_smiles.append({"smiles": smi, "name": None, "source": "enamine_real"})
-                    sources_summary["enamine"] = len(ligands_raw)
-
-                elif db_name == "fragments":
-                    from pipeline.ligands import load_fragment_library
-                    frags = load_fragment_library()
-                    all_smiles.extend(frags)
-                    sources_summary["fragments"] = len(frags)
-
-            except Exception as exc:
-                logger.warning("Failed to fetch from %s: %s", db_name, exc)
-                sources_summary[db_name] = 0
-
-        return all_smiles, sources_summary
-
-    loop = _asyncio.get_event_loop()
-    all_smiles, sources_summary = await loop.run_in_executor(None, _fetch)
-
-    if not all_smiles:
-        raise HTTPException(
-            status_code=422, detail="No compounds found from selected databases",
-        )
-
-    smiles_list = [lig["smiles"] for lig in all_smiles if lig.get("smiles")]
-
+    # Store only parameters — fetch happens in Celery worker
     run = RunORM_V9(
         phase_id=phase_id,
         type="import",
         config={
-            "smiles_list": smiles_list,
+            "source": "database",
             "databases": databases,
-            "sources_summary": sources_summary,
-            "uniprot_id": uniprot_id,
-            "max_per_source": max_per_source,
+            "uniprot_id": body.get("uniprot_id", ""),
+            "max_per_source": body.get("max_per_source", 50),
         },
         input_source="connected_library",
         status="created",
     )
     db.add(run)
-    await db.flush()
+    await db.commit()
 
+    # Dispatch Celery task (after commit so the worker can find the run)
     try:
         from celery_app import celery_app
         celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
-        logger.info(
-            "Dispatched database import run %s: %s (%d compounds)",
-            run.id, sources_summary, len(smiles_list),
-        )
+        logger.info("Dispatched database import run %s: %s", run.id, databases)
     except Exception as e:
         logger.warning("Failed to dispatch Celery task for db run %s: %s", run.id, e)
         run.status = "failed"
         run.error_message = f"Failed to dispatch task: {e}"
-        await db.flush()
+        await db.commit()
 
     # Reload with logs eagerly loaded
     stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))

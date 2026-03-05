@@ -4,6 +4,26 @@
 // CDC §4.1: "All columns with results are shown by default"
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Group metadata — labels & colors for the grouped header row
+// ---------------------------------------------------------------------------
+export const GROUP_META = {
+  molecule:          { label: 'Molecule',          bg: 'bg-slate-50',    text: 'text-slate-500',    border: 'border-slate-300' },
+  annotation:        { label: 'Annotations',       bg: 'bg-amber-50',   text: 'text-amber-600',    border: 'border-amber-300' },
+  docking:           { label: 'Docking',            bg: 'bg-blue-50',    text: 'text-blue-600',     border: 'border-blue-400' },
+  admet:             { label: 'ADMET',              bg: 'bg-emerald-50', text: 'text-emerald-600',  border: 'border-emerald-400' },
+  scoring:           { label: 'Scoring',            bg: 'bg-violet-50',  text: 'text-violet-600',   border: 'border-violet-400' },
+  enrichment:        { label: 'Enrichment',         bg: 'bg-cyan-50',    text: 'text-cyan-600',     border: 'border-cyan-400' },
+  clustering:        { label: 'Clustering',         bg: 'bg-teal-50',    text: 'text-teal-600',     border: 'border-teal-400' },
+  off_target:        { label: 'Off-target',         bg: 'bg-orange-50',  text: 'text-orange-600',   border: 'border-orange-400' },
+  confidence:        { label: 'Confidence',         bg: 'bg-indigo-50',  text: 'text-indigo-600',   border: 'border-indigo-400' },
+  retrosynthesis:    { label: 'Retrosynthesis',     bg: 'bg-pink-50',    text: 'text-pink-600',     border: 'border-pink-400' },
+  safety:            { label: 'Safety',             bg: 'bg-red-50',     text: 'text-red-500',      border: 'border-red-400' },
+  activity_cliffs:   { label: 'Activity Cliffs',    bg: 'bg-yellow-50',  text: 'text-yellow-600',   border: 'border-yellow-400' },
+  pharmacophore:     { label: 'Pharmacophore',      bg: 'bg-fuchsia-50', text: 'text-fuchsia-600',  border: 'border-fuchsia-400' },
+  generation:        { label: 'Generation',         bg: 'bg-sky-50',     text: 'text-sky-600',      border: 'border-sky-400' },
+}
+
 export const PHASE_TYPES = {
   hit_discovery: { label: 'Hit Discovery', short: 'A', color: 'blue', description: 'Find hits in a compound library' },
   hit_to_lead: { label: 'Hit-to-Lead', short: 'B', color: 'purple', description: 'Optimize hits, generate analogues' },
@@ -13,15 +33,21 @@ export const PHASE_TYPES = {
 // All possible columns in the molecule table.
 // key = flat field name on the molecule row (after property flattening)
 export const ALL_COLUMNS = [
-  // Identity (always available from import)
-  { key: 'name', label: 'Name', type: 'text', group: 'identity', width: 140, sortable: true },
-  { key: 'smiles', label: 'SMILES', type: 'smiles', group: 'identity', width: 200, sortable: false },
-  { key: 'source_run_id', label: 'Source', type: 'text', group: 'identity', width: 80, sortable: true },
+  // Molecule identity (always available from import)
+  { key: 'name', label: 'Name', type: 'text', group: 'molecule', width: 140, sortable: true },
+  { key: 'smiles', label: 'SMILES', type: 'smiles', group: 'molecule', width: 200, sortable: false },
+  { key: 'source_run_id', label: 'Source', type: 'source', group: 'molecule', width: 110, sortable: true },
+  // User annotations
+  { key: 'tags', label: 'Tags', type: 'tags', group: 'annotation', width: 160, sortable: false, hiddenByDefault: true },
+  { key: 'user_comment', label: 'Notes', type: 'editable_text', group: 'annotation', width: 180, sortable: false, hiddenByDefault: true },
+  { key: 'invalidated', label: 'Invalid', type: 'invalidation', group: 'annotation', width: 65, sortable: true, hiddenByDefault: true },
+  { key: 'ai_comment', label: 'AI Notes', type: 'text', group: 'annotation', width: 180, sortable: false, hiddenByDefault: true },
   // Docking scores
   { key: 'docking_score', label: 'Docking', type: 'number', group: 'docking', unit: 'kcal/mol', width: 90, sortable: true, colorScale: 'lower-better' },
   { key: 'cnn_score', label: 'CNN Score', type: 'number', group: 'docking', width: 90, sortable: true, colorScale: 'higher-better' },
   { key: 'cnn_affinity', label: 'CNN Aff.', type: 'number', group: 'docking', width: 80, sortable: true, colorScale: 'higher-better' },
   { key: 'cnn_vs', label: 'CNN VS', type: 'number', group: 'docking', width: 80, sortable: true, colorScale: 'higher-better' },
+  { key: 'consensus_ecr', label: 'ECR', type: 'number', group: 'docking', width: 65, sortable: true, colorScale: 'higher-better' },
   // Drug properties / ADMET
   { key: 'logP', label: 'LogP', type: 'number', group: 'admet', width: 70, sortable: true },
   { key: 'MW', label: 'MW', type: 'number', group: 'admet', unit: 'Da', width: 70, sortable: true },
@@ -36,6 +62,16 @@ export const ALL_COLUMNS = [
   { key: 'metabolic_stability', label: 'Met. Stab.', type: 'number', group: 'admet', width: 80, sortable: true, colorScale: 'higher-better' },
   { key: 'oral_bioavailability', label: 'Oral Bioavail.', type: 'number', group: 'admet', width: 95, sortable: true, colorScale: 'higher-better' },
   { key: 'plasma_protein_binding', label: 'PPB', type: 'number', group: 'admet', width: 60, sortable: true },
+  // Druglikeness rules (CNS MPO, Pfizer 3/75, GSK 4/400, Brenk)
+  { key: 'cns_mpo', label: 'CNS MPO', type: 'number', group: 'admet', width: 70, sortable: true, colorScale: 'higher-better' },
+  { key: 'pfizer_alert', label: 'Pfizer 3/75', type: 'boolean', group: 'admet', width: 80, sortable: true },
+  { key: 'gsk_alert', label: 'GSK 4/400', type: 'boolean', group: 'admet', width: 75, sortable: true },
+  { key: 'brenk_alert', label: 'Brenk', type: 'boolean', group: 'confidence', width: 60, sortable: true },
+  { key: 'heavy_atom_count', label: 'HA', type: 'number', group: 'admet', width: 45, sortable: true },
+  { key: 'sa_score', label: 'SA Score', type: 'number', group: 'admet', width: 70, sortable: true, colorScale: 'lower-better' },
+  { key: 'ligand_efficiency', label: 'LE', type: 'number', group: 'scoring', width: 55, sortable: true, colorScale: 'higher-better' },
+  { key: 'ro3_pass', label: 'Ro3', type: 'boolean', group: 'admet', width: 50, sortable: true },
+  { key: 'inchikey', label: 'InChIKey', type: 'text', group: 'molecule', width: 180, sortable: true },
   // Scoring
   { key: 'composite_score', label: 'Composite', type: 'number', group: 'scoring', width: 90, sortable: true, colorScale: 'higher-better' },
   // Enrichment
@@ -66,15 +102,16 @@ export const ALL_COLUMNS = [
   { key: 'skin_sensitization', label: 'Skin Sens.', type: 'boolean', group: 'safety', width: 80, sortable: true },
   { key: 'carcinogenicity', label: 'Carcino.', type: 'number', group: 'safety', width: 70, sortable: true, colorScale: 'lower-better' },
   { key: 'safety_color_code', label: 'Safety', type: 'text', group: 'safety', width: 65, sortable: true, popup: 'safety' },
+  // Activity cliffs
+  { key: 'is_cliff', label: 'Cliff', type: 'boolean', group: 'activity_cliffs', width: 55, sortable: true },
+  { key: 'sali_max', label: 'SALI', type: 'number', group: 'activity_cliffs', width: 65, sortable: true, colorScale: 'higher-better' },
+  { key: 'n_cliffs', label: '# Cliffs', type: 'number', group: 'activity_cliffs', width: 65, sortable: true },
+  // Pharmacophore
+  { key: 'pharmacophore_features', label: 'Pharma. Features', type: 'number', group: 'pharmacophore', width: 95, sortable: true, colorScale: 'higher-better' },
+  { key: 'pharmacophore_similarity', label: 'Pharma. Sim.', type: 'number', group: 'pharmacophore', width: 85, sortable: true, colorScale: 'higher-better' },
   // Generation
   { key: 'generation_level', label: 'Gen. Level', type: 'number', group: 'generation', width: 80, sortable: true },
   { key: 'parent_molecule_id', label: 'Parent', type: 'text', group: 'generation', width: 80, sortable: false },
-  // User annotations
-  { key: '_detail', label: '', type: 'action', group: 'annotation', width: 36, sortable: false },
-  { key: 'tags', label: 'Tags', type: 'tags', group: 'annotation', width: 140, sortable: false },
-  { key: 'invalidated', label: 'Invalid', type: 'invalidation', group: 'annotation', width: 60, sortable: true },
-  { key: 'user_comment', label: 'Notes', type: 'editable_text', group: 'annotation', width: 160, sortable: false },
-  { key: 'ai_comment', label: 'AI Notes', type: 'text', group: 'annotation', width: 180, sortable: false },
 ]
 
 // Column key lookup for fast access
@@ -92,6 +129,7 @@ const PROP_ALIASES = {
   hbd: 'HBD', hba: 'HBA', qed: 'QED', tpsa: 'TPSA',
   bbb_permeability: 'BBB', herg_inhibition: 'hERG', herg_risk: 'herg_risk',
   color_code: 'safety_color_code',
+  affinity: 'docking_score', vina_score: 'docking_score',
 }
 
 /**
@@ -99,7 +137,7 @@ const PROP_ALIASES = {
  * Skips arrays and special keys (flags, note, status, smiles, confidence_modifier).
  */
 function deepFlatten(obj, out = {}) {
-  const SKIP_KEYS = new Set(['flags', 'note', 'status', 'smiles', 'confidence_modifier', 'nearest_tanimoto', 'docking_status', 'tree', 'children', 'reaction', 'reactants', 'reactant_names', 'conditions'])
+  const SKIP_KEYS = new Set(['flags', 'note', 'status', 'smiles', 'confidence_modifier', 'nearest_tanimoto', 'docking_status', 'tree', 'children', 'reaction', 'reactants', 'reactant_names', 'conditions', 'results', 'warnings', 'pose_molblock'])
   for (const [k, v] of Object.entries(obj)) {
     if (SKIP_KEYS.has(k)) continue
     if (v && typeof v === 'object' && !Array.isArray(v)) {
@@ -138,7 +176,7 @@ export function detectAvailableColumns(molecules) {
 
   for (const mol of molecules) {
     for (const col of ALL_COLUMNS) {
-      if (available.has(col.key)) continue
+      if (available.has(col.key) || col.hiddenByDefault) continue
       const val = mol[col.key]
       if (val !== undefined && val !== null && val !== '') {
         available.add(col.key)
@@ -148,11 +186,29 @@ export function detectAvailableColumns(molecules) {
   return ALL_COLUMNS.filter(c => available.has(c.key))
 }
 
+/** Annotation columns — always available in ColumnSelector, hidden by default */
+export const ANNOTATION_COLUMNS = ALL_COLUMNS.filter(c => c.hiddenByDefault)
+
 /**
  * Get column definition by key. Returns undefined for unknown keys.
  */
 export function getColumnDef(key) {
   return COLUMN_MAP[key]
+}
+
+/**
+ * Get effective color scale config for a column, considering user overrides.
+ * @param {string} key — column key
+ * @param {Object} overrides — columnColorOverrides from settingsStore
+ * @returns {{ mode: string, intervals?: Array }} — resolved color config
+ *   mode: 'none' | 'higher-better' | 'lower-better' | 'custom'
+ *   intervals (custom only): [{ min: number|null, max: number|null, color: string }]
+ */
+export function getEffectiveColorScale(key, overrides = {}) {
+  if (overrides[key]) return overrides[key]
+  const col = COLUMN_MAP[key]
+  if (!col || !col.colorScale) return { mode: 'none' }
+  return { mode: col.colorScale }
 }
 
 // ---------------------------------------------------------------------------
@@ -175,4 +231,6 @@ export const CALCULATION_SUBTYPES = [
   { key: 'confidence', label: 'Confidence Analysis', icon: 'check-circle', description: 'PAINS filters, applicability domain, convergence', columns: ['confidence_score', 'pains_alert', 'applicability_domain', 'confidence_flags'] },
   { key: 'retrosynthesis', label: 'Retrosynthesis', icon: 'git-branch', description: 'Synthesis feasibility, cost estimation, reagent availability', columns: ['n_synth_steps', 'synth_confidence', 'synth_cost_estimate', 'reagents_available'] },
   { key: 'safety', label: 'Safety Profile', icon: 'alert-triangle', description: 'Full safety: hERG, AMES, hepatotoxicity, carcinogenicity', columns: ['herg_risk', 'ames_mutagenicity', 'hepatotoxicity', 'skin_sensitization', 'carcinogenicity', 'safety_color_code'] },
+  { key: 'pharmacophore', label: 'Pharmacophore Mapping', icon: 'hexagon', description: 'Map 3D pharmacophoric features and compute pairwise similarity', columns: [] },
+  { key: 'activity_cliffs', label: 'Activity Cliffs (SALI)', icon: 'trending-up', description: 'Detect structure-activity cliffs — similar molecules with large activity differences', columns: ['is_cliff', 'sali_max', 'n_cliffs'] },
 ]

@@ -1,8 +1,9 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import FilterBar from '../../components/FilterBar.jsx'
 import Badge from '../../components/Badge.jsx'
 import BindXLogo from '../../components/BindXLogo.jsx'
+import InfoTip, { TIPS } from '../../components/InfoTip.jsx'
 
 function FreezeBanner() {
   return (
@@ -85,34 +86,68 @@ function Breadcrumb({ projectId, projectName, phase, phaseTypeMeta }) {
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
       </svg>
       <span className="text-gray-600 font-medium truncate">
-        {phase.label} — {phaseTypeMeta.label || phase.type}
+        Phase {phaseTypeMeta.short || '?'} — {phaseTypeMeta.label || phase.type}
       </span>
     </nav>
   )
 }
 
-function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun, onOpenAgent }) {
+function PhaseDescription({ phaseId }) {
+  const storageKey = `bindx_phase_desc_${phaseId}`
+  const [value, setValue] = useState(() => localStorage.getItem(storageKey) || '')
+
+  useEffect(() => {
+    setValue(localStorage.getItem(`bindx_phase_desc_${phaseId}`) || '')
+  }, [phaseId])
+
+  const handleChange = (e) => {
+    setValue(e.target.value)
+    localStorage.setItem(storageKey, e.target.value)
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <label className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1 shrink-0">Phase Description</label>
+      <textarea
+        value={value}
+        onChange={handleChange}
+        placeholder="Goals, strategy, notes..."
+        className="flex-1 text-xs text-gray-600 border border-gray-200 rounded-lg px-3 py-2 resize-none overflow-y-auto focus:outline-none focus:ring-1 focus:ring-bx-mint focus:border-bx-mint placeholder-gray-300"
+      />
+    </div>
+  )
+}
+
+function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun, onOpenAgent, onDeletePhase, onSendToNextPhase, bookmarkedCount }) {
   return (
     <div className="card overflow-hidden">
       <div className={`h-1.5 ${isFrozen ? 'bg-blue-400' : 'bg-bx-mint'}`} />
       <div className="px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          {/* Title + stats */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl font-bold text-bx-light-text">
-                {phase.label}
-                <span className="ml-2 text-base font-normal text-gray-400">
-                  — {phaseTypeMeta.label || phase.type}
-                </span>
-              </h1>
-              {isFrozen && <Badge variant="blue" size="sm">Frozen</Badge>}
-            </div>
-            <StatsBar stats={stats} />
+          {/* Title */}
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-bold text-bx-light-text">
+              Phase {phaseTypeMeta.short || '?'}
+              <span className="ml-2 text-base font-normal text-gray-400">
+                — {phaseTypeMeta.label || phase.type}
+                <InfoTip text={TIPS[`phase_${phase.type === 'hit_discovery' ? 'a' : phase.type === 'hit_to_lead' ? 'b' : 'c'}`]} size="xs" />
+              </span>
+            </h1>
+            {isFrozen && <Badge variant="blue" size="sm">Frozen</Badge>}
           </div>
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={onDeletePhase}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 transition-all duration-150"
+              title="Delete this phase"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
             <button
               onClick={onOpenAgent}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all duration-150"
@@ -122,6 +157,7 @@ function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, on
                   d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
               </svg>
               AI Agent
+              <InfoTip text="AI agent analyzes your molecules and provides insights on chemical series, property trends, safety alerts, and optimization suggestions." size="xs" />
             </button>
             <button
               onClick={onFreezeToggle}
@@ -139,7 +175,19 @@ function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, on
                 />
               </svg>
               {isFrozen ? 'Unfreeze' : 'Freeze Phase'}
+              <InfoTip text={TIPS.freeze} size="xs" />
             </button>
+            {onSendToNextPhase && bookmarkedCount > 0 && !isFrozen && (
+              <button
+                onClick={onSendToNextPhase}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-bx-mint/30 text-bx-mint-dim bg-bx-mint/5 hover:bg-bx-mint/10 transition-all duration-150"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+                Next Phase ({bookmarkedCount})
+              </button>
+            )}
             <button
               onClick={onNewRun}
               disabled={isFrozen}
@@ -165,6 +213,14 @@ function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, on
                 </>
               )}
             </button>
+          </div>
+        </div>
+
+        {/* Stats + Description row */}
+        <div className="flex items-stretch gap-4 mt-3">
+          <StatsBar stats={stats} />
+          <div className="flex-1 min-w-[200px]" style={{ height: 80 }}>
+            <PhaseDescription phaseId={phase.id} />
           </div>
         </div>
 

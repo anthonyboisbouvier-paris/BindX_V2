@@ -3,24 +3,24 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 
 import { useWorkspace } from '../../contexts/WorkspaceContext.jsx'
 import { useToast } from '../../contexts/ToastContext.jsx'
+import { v9UpdateAnnotations } from '../../api.js'
 import { ALL_COLUMNS, COLUMN_PRESETS, PHASE_TYPES, flattenMoleculeProperties, detectAvailableColumns } from '../../lib/columns.js'
 
 import MoleculeTable from '../../components/MoleculeTable.jsx'
-import SelectionToolbar from '../../components/SelectionToolbar.jsx'
-import ColumnSelector from '../../components/ColumnSelector.jsx'
+import TableToolbar from '../../components/TableToolbar.jsx'
 import RunHistory from '../../components/RunHistory.jsx'
 import RunCreator from '../../components/RunCreator.jsx'
 import RunProgress from '../../components/RunProgress.jsx'
 import FreezeDialog from '../../components/FreezeDialog.jsx'
 import ParetoFront from '../../components/ParetoFront.jsx'
+import AnalyticsPanel from '../../components/AnalyticsPanel.jsx'
 import ExportModal from '../../components/ExportModal.jsx'
 import CampaignAgentPanel from '../../components/CampaignAgentPanel.jsx'
 import InfoTip, { TIPS } from '../../components/InfoTip.jsx'
-import BindXLogo from '../../components/BindXLogo.jsx'
 
 import AdvancedFilterBuilder from '../../components/AdvancedFilterBuilder.jsx'
 import MoleculeDetailPanel, { DetailPopupModal } from './MoleculeDetailPanel.jsx'
-import PhaseHeader, { Breadcrumb, FilterBarWithCount, StatsBar } from './PhaseHeader.jsx'
+import PhaseHeader, { Breadcrumb } from './PhaseHeader.jsx'
 
 export default function PhaseDashboard() {
   const { projectId, phaseId } = useParams()
@@ -44,6 +44,7 @@ export default function PhaseDashboard() {
     bookmarkSelected,
     freezePhase,
     unfreezePhase,
+    deletePhase,
     getPhaseStatus,
     createRun,
     cancelRun,
@@ -60,6 +61,7 @@ export default function PhaseDashboard() {
   } = useWorkspace()
 
   const { addToast } = useToast()
+  const navigate = useNavigate()
 
   // Sync URL params to workspace state
   useEffect(() => { if (projectId) selectProject(projectId) }, [projectId, selectProject])
@@ -77,17 +79,29 @@ export default function PhaseDashboard() {
     [flatMolecules]
   )
 
-  // --- User annotations (tags, invalidation, comments) — local state keyed by mol id ---
-  const [annotations, setAnnotations] = useState({}) // { molId: { tags: [...], invalidated: bool, user_comment: '...' } }
+  // --- User annotations (tags, invalidation, comments) — optimistic local + API persist ---
+  const [annotations, setAnnotations] = useState({})
+  const debounceTimers = useRef({})
 
   const handleAnnotation = useCallback((molId, key, value) => {
+    // Optimistic local update
     setAnnotations(prev => ({
       ...prev,
       [molId]: { ...(prev[molId] || {}), [key]: value },
     }))
+    // Debounced API persist (300ms for text, immediate for tags/boolean)
+    const delay = key === 'user_comment' ? 600 : 100
+    const timerKey = `${molId}:${key}`
+    if (debounceTimers.current[timerKey]) clearTimeout(debounceTimers.current[timerKey])
+    debounceTimers.current[timerKey] = setTimeout(() => {
+      v9UpdateAnnotations(molId, { [key]: value }).catch(err => {
+        console.error('Failed to save annotation:', err)
+      })
+      delete debounceTimers.current[timerKey]
+    }, delay)
   }, [])
 
-  // Merge annotations into flat molecules
+  // Merge annotations into flat molecules (API fields + local overrides)
   const annotatedMolecules = useMemo(
     () => flatMolecules.map(m => ({ ...m, ...(annotations[m.id] || {}) })),
     [flatMolecules, annotations]
@@ -98,22 +112,27 @@ export default function PhaseDashboard() {
   const [showRunCreator, setShowRunCreator] = useState(false)
   const [showPareto, setShowPareto] = useState(true)
   const [showFreezeDialog, setShowFreezeDialog] = useState(false)
+  const [filterBarResult, setFilterBarResult] = useState(annotatedMolecules)
   const [filteredMolecules, setFilteredMolecules] = useState(annotatedMolecules)
   const [popupState, setPopupState] = useState(null) // { type: 'safety'|'retrosynthesis'|'confidence', molecule }
   const [showExportModal, setShowExportModal] = useState(false)
   const [showAgentPanel, setShowAgentPanel] = useState(false)
   const [showRunLogs, setShowRunLogs] = useState(false)
+  const [showAnalytics, setShowAnalytics] = useState(true)
   const [advancedFilterFn, setAdvancedFilterFn] = useState(null)
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
 
-  // Update filtered whenever phase molecules or advanced filter change
+  // Combine FilterBar result + advanced filter + annotations overlay
   useEffect(() => {
+    const base = filterBarResult || flatMolecules
+    // Re-apply annotations on top (filterBarResult has stale snapshots without annotations)
+    const withAnnotations = base.map(m => ({ ...m, ...(annotations[m.id] || {}) }))
     if (advancedFilterFn) {
-      setFilteredMolecules(annotatedMolecules.filter(advancedFilterFn))
+      setFilteredMolecules(withAnnotations.filter(advancedFilterFn))
     } else {
-      setFilteredMolecules(annotatedMolecules)
+      setFilteredMolecules(withAnnotations)
     }
-  }, [annotatedMolecules, advancedFilterFn])
+  }, [filterBarResult, flatMolecules, annotations, advancedFilterFn])
 
   // Auto-select first molecule when molecules load and none is selected
   useEffect(() => {
@@ -207,11 +226,8 @@ export default function PhaseDashboard() {
     }
   }, [currentPhase, currentPhaseRuns, flatMolecules, bookmarkedCount, useServerFilters, moleculeTotal])
 
-  // Number of active filters
-  const [activeFilterCount, setActiveFilterCount] = useState(0)
-
   const handleFilteredChange = useCallback((result) => {
-    setFilteredMolecules(result)
+    setFilterBarResult(result)
   }, [])
 
   // Row click — opens detail panel
@@ -248,12 +264,35 @@ export default function PhaseDashboard() {
         addToast('File uploaded and import started', 'success')
       } else if (runConfig.type === 'import' && runConfig.config?.sourceMode === 'internal') {
         // Internal import — bookmarked molecules from another phase
+        // Resolve source_phase_id by phase type order (hit_discovery → hit_to_lead → lead_optimization)
+        let sourcePhaseId = runConfig.config.source_phase_id
+        if (!sourcePhaseId) {
+          const PHASE_ORDER = ['hit_discovery', 'hit_to_lead', 'lead_optimization']
+          const phases = currentCampaign?.phases || []
+          const myType = currentPhase?.type || phases.find(p => String(p.id) === String(phaseId))?.type
+          const myOrderIdx = PHASE_ORDER.indexOf(myType)
+          if (myOrderIdx > 0) {
+            // Find the phase of the previous type
+            const prevType = PHASE_ORDER[myOrderIdx - 1]
+            const prevPhase = phases.find(p => p.type === prevType)
+            if (prevPhase) sourcePhaseId = prevPhase.id
+          }
+          // Fallback: try index-based lookup
+          if (!sourcePhaseId && phases.length > 1) {
+            const myIdx = phases.findIndex(p => String(p.id) === String(phaseId))
+            if (myIdx > 0) sourcePhaseId = phases[myIdx - 1].id
+          }
+        }
+        if (!sourcePhaseId) {
+          addToast('No previous phase found to import from. This is the first phase.', 'error')
+          return
+        }
         await createRun(phaseId, {
           type: 'import',
           config: {
             source: 'phase_selection',
             selection: 'bookmarked',
-            source_phase_id: runConfig.config.source_phase_id,
+            source_phase_id: sourcePhaseId,
           },
         })
         addToast('Importing bookmarked molecules...', 'success')
@@ -279,7 +318,7 @@ export default function PhaseDashboard() {
     } finally {
       setRunSubmitting(false)
     }
-  }, [phaseId, createRun, importFile, importDatabase, currentProject, addToast])
+  }, [phaseId, createRun, importFile, importDatabase, currentProject, currentCampaign, currentPhase, addToast])
 
   const handleCancelRun = useCallback(async (runId) => {
     try {
@@ -316,6 +355,22 @@ export default function PhaseDashboard() {
     }
   }, [isFrozen, currentPhase, freezePhase, unfreezePhase, addToast, flatMolecules])
 
+  const handleDeletePhase = useCallback(async () => {
+    if (!currentPhase) return
+    const phaseName = PHASE_TYPES[currentPhase.type]?.label || currentPhase.type
+    const molCount = moleculeTotal || flatMolecules.length
+    const runCount = (currentPhaseRuns || []).length
+    const msg = `Delete phase "${phaseName}"? This will permanently remove ${molCount} molecule${molCount !== 1 ? 's' : ''} and ${runCount} run${runCount !== 1 ? 's' : ''}. This cannot be undone.`
+    if (!window.confirm(msg)) return
+    try {
+      await deletePhase(currentPhase.id)
+      addToast('Phase deleted', 'success')
+      navigate(`/project/${projectId}`)
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to delete phase', 'error')
+    }
+  }, [currentPhase, flatMolecules.length, currentPhaseRuns, deletePhase, addToast, navigate, projectId])
+
   const handleSelectAll = useCallback(() => {
     if (flatMolecules.every(m => selectedMoleculeIds.has(m.id))) selectNone()
     else selectAll()
@@ -336,32 +391,44 @@ export default function PhaseDashboard() {
   }, [currentCampaign, currentPhase])
 
   // Send bookmarks to next phase
-  const navigate = useNavigate()
   const handleSendToNextPhase = useCallback(async () => {
     if (!currentCampaign || !currentPhase) return
     const phases = currentCampaign.phases || []
-    const myIdx = phases.findIndex(p => p.id === currentPhase.id)
-    if (myIdx < 0) return
+    const typeOrder = ['hit_discovery', 'hit_to_lead', 'lead_optimization']
+    const currentTypeIdx = typeOrder.indexOf(currentPhase.type)
 
-    let nextPhase = phases[myIdx + 1]
+    if (currentTypeIdx < 0 || currentTypeIdx >= typeOrder.length - 1) {
+      addToast('This is the final phase (Lead Optimization). No further phase can be created.', 'warning')
+      return
+    }
+
+    const nextType = typeOrder[currentTypeIdx + 1]
+
+    // Find existing next phase by type (more reliable than index)
+    let nextPhase = phases.find(p => p.type === nextType)
+
+    // If next phase already exists, just navigate to it
+    if (nextPhase) {
+      navigate(`/project/${projectId}/phase/${nextPhase.id}`)
+      return
+    }
 
     // Auto-create next phase if it doesn't exist
-    if (!nextPhase) {
-      const typeOrder = ['hit_discovery', 'hit_to_lead', 'lead_optimization']
-      const currentTypeIdx = typeOrder.indexOf(currentPhase.type)
-      if (currentTypeIdx < 0 || currentTypeIdx >= typeOrder.length - 1) {
-        addToast('This is the final phase (Lead Optimization). No further phase can be created.', 'warning')
-        return
+    const nextLabel = PHASE_TYPES[nextType]?.label || nextType
+    try {
+      nextPhase = await createPhase(currentCampaign.id, { type: nextType })
+      addToast(`Created ${nextLabel} phase`, 'success')
+    } catch (err) {
+      // If 409 (already exists), find it and navigate
+      if (err?.status === 409) {
+        const existing = phases.find(p => p.type === nextType)
+        if (existing) {
+          navigate(`/project/${projectId}/phase/${existing.id}`)
+          return
+        }
       }
-      const nextType = typeOrder[currentTypeIdx + 1]
-      const nextLabel = PHASE_TYPES[nextType]?.label || nextType
-      try {
-        nextPhase = await createPhase(currentCampaign.id, { type: nextType })
-        addToast(`Created ${nextLabel} phase`, 'success')
-      } catch (err) {
-        addToast(err.userMessage || 'Failed to create next phase', 'error')
-        return
-      }
+      addToast(err.userMessage || 'Failed to create next phase', 'error')
+      return
     }
 
     try {
@@ -373,7 +440,7 @@ export default function PhaseDashboard() {
           source_phase_id: currentPhase.id,
         },
       })
-      addToast(`Sending ${bookmarkedCount} bookmarked molecules to ${nextPhase.label || 'next phase'}...`, 'success')
+      addToast(`Sending ${bookmarkedCount} bookmarked molecules to ${PHASE_TYPES[nextType]?.label || 'next phase'}...`, 'success')
       navigate(`/project/${projectId}/phase/${nextPhase.id}`)
     } catch (err) {
       addToast(err.userMessage || 'Failed to send bookmarks to next phase', 'error')
@@ -416,6 +483,9 @@ export default function PhaseDashboard() {
           onNewRun={handleNewRun}
           hasActiveRun={!!activeRun}
           onOpenAgent={() => setShowAgentPanel(true)}
+          onDeletePhase={handleDeletePhase}
+          onSendToNextPhase={handleSendToNextPhase}
+          bookmarkedCount={bookmarkedCount}
         />
 
         {/* Active run progress */}
@@ -466,7 +536,7 @@ export default function PhaseDashboard() {
           onClose={() => setShowFreezeDialog(false)}
           onConfirm={handleFreezeConfirm}
           action={isFrozen ? 'unfreeze' : 'freeze'}
-          phaseName={currentPhase.label}
+          phaseName={PHASE_TYPES[currentPhase.type]?.label || currentPhase.type}
           bookmarkedMols={flatMolecules.filter(m => m.bookmarked)}
           hasDownstreamRuns={hasDownstreamRuns}
         />
@@ -491,18 +561,36 @@ export default function PhaseDashboard() {
         onNewRun={handleNewRun}
         hasActiveRun={!!activeRun}
         onOpenAgent={() => setShowAgentPanel(true)}
+        onDeletePhase={handleDeletePhase}
+        onSendToNextPhase={handleSendToNextPhase}
+        bookmarkedCount={bookmarkedCount}
       />
 
       {/* Active run progress */}
       <RunProgress run={activeRun} onCancel={handleCancelRun} queuedCount={queuedRunCount} />
 
-      {/* Selection Toolbar */}
-      <SelectionToolbar
+      {/* Unified Toolbar (filters + columns + selection) */}
+      <TableToolbar
+        molecules={annotatedMolecules}
+        columns={availableColumns}
+        onFilteredChange={handleFilteredChange}
+        serverMode={useServerFilters}
+        onServerFilterChange={updateServerFilters}
+        totalFromServer={useServerFilters ? moleculeTotal : undefined}
+        showAdvancedFilter={showAdvancedFilter}
+        onToggleAdvancedFilter={() => setShowAdvancedFilter(v => !v)}
+        advancedFilterActive={!!advancedFilterFn}
+        onClearAdvancedFilter={() => setAdvancedFilterFn(null)}
+        visibleKeys={visibleKeys}
+        onVisibleKeysChange={setVisibleKeys}
+        filteredMoleculeCount={filteredMolecules.length}
+        moleculeTotal={moleculeTotal}
+        moleculeHasMore={moleculeHasMore}
+        moleculesLoading={moleculesLoading}
         selectedCount={selectedMoleculeIds.size}
         totalCount={flatMolecules.length}
         bookmarkedCount={bookmarkedCount}
         filteredCount={filteredMolecules.length}
-        activeFilterCount={activeFilterCount}
         onSelectAll={handleSelectAll}
         onSelectNone={selectNone}
         onSelectBookmarked={selectBookmarked}
@@ -513,68 +601,17 @@ export default function PhaseDashboard() {
         isFrozen={isFrozen}
       />
 
-      {/* Filter bar */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <div className="flex-1">
-            <FilterBarWithCount
-              molecules={flatMolecules}
-              columns={availableColumns}
-              onFilteredChange={handleFilteredChange}
-              onFilterCountChange={setActiveFilterCount}
-              serverMode={useServerFilters}
-              onServerFilterChange={updateServerFilters}
-              totalFromServer={useServerFilters ? moleculeTotal : undefined}
-            />
-          </div>
-          <button
-            onClick={() => setShowAdvancedFilter(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex-shrink-0 ${
-              showAdvancedFilter
-                ? 'bg-bx-surface text-white border-bx-surface'
-                : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'
-            }`}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-            </svg>
-            Advanced
-            {advancedFilterFn && (
-              <span className="w-1.5 h-1.5 rounded-full bg-bx-cyan" />
-            )}
-          </button>
-        </div>
-
-        <AdvancedFilterBuilder
-          columns={availableColumns}
-          onFilterChange={setAdvancedFilterFn}
-          isOpen={showAdvancedFilter}
-          onToggle={() => setShowAdvancedFilter(v => !v)}
-        />
-      </div>
+      <AdvancedFilterBuilder
+        columns={availableColumns}
+        onFilterChange={(fn) => setAdvancedFilterFn(() => fn)}
+        isOpen={showAdvancedFilter}
+        onToggle={() => setShowAdvancedFilter(v => !v)}
+      />
 
       {/* Table + Detail panel split layout */}
       <div className="flex gap-4 items-start">
         {/* Table (60% when drawer open, 100% when closed) */}
         <div className={`min-w-0 space-y-2 transition-all duration-200 ${showDetail ? 'flex-1' : 'w-full'}`}>
-          {/* Column controls row */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <ColumnSelector
-                allColumns={ALL_COLUMNS}
-                visibleKeys={visibleKeys}
-                onChange={setVisibleKeys}
-              />
-              <span className="text-sm text-gray-400 tabular-nums flex items-center gap-1.5">
-                {moleculesLoading && <BindXLogo variant="loading" size={20} />}
-                {filteredMolecules.length !== moleculeTotal
-                  ? `${filteredMolecules.length} of ${moleculeTotal.toLocaleString()} molecules`
-                  : `${moleculeTotal.toLocaleString()} molecules`}
-                {moleculeHasMore && <span className="text-[10px] text-gray-300">(scroll for more)</span>}
-              </span>
-            </div>
-          </div>
 
           <MoleculeTable
             molecules={filteredMolecules}
@@ -590,6 +627,7 @@ export default function PhaseDashboard() {
             onLoadMore={moleculeHasMore ? loadMoreMolecules : undefined}
             hasMore={moleculeHasMore}
             totalCount={moleculeTotal}
+            runs={currentPhaseRuns}
           />
         </div>
 
@@ -597,7 +635,11 @@ export default function PhaseDashboard() {
         {showDetail && selectedMolecule && (
           <div className="flex-shrink-0 w-[40%] min-w-[300px] max-w-[520px]">
             <MoleculeDetailPanel
-              molecule={flatMolecules.find(m => m.id === selectedMolecule.id) || selectedMolecule}
+              molecule={(() => {
+                const flat = flatMolecules.find(m => m.id === selectedMolecule.id) || selectedMolecule
+                const original = phaseMolecules.find(m => m.id === selectedMolecule.id)
+                return original ? { ...flat, properties: original.properties } : flat
+              })()}
               molecules={filteredMolecules}
               onClose={handleCloseDetail}
               onToggleBookmark={isFrozen ? undefined : toggleBookmark}
@@ -608,9 +650,6 @@ export default function PhaseDashboard() {
           </div>
         )}
       </div>
-
-      {/* Run History timeline */}
-      <RunHistory runs={currentPhaseRuns} onCancel={handleCancelRun} onArchive={handleArchiveRun} />
 
       {/* Pareto Analysis (collapsible) */}
       <div className="card overflow-hidden">
@@ -640,10 +679,46 @@ export default function PhaseDashboard() {
               molecules={filteredMolecules}
               onSelect={mol => mol && handleRowClick(mol)}
               onToggleBookmark={isFrozen ? undefined : toggleBookmark}
+              visibleKeys={visibleKeys}
             />
           </div>
         )}
       </div>
+
+      {/* Analytics (collapsible) */}
+      <div className="card overflow-hidden">
+        <button
+          onClick={() => setShowAnalytics(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors text-left"
+        >
+          <div className="flex items-center gap-2.5">
+            <svg className="w-4 h-4 text-bx-light-text" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span className="font-semibold text-gray-700 text-sm">Analytics</span>
+            <span className="text-sm text-gray-400">Distributions, correlations, breakdowns</span>
+          </div>
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform duration-150 ${showAnalytics ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {showAnalytics && (
+          <div className="px-5 pb-5 border-t border-gray-100 pt-4">
+            <AnalyticsPanel
+              molecules={filteredMolecules}
+              availableColumns={availableColumns}
+              visibleKeys={visibleKeys}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Run History timeline */}
+      <RunHistory runs={currentPhaseRuns} onCancel={handleCancelRun} onArchive={handleArchiveRun} />
 
       {/* Run Logs (collapsible terminal) */}
       <div className="card overflow-hidden">
@@ -731,7 +806,7 @@ export default function PhaseDashboard() {
         onClose={() => setShowFreezeDialog(false)}
         onConfirm={handleFreezeConfirm}
         action={isFrozen ? 'unfreeze' : 'freeze'}
-        phaseName={phase.label}
+        phaseName={PHASE_TYPES[phase.type]?.label || phase.type}
         bookmarkedMols={flatMolecules.filter(m => m.bookmarked)}
         hasDownstreamRuns={hasDownstreamRuns}
       />

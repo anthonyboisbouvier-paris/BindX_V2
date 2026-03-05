@@ -1,6 +1,9 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import InfoTip, { TIPS } from './InfoTip.jsx'
+import { GROUP_META, getEffectiveColorScale } from '../lib/columns.js'
+import useSettingsStore from '../stores/settingsStore.js'
 
 // ---------------------------------------------------------------------------
 // Number formatter per column key
@@ -35,21 +38,49 @@ function formatNumber(key, value) {
 
 // ---------------------------------------------------------------------------
 // Color scale: returns Tailwind classes for a value in a column
+// colorConfig: { mode, intervals? } from getEffectiveColorScale
 // ---------------------------------------------------------------------------
-function getValueColorClasses(value, allValues, scale) {
-  if (value == null || !allValues || !allValues.length) return { cell: '', text: '' }
+const CUSTOM_COLOR_MAP = {
+  green:        { cell: 'bg-green-50',  text: 'text-green-700 font-semibold' },
+  'yellow-green': { cell: 'bg-lime-50', text: 'text-lime-700' },
+  yellow:       { cell: 'bg-yellow-50', text: 'text-yellow-700' },
+  orange:       { cell: 'bg-orange-50', text: 'text-orange-600' },
+  red:          { cell: 'bg-red-50',    text: 'text-red-600' },
+  gray:         { cell: 'bg-gray-50',   text: 'text-gray-500' },
+}
+
+function getValueColorClasses(value, allValues, colorConfig) {
+  if (value == null) return { cell: '', text: '' }
+
+  // Accept string for backward compat (scale name) or object { mode, intervals }
+  const config = typeof colorConfig === 'string' ? { mode: colorConfig } : colorConfig
+  if (!config || config.mode === 'none') return { cell: '', text: '' }
+
+  // Custom interval mode: match first interval where value fits
+  if (config.mode === 'custom' && config.intervals?.length) {
+    for (const band of config.intervals) {
+      const aboveMin = band.min == null || value >= band.min
+      const belowMax = band.max == null || value < band.max
+      if (aboveMin && belowMax) {
+        return CUSTOM_COLOR_MAP[band.color] || { cell: '', text: '' }
+      }
+    }
+    return { cell: '', text: '' }
+  }
+
+  // Percentile-based modes (higher-better / lower-better)
+  if (!allValues || !allValues.length) return { cell: '', text: '' }
   const valid = allValues.filter(v => v != null)
   if (valid.length < 4) return { cell: '', text: '' }
   const sorted = [...valid].sort((a, b) => a - b)
   const n = sorted.length
-  // Rank from 0 (lowest) to 1 (highest)
   const lteCount = sorted.filter(v => v <= value).length
   const rank = lteCount / n
 
-  if (scale === 'higher-better') {
+  if (config.mode === 'higher-better') {
     if (rank >= 0.75) return { cell: 'bg-green-50', text: 'text-green-700 font-semibold' }
     if (rank <= 0.25) return { cell: 'bg-red-50', text: 'text-red-600' }
-  } else if (scale === 'lower-better') {
+  } else if (config.mode === 'lower-better') {
     if (rank <= 0.25) return { cell: 'bg-green-50', text: 'text-green-700 font-semibold' }
     if (rank >= 0.75) return { cell: 'bg-red-50', text: 'text-red-600' }
   }
@@ -97,10 +128,10 @@ function getSmilesDrawer() {
 const _svgCache = new Map()
 
 function SmilesImage({ smiles, width = 120, height = 60 }) {
-  const containerRef = useRef(null)
+  const thumbRef = useRef(null)
   const [svgHtml, setSvgHtml] = useState(() => _svgCache.get(smiles) || null)
   const [failed, setFailed] = useState(false)
-  const [hovered, setHovered] = useState(false)
+  const [popupPos, setPopupPos] = useState(null) // { x, y } or null
 
   useEffect(() => {
     if (!smiles) return
@@ -111,11 +142,10 @@ function SmilesImage({ smiles, width = 120, height = 60 }) {
       try {
         SD.parse(smiles, (tree) => {
           if (cancelled) return
-          // Create a temporary SVG element
           const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
           svgEl.setAttribute('width', String(width))
           svgEl.setAttribute('height', String(height))
-          document.body.appendChild(svgEl) // must be in DOM briefly for SvgDrawer
+          document.body.appendChild(svgEl)
           const drawer = new SD.SvgDrawer({ width, height })
           drawer.draw(tree, svgEl, 'light')
           const html = svgEl.outerHTML
@@ -132,6 +162,19 @@ function SmilesImage({ smiles, width = 120, height = 60 }) {
     return () => { cancelled = true }
   }, [smiles, width, height])
 
+  const handleEnter = useCallback(() => {
+    if (!thumbRef.current) return
+    const rect = thumbRef.current.getBoundingClientRect()
+    const popW = 360, popH = 240
+    let x = rect.left + rect.width / 2 - popW / 2
+    let y = rect.top - popH - 8
+    // Clamp inside viewport
+    if (x < 8) x = 8
+    if (x + popW > window.innerWidth - 8) x = window.innerWidth - 8 - popW
+    if (y < 8) y = rect.bottom + 8 // flip below if no room above
+    setPopupPos({ x, y })
+  }, [])
+
   if (failed || !svgHtml) {
     if (failed) {
       const truncated = smiles.length > 20 ? smiles.slice(0, 20) + '…' : smiles
@@ -142,25 +185,29 @@ function SmilesImage({ smiles, width = 120, height = 60 }) {
 
   return (
     <span
-      className="relative inline-block cursor-pointer"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      ref={thumbRef}
+      className="inline-block cursor-pointer"
+      onMouseEnter={handleEnter}
+      onMouseLeave={() => setPopupPos(null)}
     >
       <span
-        ref={containerRef}
         dangerouslySetInnerHTML={{ __html: svgHtml }}
         style={{ display: 'block', width, height }}
-        title={smiles}
       />
-      {/* Hover zoom */}
-      {hovered && (
-        <span
-          className="absolute z-50 bg-white border border-gray-200 rounded-xl shadow-2xl p-2 pointer-events-none"
-          style={{ bottom: '110%', left: '50%', transform: 'translateX(-50%)', width: 240, height: 140 }}
-          dangerouslySetInnerHTML={{
-            __html: svgHtml.replace(`width="${width}"`, 'width="224"').replace(`height="${height}"`, 'height="124"')
-          }}
-        />
+      {/* Hover zoom — fixed portal to escape overflow clipping */}
+      {popupPos && createPortal(
+        <div
+          className="fixed z-[9999] bg-white border border-gray-200 rounded-xl shadow-2xl pointer-events-none"
+          style={{ left: popupPos.x, top: popupPos.y, width: 360, padding: 12 }}
+        >
+          <div
+            dangerouslySetInnerHTML={{ __html: svgHtml }}
+            style={{ width: 336, height: 190, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            className="[&>svg]:!w-full [&>svg]:!h-full"
+          />
+          <div className="text-[9px] text-gray-400 font-mono mt-1 truncate" style={{ maxWidth: 336 }}>{smiles}</div>
+        </div>,
+        document.body
       )}
     </span>
   )
@@ -174,7 +221,14 @@ function EditableTextCell({ value, onSave, placeholder = 'Add note…' }) {
   const [draft, setDraft] = useState(value || '')
   const inputRef = useRef(null)
 
+  useEffect(() => { setDraft(value || '') }, [value])
   useEffect(() => { if (editing && inputRef.current) inputRef.current.focus() }, [editing])
+
+  const commit = () => {
+    setEditing(false)
+    const trimmed = draft.trim()
+    if (trimmed !== (value || '')) onSave(trimmed)
+  }
 
   if (editing) {
     return (
@@ -183,25 +237,28 @@ function EditableTextCell({ value, onSave, placeholder = 'Add note…' }) {
         type="text"
         value={draft}
         onChange={e => setDraft(e.target.value)}
-        onBlur={() => { setEditing(false); if (draft !== (value || '')) onSave(draft) }}
+        onBlur={commit}
         onKeyDown={e => {
-          if (e.key === 'Enter') { setEditing(false); if (draft !== (value || '')) onSave(draft) }
+          if (e.key === 'Enter') commit()
           if (e.key === 'Escape') { setEditing(false); setDraft(value || '') }
         }}
-        className="w-full text-xs px-1.5 py-0.5 border border-blue-300 rounded bg-white outline-none ring-1 ring-blue-200"
-        style={{ maxWidth: 140 }}
+        className="w-full text-xs px-2 py-1 border border-indigo-400 rounded-md bg-white outline-none ring-2 ring-indigo-200/60 shadow-sm"
+        style={{ maxWidth: 170 }}
+        onClick={e => e.stopPropagation()}
       />
     )
   }
 
   return (
     <span
-      className="text-xs text-gray-500 cursor-pointer hover:text-gray-700 block truncate"
-      style={{ maxWidth: 140 }}
-      title={value || 'Click to add'}
+      className={`text-xs cursor-pointer block truncate rounded px-1.5 py-0.5 transition-colors ${
+        value ? 'text-gray-700 bg-slate-50 hover:bg-indigo-50' : 'text-gray-300 hover:text-indigo-400 hover:bg-indigo-50/50 italic'
+      }`}
+      style={{ maxWidth: 170 }}
+      title={value || 'Click to add a note'}
       onClick={e => { e.stopPropagation(); setEditing(true) }}
     >
-      {value || <span className="text-gray-300 italic">{placeholder}</span>}
+      {value || placeholder}
     </span>
   )
 }
@@ -209,19 +266,56 @@ function EditableTextCell({ value, onSave, placeholder = 'Add note…' }) {
 // ---------------------------------------------------------------------------
 // Tags cell — renders chips with add/remove
 // ---------------------------------------------------------------------------
-function TagsCell({ tags = [], onUpdate }) {
+// Stable color per tag name (hash-based, same tag = same color everywhere)
+const TAG_PALETTES = [
+  'bg-blue-100 text-blue-700 border-blue-200',
+  'bg-purple-100 text-purple-700 border-purple-200',
+  'bg-emerald-100 text-emerald-700 border-emerald-200',
+  'bg-amber-100 text-amber-700 border-amber-200',
+  'bg-rose-100 text-rose-700 border-rose-200',
+  'bg-cyan-100 text-cyan-700 border-cyan-200',
+  'bg-indigo-100 text-indigo-700 border-indigo-200',
+  'bg-teal-100 text-teal-700 border-teal-200',
+  'bg-orange-100 text-orange-700 border-orange-200',
+  'bg-pink-100 text-pink-700 border-pink-200',
+  'bg-lime-100 text-lime-700 border-lime-200',
+  'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200',
+]
+function tagColor(tag) {
+  let h = 0
+  for (let i = 0; i < tag.length; i++) h = ((h << 5) - h + tag.charCodeAt(i)) | 0
+  return TAG_PALETTES[Math.abs(h) % TAG_PALETTES.length]
+}
+
+function TagsCell({ tags = [], onUpdate, allKnownTags = [] }) {
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef(null)
+  const dropdownRef = useRef(null)
 
   useEffect(() => { if (adding && inputRef.current) inputRef.current.focus() }, [adding])
 
-  const colors = ['bg-blue-100 text-blue-700', 'bg-purple-100 text-purple-700', 'bg-green-100 text-green-700', 'bg-amber-100 text-amber-700', 'bg-pink-100 text-pink-700']
+  // Suggestions: existing tags not already on this molecule, filtered by draft
+  const suggestions = useMemo(() => {
+    const tagsSet = new Set(tags)
+    const available = allKnownTags.filter(t => !tagsSet.has(t))
+    if (!draft.trim()) return available
+    const lower = draft.toLowerCase()
+    return available.filter(t => t.toLowerCase().includes(lower))
+  }, [allKnownTags, tags, draft])
 
-  const handleAdd = () => {
+  const handleAdd = useCallback(() => {
     const t = draft.trim()
     if (t && !tags.includes(t)) {
       onUpdate([...tags, t])
+    }
+    setDraft('')
+    setAdding(false)
+  }, [draft, tags, onUpdate])
+
+  const handlePickSuggestion = (tag) => {
+    if (!tags.includes(tag)) {
+      onUpdate([...tags, tag])
     }
     setDraft('')
     setAdding(false)
@@ -231,29 +325,82 @@ function TagsCell({ tags = [], onUpdate }) {
     onUpdate(tags.filter(t => t !== tag))
   }
 
+  // Compute dropdown position from input ref
+  const [dropdownPos, setDropdownPos] = useState(null)
+  useEffect(() => {
+    if (adding && inputRef.current && suggestions.length > 0) {
+      const rect = inputRef.current.getBoundingClientRect()
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left })
+    } else {
+      setDropdownPos(null)
+    }
+  }, [adding, suggestions.length, draft])
+
+  // Close portal dropdown on outside click
+  useEffect(() => {
+    if (!adding) return
+    function handle(e) {
+      if (dropdownRef.current?.contains(e.target)) return
+      if (inputRef.current?.contains(e.target)) return
+      handleAdd()
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [adding, handleAdd])
+
   return (
     <span className="inline-flex flex-wrap items-center gap-1" onClick={e => e.stopPropagation()}>
-      {tags.map((tag, i) => (
-        <span key={tag} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${colors[i % colors.length]}`}>
+      {tags.map(tag => (
+        <span key={tag} className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${tagColor(tag)} shadow-sm`}>
           {tag}
-          <button onClick={() => handleRemove(tag)} className="ml-0.5 opacity-50 hover:opacity-100">×</button>
+          <button
+            onClick={e => { e.stopPropagation(); handleRemove(tag) }}
+            className="ml-0.5 opacity-40 hover:opacity-100 transition-opacity text-xs leading-none"
+            title={`Remove "${tag}"`}
+          >×</button>
         </span>
       ))}
       {adding ? (
-        <input
-          ref={inputRef}
-          type="text"
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={handleAdd}
-          onKeyDown={e => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') { setAdding(false); setDraft('') } }}
-          className="text-[10px] px-1 py-0.5 border border-blue-300 rounded bg-white outline-none w-14"
-          placeholder="tag"
-        />
+        <>
+          <input
+            ref={inputRef}
+            type="text"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') handleAdd()
+              if (e.key === 'Escape') { setAdding(false); setDraft('') }
+            }}
+            className="text-[10px] px-2 py-0.5 border border-indigo-400 rounded-full bg-white outline-none ring-1 ring-indigo-200 w-20 shadow-sm"
+            placeholder="new tag…"
+            onClick={e => e.stopPropagation()}
+          />
+          {/* Suggestions dropdown — rendered as portal to escape overflow:hidden */}
+          {dropdownPos && suggestions.length > 0 && createPortal(
+            <div
+              ref={dropdownRef}
+              className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-xl py-1 min-w-[130px] max-h-40 overflow-y-auto"
+              style={{ top: dropdownPos.top, left: dropdownPos.left }}
+              onClick={e => e.stopPropagation()}
+            >
+              {suggestions.slice(0, 10).map(s => (
+                <button
+                  key={s}
+                  className="flex items-center gap-1.5 w-full text-left text-[11px] px-2.5 py-1.5 hover:bg-indigo-50 text-gray-700 truncate"
+                  onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handlePickSuggestion(s) }}
+                >
+                  <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 border ${tagColor(s)}`} />
+                  {s}
+                </button>
+              ))}
+            </div>,
+            document.body
+          )}
+        </>
       ) : (
         <button
-          onClick={() => setAdding(true)}
-          className="w-4 h-4 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 hover:text-gray-600 text-xs"
+          onClick={e => { e.stopPropagation(); setAdding(true) }}
+          className="w-5 h-5 rounded-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-400 hover:text-indigo-600 text-xs transition-colors shadow-sm"
           title="Add tag"
         >+</button>
       )}
@@ -264,22 +411,25 @@ function TagsCell({ tags = [], onUpdate }) {
 // ---------------------------------------------------------------------------
 // Cell value renderer
 // ---------------------------------------------------------------------------
-function CellValue({ col, value, colorClasses, mol, onAnnotation }) {
-  // Action column (detail link) — rendered by parent <td>, returns null here
-  if (col.type === 'action') return null
-
+function CellValue({ col, value, colorClasses, mol, onAnnotation, allKnownTags, runNameMap }) {
   // Invalidation toggle
   if (col.type === 'invalidation') {
     const checked = !!value
     return (
       <span className="flex items-center justify-center" onClick={e => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={() => onAnnotation && onAnnotation(mol.id, 'invalidated', !checked)}
-          className="accent-red-500 cursor-pointer w-3.5 h-3.5"
-          title={checked ? 'Mark as valid' : 'Mark as invalid'}
-        />
+        <button
+          onClick={e => { e.stopPropagation(); onAnnotation && onAnnotation(mol.id, 'invalidated', !checked) }}
+          className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-all cursor-pointer ${
+            checked
+              ? 'bg-red-500 border-red-500 text-white'
+              : 'bg-white border-gray-300 hover:border-red-300 hover:bg-red-50 text-transparent'
+          }`}
+          title={checked ? 'Click to mark as valid' : 'Click to mark as invalid'}
+        >
+          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </span>
     )
   }
@@ -290,6 +440,7 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation }) {
       <TagsCell
         tags={Array.isArray(value) ? value : []}
         onUpdate={(tags) => onAnnotation && onAnnotation(mol.id, 'tags', tags)}
+        allKnownTags={allKnownTags || []}
       />
     )
   }
@@ -302,6 +453,17 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation }) {
         onSave={(text) => onAnnotation && onAnnotation(mol.id, col.key, text)}
         placeholder="Add note…"
       />
+    )
+  }
+
+  // Source column — resolve run ID to label
+  if (col.type === 'source') {
+    if (value == null) return <span className="text-gray-300 select-none">—</span>
+    const label = runNameMap?.[value] || String(value).slice(0, 8)
+    return (
+      <span className="text-gray-600 text-xs block truncate" title={label} style={{ maxWidth: col.width ? `${col.width - 16}px` : 90 }}>
+        {label}
+      </span>
     )
   }
 
@@ -386,12 +548,78 @@ export default function MoleculeTable({
   onLoadMore,
   hasMore = false,
   totalCount,
+  runs = [],
 }) {
+  const columnColorOverrides = useSettingsStore(s => s.columnColorOverrides)
   const [sorts, setSorts] = useState([]) // [{key, dir}] max 2
   const [columnFilters, setColumnFilters] = useState({}) // {key: {type:'text',value} | {type:'number',min,max} | {type:'boolean',value}}
   const [showFilterCol, setShowFilterCol] = useState(null) // key of column with open filter
   const tableRef = useRef(null)
   const filterDropdownRef = useRef(null)
+
+  // Collect all known tags across all molecules for tag suggestions
+  const allKnownTags = useMemo(() => {
+    const tagSet = new Set()
+    for (const mol of molecules) {
+      if (Array.isArray(mol.tags)) mol.tags.forEach(t => tagSet.add(t))
+    }
+    return [...tagSet].sort()
+  }, [molecules])
+
+  // Run ID → human-readable label (e.g. "Import", "Docking + ADMET")
+  const runNameMap = useMemo(() => {
+    const map = {}
+    for (const run of runs) {
+      let label = run.type === 'calculation' && run.calculation_types?.length
+        ? run.calculation_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' + ')
+        : run.type ? run.type.charAt(0).toUpperCase() + run.type.slice(1) : run.id
+      map[run.id] = label
+    }
+    return map
+  }, [runs])
+
+  // --- Resizable columns ---
+  const STORAGE_KEY = 'bx-col-widths'
+  const [colWidthOverrides, setColWidthOverrides] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {} } catch { return {} }
+  })
+  const resizeRef = useRef(null) // { colKey, startX, startWidth }
+
+  const handleResizeStart = useCallback((e, colKey, currentWidth) => {
+    e.preventDefault()
+    e.stopPropagation()
+    resizeRef.current = { colKey, startX: e.clientX, startWidth: currentWidth }
+    const onMove = (ev) => {
+      if (!resizeRef.current) return
+      const delta = ev.clientX - resizeRef.current.startX
+      const newWidth = Math.max(40, resizeRef.current.startWidth + delta)
+      setColWidthOverrides(prev => {
+        const next = { ...prev, [resizeRef.current.colKey]: newWidth }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+        return next
+      })
+    }
+    const onUp = () => {
+      resizeRef.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }, [])
+
+  const handleResizeReset = useCallback((colKey) => {
+    setColWidthOverrides(prev => {
+      const next = { ...prev }
+      delete next[colKey]
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [])
 
   // Close column filter dropdown on click outside
   useEffect(() => {
@@ -405,18 +633,30 @@ export default function MoleculeTable({
     return () => document.removeEventListener('mousedown', handler)
   }, [showFilterCol])
 
-  // Pre-compute column value arrays for color scaling
+  // Effective color config per column (merges user overrides with defaults)
+  const colorConfigs = useMemo(() => {
+    const map = {}
+    columns.forEach(col => {
+      if (col.type === 'number') {
+        map[col.key] = getEffectiveColorScale(col.key, columnColorOverrides)
+      }
+    })
+    return map
+  }, [columns, columnColorOverrides])
+
+  // Pre-compute column value arrays for color scaling (all numeric columns that have a color mode)
   const colValues = useMemo(() => {
     const map = {}
     columns.forEach(col => {
-      if (col.type === 'number' && col.colorScale) {
+      const cfg = colorConfigs[col.key]
+      if (col.type === 'number' && cfg && cfg.mode !== 'none') {
         map[col.key] = molecules
           .map(m => m[col.key])
           .filter(v => v != null && typeof v === 'number')
       }
     })
     return map
-  }, [molecules, columns])
+  }, [molecules, columns, colorConfigs])
 
   // Column-filtered molecules
   const colFiltered = useMemo(() => {
@@ -452,6 +692,10 @@ export default function MoleculeTable({
         }
         if (f.type === 'text') {
           if (val == null) return false
+          // Tags: search within array items
+          if (Array.isArray(val)) {
+            return val.some(t => String(t).toLowerCase().includes(f.value.toLowerCase()))
+          }
           return String(val).toLowerCase().includes(f.value.toLowerCase())
         }
         if (f.type === 'number') {
@@ -511,18 +755,17 @@ export default function MoleculeTable({
     }
   }, [rowVirtualizer.getVirtualItems(), onLoadMore, hasMore, sorted.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Compute effective column width: max(declared width, label-based minimum)
+  // Compute effective column width: override > max(declared width, label-based minimum)
   const effectiveWidths = useMemo(() => columns.map(col => {
-    if (col.type === 'action') return 36
-    // Uppercase text-xs ≈ 7.5px per char, + unit text, + sort icon + padding
+    if (colWidthOverrides[col.key]) return Math.max(40, colWidthOverrides[col.key])
     const labelChars = (col.label || '').length
-    const unitChars = col.unit ? col.unit.length + 2 : 0 // "(Da)" etc.
+    const unitChars = col.unit ? col.unit.length + 2 : 0
     const textWidth = (labelChars + unitChars) * 7.5
-    const extras = 24 // sort icon + gaps
-    const padding = 20 // px-2 each side + internal gaps
+    const extras = 24
+    const padding = 20
     const minFromLabel = Math.ceil(textWidth + extras + padding)
     return Math.max(col.width || 80, minFromLabel)
-  }), [columns])
+  }), [columns, colWidthOverrides])
 
   // Grid template: checkbox(40px) + bookmark(32px) + data columns
   const gridTemplate = useMemo(() => {
@@ -534,6 +777,38 @@ export default function MoleculeTable({
     () => Math.max(600, effectiveWidths.reduce((sum, w) => sum + w, 0) + 90),
     [effectiveWidths]
   )
+
+  // Map group → run label from actual phase runs
+  const groupRunLabels = useMemo(() => {
+    const labels = {}
+    for (const run of runs) {
+      if (run.status !== 'completed') continue
+      if (run.type === 'import') {
+        labels['molecule'] = labels['molecule'] || 'Import'
+      } else if (run.type === 'generation') {
+        labels['generation'] = labels['generation'] || 'Generation'
+      } else if (run.type === 'calculation' && run.calculation_types) {
+        for (const ct of run.calculation_types) {
+          labels[ct] = labels[ct] || (ct.charAt(0).toUpperCase() + ct.slice(1))
+        }
+      }
+    }
+    return labels
+  }, [runs])
+
+  // Group runs: merge consecutive columns with the same group for the group header row
+  const groupRuns = useMemo(() => {
+    const result = []
+    for (const col of columns) {
+      const g = col.group || 'molecule'
+      if (result.length > 0 && result[result.length - 1].group === g) {
+        result[result.length - 1].count++
+      } else {
+        result.push({ group: g, count: 1 })
+      }
+    }
+    return result
+  }, [columns])
 
   // Header click: shift for multi-sort (max 2 levels)
   const handleHeaderClick = useCallback((col, e) => {
@@ -600,16 +875,38 @@ export default function MoleculeTable({
         ref={tableRef}
         className="overflow-auto"
         style={{
-          maxHeight: 'calc(100vh - 420px)',
+          maxHeight: 'calc(100vh - 170px)',
           minHeight: 200,
           scrollbarWidth: 'thin',
           scrollbarColor: '#e5e7eb transparent',
         }}
       >
         <div style={{ minWidth: minTableWidth }}>
-          {/* Header row — sticky */}
+          {/* Group header row — sticky */}
+          <div className="sticky top-0 z-10 bg-gray-50">
           <div
-            className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200"
+            style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
+          >
+            {/* Empty cells for checkbox + bookmark */}
+            <div className="col-span-2" />
+            {/* Group spans */}
+            {groupRuns.map((run, i) => {
+              const meta = GROUP_META[run.group] || GROUP_META.molecule
+              const label = groupRunLabels[run.group] || meta.label
+              return (
+                <div
+                  key={`${run.group}-${i}`}
+                  className={`${meta.bg} ${meta.text} ${meta.border} border-b-2 text-[10px] uppercase tracking-wider font-semibold text-center py-1 whitespace-nowrap`}
+                  style={{ gridColumn: `span ${run.count}` }}
+                >
+                  {label}
+                </div>
+              )
+            })}
+          </div>
+          {/* Column header row */}
+          <div
+            className="bg-gray-50 border-b border-gray-200"
             style={{ display: 'grid', gridTemplateColumns: gridTemplate }}
           >
             {/* Checkbox column */}
@@ -663,34 +960,29 @@ export default function MoleculeTable({
                 if (f.type === 'enum') return f.value != null
                 return false
               })()
-              const isFilterable = col.type === 'number' || col.type === 'text' || col.type === 'boolean' || col.type === 'smiles'
-
-              if (col.type === 'action') {
-                return <div key={col.key} className="px-1 py-2.5" />
-              }
+              const isFilterable = col.type === 'number' || col.type === 'text' || col.type === 'boolean' || col.type === 'smiles' || col.type === 'tags' || col.type === 'editable_text' || col.type === 'invalidation' || col.type === 'source'
 
               return (
                 <div
                   key={col.key}
-                  className={`px-2 py-1.5 font-semibold uppercase tracking-wide text-xs select-none relative flex flex-col gap-0.5 ${
-                    col.type === 'number' ? 'items-end' : 'items-start'
-                  } ${col.sortable ? 'cursor-pointer transition-colors' : ''} ${
+                  className={`px-2 py-1.5 font-semibold uppercase tracking-wide text-xs select-none relative flex flex-col gap-0.5 items-center ${
+                    col.sortable ? 'cursor-pointer transition-colors' : ''
+                  } ${
                     isActive ? 'text-bx-light-text bg-blue-50/50' : 'text-gray-500 hover:text-bx-light-text hover:bg-gray-100'
                   }`}
                   onClick={e => handleHeaderClick(col, e)}
-                  title={col.sortable ? 'Click to sort · Shift+click to add sort level' : col.label}
                 >
-                  {/* Line 1: label + unit + sort icon */}
+                  {/* Line 1: label + unit */}
                   <span className="flex items-center gap-1 whitespace-nowrap leading-tight">
                     {col.label}
                     {col.unit && (
                       <span className="font-normal text-gray-300 text-[9px]">({col.unit})</span>
                     )}
-                    {col.sortable && <SortIcon direction={dir} rank={rank} />}
                   </span>
-                  {/* Line 2: info tip + filter button */}
-                  {(TIPS[col.key] || isFilterable) && (
-                    <span className="flex items-center gap-0.5">
+                  {/* Line 2: sort + info tip + filter — all centered */}
+                  {(col.sortable || TIPS[col.key] || isFilterable) && (
+                    <span className="flex items-center gap-1">
+                      {col.sortable && <SortIcon direction={dir} rank={rank} />}
                       {TIPS[col.key] && <InfoTip text={TIPS[col.key]} size="xs" />}
                       {isFilterable && (
                         <button
@@ -810,8 +1102,67 @@ export default function MoleculeTable({
                         )
                       })()}
 
+                      {/* Tags filter: text search on tag values */}
+                      {col.type === 'tags' && (() => {
+                        const f = columnFilters[col.key]
+                        const textVal = (f && f.type === 'text') ? f.value : ''
+                        return (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={textVal}
+                            onChange={e => setColumnFilters(prev => ({ ...prev, [col.key]: { type: 'text', value: e.target.value } }))}
+                            onKeyDown={e => { if (e.key === 'Escape') setShowFilterCol(null) }}
+                            placeholder="Filter by tag…"
+                            className="text-xs px-2 py-1 border border-gray-200 rounded w-28 outline-none focus:border-blue-300"
+                          />
+                        )
+                      })()}
+
+                      {/* Editable text filter (notes) */}
+                      {col.type === 'editable_text' && (() => {
+                        const f = columnFilters[col.key]
+                        const textVal = (f && f.type === 'text') ? f.value : ''
+                        return (
+                          <input
+                            type="text"
+                            autoFocus
+                            value={textVal}
+                            onChange={e => setColumnFilters(prev => ({ ...prev, [col.key]: { type: 'text', value: e.target.value } }))}
+                            onKeyDown={e => { if (e.key === 'Escape') setShowFilterCol(null) }}
+                            placeholder={`Filter ${col.label}…`}
+                            className="text-xs px-2 py-1 border border-gray-200 rounded w-28 outline-none focus:border-blue-300"
+                          />
+                        )
+                      })()}
+
+                      {/* Invalidation filter: All / Yes / No */}
+                      {col.type === 'invalidation' && (() => {
+                        const f = columnFilters[col.key]
+                        const currentVal = (f && typeof f === 'object' && f.type === 'boolean') ? f.value : null
+                        const btnBase = 'text-xs px-2 py-1 rounded transition-colors'
+                        const btnActive = 'bg-blue-100 text-blue-700 font-medium'
+                        const btnInactive = 'text-gray-500 hover:bg-gray-100'
+                        return (
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              className={`${btnBase} ${currentVal === null || currentVal === undefined ? btnActive : btnInactive}`}
+                              onClick={() => setColumnFilters(prev => { const n = { ...prev }; delete n[col.key]; return n })}
+                            >All</button>
+                            <button
+                              className={`${btnBase} ${currentVal === true ? btnActive : btnInactive}`}
+                              onClick={() => setColumnFilters(prev => ({ ...prev, [col.key]: { type: 'boolean', value: true } }))}
+                            >Yes</button>
+                            <button
+                              className={`${btnBase} ${currentVal === false ? btnActive : btnInactive}`}
+                              onClick={() => setColumnFilters(prev => ({ ...prev, [col.key]: { type: 'boolean', value: false } }))}
+                            >No</button>
+                          </div>
+                        )
+                      })()}
+
                       {/* Text / SMILES filter: text input (skip safety_color_code) */}
-                      {(col.type === 'text' || col.type === 'smiles') && col.key !== 'safety_color_code' && (() => {
+                      {(col.type === 'text' || col.type === 'smiles' || col.type === 'source') && col.key !== 'safety_color_code' && (() => {
                         const f = columnFilters[col.key]
                         // Backward compat: plain string → extract value
                         const textVal = typeof f === 'string' ? f : (f && f.type === 'text' ? f.value : '')
@@ -836,10 +1187,18 @@ export default function MoleculeTable({
                       )}
                     </div>
                   )}
+                  {/* Resize handle */}
+                  <div
+                    className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400/50 active:bg-blue-500/70 transition-colors z-10"
+                    onMouseDown={e => handleResizeStart(e, col.key, effectiveWidths[columns.indexOf(col)])}
+                    onDoubleClick={e => { e.stopPropagation(); handleResizeReset(col.key) }}
+                    title="Drag to resize · Double-click to reset"
+                  />
                 </div>
               )
             })}
           </div>
+          </div>{/* end sticky group+header wrapper */}
 
           {/* Virtualized body */}
           <div
@@ -926,38 +1285,20 @@ export default function MoleculeTable({
                   {/* Data cells */}
                   {columns.map(col => {
                     const value = mol[col.key]
-                    const colorClasses = col.colorScale && col.type === 'number'
-                      ? getValueColorClasses(value, colValues[col.key] || [], col.colorScale)
+                    const colorClasses = col.type === 'number' && colorConfigs[col.key]
+                      ? getValueColorClasses(value, colValues[col.key] || [], colorConfigs[col.key])
                       : { cell: '', text: '' }
                     const hasPopup = col.popup && onCellPopup && value != null
-
-                    // Action column — detail link icon
-                    if (col.type === 'action') {
-                      return (
-                        <div key={col.key} className="px-1 flex items-center justify-center">
-                          <button
-                            onClick={e => { e.stopPropagation(); onRowClick && onRowClick(mol) }}
-                            className="p-0.5 rounded hover:bg-blue-50 text-gray-300 hover:text-blue-500 transition-colors"
-                            title="View details"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                            </svg>
-                          </button>
-                        </div>
-                      )
-                    }
 
                     return (
                       <div
                         key={col.key}
-                        className={`px-3 flex items-center max-h-[${ROW_HEIGHT}px] overflow-hidden ${col.type === 'number' ? 'justify-end tabular-nums' : 'justify-start'} ${colorClasses.cell} ${hasPopup ? 'cursor-pointer hover:bg-blue-50/80 transition-colors' : ''} ${mol.invalidated && col.key !== 'invalidated' ? 'opacity-40' : ''}`}
+                        className={`px-3 flex items-center max-h-[${ROW_HEIGHT}px] ${col.type === 'tags' ? 'overflow-visible' : 'overflow-hidden'} ${col.type === 'number' ? 'justify-end tabular-nums' : 'justify-start'} ${colorClasses.cell} ${hasPopup ? 'cursor-pointer hover:bg-blue-50/80 transition-colors' : ''} ${mol.invalidated && col.key !== 'invalidated' ? 'opacity-40' : ''}`}
                         onClick={hasPopup ? (e) => { e.stopPropagation(); onCellPopup(col.popup, mol) } : undefined}
                         title={hasPopup ? `Click for ${col.label} details` : undefined}
                       >
                         <span className={`text-sm ${hasPopup ? 'underline decoration-dotted underline-offset-2 decoration-gray-300' : ''}`}>
-                          <CellValue col={col} value={value} colorClasses={colorClasses} mol={mol} onAnnotation={onAnnotation} />
+                          <CellValue col={col} value={value} colorClasses={colorClasses} mol={mol} onAnnotation={onAnnotation} allKnownTags={allKnownTags} runNameMap={runNameMap} />
                         </span>
                       </div>
                     )
