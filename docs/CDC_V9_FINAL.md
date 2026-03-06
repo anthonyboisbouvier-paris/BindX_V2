@@ -327,7 +327,11 @@ Remplace InputForm. Modal depuis dashboard :
   - Import : source + pré-filtres
   - Calcul : checkboxes des calculs + paramètres par calcul coché (moteur docking, poids scoring, etc.)
   - Génération : mode batch ou molécule, paramètres
-- **Étape 3** : Confirmation (nb molécules, estimation temps, calculs sélectionnés)
+- **Étape 3** : Review & Launch
+  - **Checklist de colonnes** : grille 2 colonnes de checkboxes montrant toutes les propriétés du groupe sélectionné. Colonnes importantes cochées par défaut, colonnes optionnelles (HA, Ro3, InChIKey, CNS MPO, Pfizer/GSK, Brenk, CNN VS, ECR) décochées. Colonnes avec dépendance (ex: LE → requiert Docking) grisées avec message. Select all / Deselect all + compteur n/total.
+  - **Option "Run on all molecules"** : toggle pour lancer le calcul sur toutes les molécules de la phase, indépendamment de la sélection dans le dashboard. Disponible même sans sélection.
+  - Résumé config, nb molécules, estimation temps
+  - Le backend filtre les propriétés stockées selon les colonnes cochées (mapping clés frontend ↔ backend via `_FRONTEND_TO_BACKEND`). `included_columns` et `run_all_molecules` stockés dans le JSON `config` du run (pas de migration DB).
 - Lancement → bandeau "Run in progress" + progress bar + étape courante
 
 ### File d'attente
