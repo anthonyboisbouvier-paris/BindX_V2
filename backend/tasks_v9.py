@@ -298,6 +298,31 @@ async def _get_molecules_by_ids(molecule_ids):
         ]
 
 
+async def _get_all_phase_molecules(phase_id):
+    """Fetch ALL molecules in a phase. Returns list of dicts."""
+    from database_v9 import AsyncSessionV9
+    from models_v9 import MoleculeORM_V9
+    from sqlalchemy import select
+
+    pid = uuid.UUID(phase_id) if isinstance(phase_id, str) else phase_id
+    async with AsyncSessionV9() as session:
+        result = await session.execute(
+            select(MoleculeORM_V9).where(MoleculeORM_V9.phase_id == pid)
+        )
+        mols = result.scalars().all()
+        return [
+            {
+                "id": m.id,
+                "smiles": m.smiles,
+                "canonical_smiles": m.canonical_smiles,
+                "name": m.name,
+                "phase_id": m.phase_id,
+                "generation_level": m.generation_level,
+            }
+            for m in mols
+        ]
+
+
 async def _get_molecules_by_run(run_id: str, phase_id: str):
     """Fetch molecules created by a specific run. Returns list of dicts."""
     from database_v9 import AsyncSessionV9
@@ -738,16 +763,23 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
     calc_types = run_data.get("calculation_types") or []
     input_ids = run_data.get("input_molecule_ids") or []
     run_uuid = uuid.UUID(run_id)
-    # Column filtering — read from run config
+    # Column filtering — only used to skip optional sub-computations
     _run_config = run_data.get("config") or {}
     _inc = set(_run_config["included_columns"]) if _run_config.get("included_columns") else None
 
-    if not input_ids:
+    # Run on all molecules in phase (ignore selection)
+    if _run_config.get("run_all_molecules"):
+        phase_id = run_data.get("phase_id")
+        if not phase_id:
+            raise ValueError("Phase ID required for run_all_molecules")
+        molecules = _db_sync(_get_all_phase_molecules(phase_id))
+    elif input_ids:
+        molecules = _db_sync(_get_molecules_by_ids(input_ids))
+    else:
         raise ValueError("No input molecules selected")
 
-    molecules = _db_sync(_get_molecules_by_ids(input_ids))
     if not molecules:
-        raise ValueError("No valid molecules found for the given IDs")
+        raise ValueError("No valid molecules found")
 
     smiles_list = [m["smiles"] for m in molecules]
     total_steps = len(calc_types)
@@ -780,7 +812,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 admet_results = predict_admet(smiles_list)
                 for mol, admet in zip(molecules, admet_results):
                     _db_sync(_store_property(
-                        mol["id"], run_uuid, "admet", _filter_cols(admet, _inc)
+                        mol["id"], run_uuid, "admet", admet
                     ))
                     # CNS MPO + Pfizer/GSK + Brenk (piggyback on ADMET run)
                     _piggyback_keys = {"cns_mpo", "pfizer_alert", "gsk_alert", "brenk_alert"}
@@ -797,7 +829,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 "brenk_alert": brenk,
                             }
                             _db_sync(_store_property(
-                                mol["id"], run_uuid, "druglikeness_rules", _filter_cols(extra, _inc)
+                                mol["id"], run_uuid, "druglikeness_rules", extra
                             ))
                         except Exception as e:
                             logger.debug("CNS MPO/Brenk failed for %s: %s", mol["smiles"][:40], e)
@@ -813,7 +845,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     try:
                         props = _cached_compute("scoring", mol["smiles"], compute_properties)
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "physicochemical", _filter_cols(props, _inc)
+                            mol["id"], run_uuid, "physicochemical", props
                         ))
                         # SA Score
                         if _inc is None or "sa_score" in _inc:
@@ -941,11 +973,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         elif dr.get("pose_molblock"):
                             # GPU docking provides molblock directly (parsed from docked SDF)
                             docking_props["pose_molblock"] = dr["pose_molblock"][:50000]
-                        # Filter columns but always keep pose_molblock
-                        filtered_docking = _filter_cols(docking_props, _inc)
-                        if "pose_molblock" in docking_props:
-                            filtered_docking["pose_molblock"] = docking_props["pose_molblock"]
-                        _db_sync(_store_property(mol["id"], run_uuid, "docking", filtered_docking))
+                        _db_sync(_store_property(mol["id"], run_uuid, "docking", docking_props))
                         stored += 1
 
                     _write_log(run_id, "info",
@@ -968,7 +996,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     scored, eliminated, summary = enrich_results(mol_dicts)
                     for mol, enrichment in zip(molecules, scored):
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "enrichment", _filter_cols(enrichment, _inc)
+                            mol["id"], run_uuid, "enrichment", enrichment
                         ))
                     _write_log(run_id, "info", f"Enrichment complete: {len(scored)} enriched, {len(eliminated)} eliminated")
                     results["enrichment"] = f"{len(scored)} molecules enriched ({len(eliminated)} eliminated)"
@@ -983,10 +1011,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     clustered = cluster_results(mol_dicts)
                     n_clusters = len(set(c.get("cluster_id", 0) for c in clustered))
                     for mol, cl_data in zip(molecules, clustered):
-                        cl_props = {"cluster_id": cl_data.get("cluster_id"),
-                                    "is_representative": cl_data.get("is_representative")}
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "clustering", _filter_cols(cl_props, _inc)
+                            mol["id"], run_uuid, "clustering",
+                            {"cluster_id": cl_data.get("cluster_id"),
+                             "is_representative": cl_data.get("is_representative")}
                         ))
                     _write_log(run_id, "info", f"Clustering complete: {n_clusters} clusters from {len(molecules)} molecules")
                     results["clustering"] = f"{len(molecules)} molecules clustered"
@@ -1005,15 +1033,15 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         # Flatten for table columns + keep full results for detail panel
                         off_target_hits = ot["n_total"] - ot["n_safe"]
                         selectivity_ratio = ot["n_safe"] / ot["n_total"] if ot["n_total"] > 0 else 0.0
-                        ot_props = {"selectivity_score": ot["selectivity_score"],
-                                    "off_target_hits": off_target_hits,
-                                    "selectivity_ratio": round(selectivity_ratio, 3),
-                                    "n_safe": ot["n_safe"],
-                                    "n_total": ot["n_total"],
-                                    "results": ot["results"],
-                                    "warnings": ot["warnings"]}
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "off_target", _filter_cols(ot_props, _inc)
+                            mol["id"], run_uuid, "off_target",
+                            {"selectivity_score": ot["selectivity_score"],
+                             "off_target_hits": off_target_hits,
+                             "selectivity_ratio": round(selectivity_ratio, 3),
+                             "n_safe": ot["n_safe"],
+                             "n_total": ot["n_total"],
+                             "results": ot["results"],
+                             "warnings": ot["warnings"]}
                         ))
                     except Exception as e:
                         logger.warning("Off-target failed for %s: %s", mol["smiles"], e)
@@ -1039,7 +1067,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         conf["confidence_score"] = conf["overall"]
                         conf["confidence_flags"] = ["pains"] if pains else []
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "confidence", _filter_cols(conf, _inc)
+                            mol["id"], run_uuid, "confidence", conf
                         ))
                     except Exception as e:
                         logger.warning("Confidence failed for %s: %s", mol["smiles"], e)
@@ -1071,7 +1099,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                             "reagent_availability": route.get("reagent_availability", []),
                         }
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "retrosynthesis", _filter_cols(stored, _inc)
+                            mol["id"], run_uuid, "retrosynthesis", stored
                         ))
                     except Exception as e:
                         logger.warning("Retrosynthesis failed for %s: %s", mol["smiles"], e)
@@ -1126,7 +1154,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 n_cliffs = 0
                 for mol, cliff in zip(molecules, cliff_results):
                     _db_sync(_store_property(
-                        mol["id"], run_uuid, "activity_cliffs", _filter_cols(cliff, _inc)
+                        mol["id"], run_uuid, "activity_cliffs", cliff
                     ))
                     if cliff.get("is_cliff"):
                         n_cliffs += 1
