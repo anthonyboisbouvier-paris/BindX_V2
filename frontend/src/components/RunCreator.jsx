@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react'
-import { RUN_TYPES, CALCULATION_SUBTYPES } from '../lib/columns.js'
+import { RUN_TYPES, CALCULATION_SUBTYPES, GROUP_META, ESTIMATED_TIMES, COLUMN_DEFAULTS, ALL_COLUMNS, getDefaultCheckedColumns } from '../lib/columns.js'
 import ScoringWeightsEditor from './ScoringWeightsEditor.jsx'
 import Badge from './Badge.jsx'
 import BindXLogo from './BindXLogo.jsx'
@@ -47,20 +47,21 @@ function RunTypeIcon({ icon, className = 'w-5 h-5' }) {
 // ---------------------------------------------------------------------------
 // Color per run type
 // ---------------------------------------------------------------------------
-const RUN_TYPE_COLORS = {
-  import:      { text: 'text-gray-500',   bg: 'bg-gray-100',    ring: 'ring-gray-200',   fill: 'bg-gray-500'   },
-  calculation: { text: 'text-blue-700',   bg: 'bg-blue-100',    ring: 'ring-blue-200',   fill: 'bg-blue-600'   },
-  generation:  { text: 'text-pink-700',   bg: 'bg-pink-100',    ring: 'ring-pink-200',   fill: 'bg-pink-600'   },
-  // Subtypes (used in RunHistory display)
-  docking:     { text: 'text-blue-700',   bg: 'bg-blue-100',    ring: 'ring-blue-200',   fill: 'bg-blue-600'   },
-  admet:       { text: 'text-green-700',  bg: 'bg-green-100',   ring: 'ring-green-200',  fill: 'bg-green-600'  },
-  scoring:     { text: 'text-amber-700',  bg: 'bg-amber-100',   ring: 'ring-amber-200',  fill: 'bg-amber-500'  },
-  enrichment:  { text: 'text-purple-700', bg: 'bg-purple-100',  ring: 'ring-purple-200', fill: 'bg-purple-600' },
-  clustering:  { text: 'text-teal-700',   bg: 'bg-teal-100',    ring: 'ring-teal-200',   fill: 'bg-teal-600'   },
-  off_target:  { text: 'text-red-700',    bg: 'bg-red-100',     ring: 'ring-red-200',    fill: 'bg-red-600'    },
-  confidence:  { text: 'text-indigo-700', bg: 'bg-indigo-100',  ring: 'ring-indigo-200', fill: 'bg-indigo-600' },
-  retrosynthesis: { text: 'text-orange-700', bg: 'bg-orange-100', ring: 'ring-orange-200', fill: 'bg-orange-500' },
-  safety:      { text: 'text-rose-700',   bg: 'bg-rose-100',    ring: 'ring-rose-200',   fill: 'bg-rose-600'   },
+// Run type colors — calc subtypes derived from GROUP_META (single source of truth)
+const _baseRunColors = {
+  import:      { text: 'text-gray-500',  bg: 'bg-gray-100',  ring: 'ring-gray-200',  fill: 'bg-gray-500'  },
+  calculation: { text: 'text-blue-700',  bg: 'bg-blue-100',  ring: 'ring-blue-200',  fill: 'bg-blue-600'  },
+  generation:  { text: 'text-pink-700',  bg: 'bg-pink-100',  ring: 'ring-pink-200',  fill: 'bg-pink-600'  },
+}
+// Auto-generate subtype colors from GROUP_META border color (e.g. 'border-blue-400' → base 'blue')
+const RUN_TYPE_COLORS = { ..._baseRunColors }
+for (const [key, meta] of Object.entries(GROUP_META)) {
+  if (_baseRunColors[key]) continue // skip import/calculation/generation
+  const color = meta.border.replace('border-', '').replace(/-\d+$/, '') // e.g. 'blue', 'emerald'
+  RUN_TYPE_COLORS[key] = {
+    text: `text-${color}-700`, bg: `bg-${color}-100`,
+    ring: `ring-${color}-200`, fill: `bg-${color}-600`,
+  }
 }
 
 function runColor(type) {
@@ -168,7 +169,6 @@ const DEFAULT_CONFIGS = {
     off_target: {},
     confidence: {},
     retrosynthesis: {},
-    safety: {},
   },
   generation:  { mode: 'batch', method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5, qed_min: 0.4, lipinski: true, pains_filter: true, include_docking: true, include_admet: true, include_scoring: true,
     // Optimization defaults
@@ -177,22 +177,6 @@ const DEFAULT_CONFIGS = {
   },
 }
 
-// Keep legacy keys for ConfigForm compatibility
-const LEGACY_DEFAULT_CONFIGS = {
-  docking:    { engine: 'gnina_gpu', exhaustiveness: 32, num_modes: 9, seed: 0, boxSizeX: '', boxSizeY: '', boxSizeZ: '' },
-  admet:      { properties: ['logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'CYP', 'oral_bioavailability', 'ames'] },
-  scoring:    { weights: { docking_score: 0.30, cnn_score: 0.20, logP: 0.15, solubility: 0.10, selectivity: 0.15, novelty: 0.10 } },
-  enrichment: { analyses: ['prolif', 'clustering', 'scaffold', 'pharmacophore'] },
-  clustering: { method: 'butina', cutoff: 0.5 },
-}
-
-const ESTIMATED_TIMES = {
-  import: '~5 seconds', calculation: '~1-5 minutes', generation: '~5-10 minutes',
-  docking: '~3-5 min', admet: '~30 sec', scoring: '~15 sec',
-  enrichment: '~1-2 min', clustering: '~30 sec', off_target: '~1 min',
-  confidence: '~15 sec', retrosynthesis: '~1 min', safety: '~30 sec',
-  pharmacophore: '~30 sec', activity_cliffs: '~15 sec',
-}
 
 // ---------------------------------------------------------------------------
 // Step 2: Configuration forms
@@ -698,28 +682,27 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
     }
 
     case 'calculation': {
-      const calcTypes = config.calculation_types || []
-      const toggleCalcType = (key) => {
-        const updated = calcTypes.includes(key)
-          ? calcTypes.filter(k => k !== key)
-          : [...calcTypes, key]
-        onChange({ ...config, calculation_types: updated })
+      const selectedCalc = (config.calculation_types || [])[0] || null
+      const selectCalcType = (key) => {
+        onChange({ ...config, calculation_types: [key] })
       }
       return (
         <div className="space-y-4">
-          <FormSection title="Select calculations to run">
+          <FormSection title="Select a calculation to run">
             <div className="grid grid-cols-1 gap-2">
               {CALCULATION_SUBTYPES.map(sub => {
-                const checked = calcTypes.includes(sub.key)
+                const checked = selectedCalc === sub.key
                 const subColor = RUN_TYPE_COLORS[sub.key] || RUN_TYPE_COLORS.calculation
                 return (
-                  <label key={sub.key}
-                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                  <button key={sub.key}
+                    onClick={() => selectCalcType(sub.key)}
+                    className={`flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
                       checked ? `border-blue-400 ${subColor.bg}` : 'border-gray-100 hover:border-gray-200'
                     }`}
                   >
-                    <input type="checkbox" checked={checked} onChange={() => toggleCalcType(sub.key)}
-                      className="accent-bx-mint mt-0.5" />
+                    <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 border-2 transition-colors ${
+                      checked ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                    }`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className={`text-sm font-semibold ${checked ? 'text-bx-light-text' : 'text-gray-700'}`}>
@@ -736,14 +719,14 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
                         {sub.columns.length > 4 && <span className="text-[9px] text-gray-400">+{sub.columns.length - 4}</span>}
                       </div>
                     </div>
-                  </label>
+                  </button>
                 )
               })}
             </div>
           </FormSection>
 
           {/* Per-subtype config panels */}
-          {calcTypes.includes('docking') && (
+          {selectedCalc === 'docking' && (
             <FormSection title="Docking configuration">
               <div className="space-y-2 bg-blue-50/50 rounded-xl p-3">
                 <EngineCard id="gnina_gpu" label="GNINA (GPU)"
@@ -777,7 +760,7 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
             </FormSection>
           )}
 
-          {calcTypes.includes('scoring') && (
+          {selectedCalc === 'scoring' && (
             <FormSection title="Scoring weights">
               <ScoringWeightsEditor
                 weights={config.scoring?.weights || DEFAULT_CONFIGS.calculation.scoring.weights}
@@ -786,9 +769,9 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
             </FormSection>
           )}
 
-          {calcTypes.length === 0 && (
+          {!selectedCalc && (
             <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-700">
-              Select at least one calculation type to proceed.
+              Select a calculation type to proceed.
             </div>
           )}
         </div>
@@ -1464,9 +1447,91 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
 }
 
 // ---------------------------------------------------------------------------
+// Column checklist for calculation runs (Step 3)
+// ---------------------------------------------------------------------------
+function ColumnChecklist({ calcGroupKey, includedColumns, onChange }) {
+  const sub = CALCULATION_SUBTYPES.find(s => s.key === calcGroupKey)
+  if (!sub || !sub.columns.length) return null
+
+  const colDefs = sub.columns.map(k => ALL_COLUMNS.find(c => c.key === k)).filter(Boolean)
+  const total = colDefs.length
+  const checkedCount = colDefs.filter(c => includedColumns.includes(c.key)).length
+  const allChecked = checkedCount === total
+
+  function toggle(key) {
+    const def = COLUMN_DEFAULTS[key]
+    if (def?.requires) return // disabled
+    onChange(
+      includedColumns.includes(key)
+        ? includedColumns.filter(k => k !== key)
+        : [...includedColumns, key]
+    )
+  }
+
+  function toggleAll() {
+    const enabledKeys = colDefs.filter(c => !COLUMN_DEFAULTS[c.key]?.requires).map(c => c.key)
+    if (allChecked) {
+      onChange(includedColumns.filter(k => !enabledKeys.includes(k)))
+    } else {
+      const newSet = new Set([...includedColumns, ...enabledKeys])
+      onChange([...newSet])
+    }
+  }
+
+  return (
+    <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Columns to compute</p>
+        <button
+          onClick={toggleAll}
+          className="text-[11px] font-medium text-bx-accent hover:underline"
+        >
+          {allChecked ? 'Deselect all' : 'Select all'}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        {colDefs.map(col => {
+          const def = COLUMN_DEFAULTS[col.key]
+          const disabled = !!def?.requires
+          const checked = includedColumns.includes(col.key)
+          return (
+            <label
+              key={col.key}
+              className={`flex items-center gap-2 py-1 px-1.5 rounded-lg text-sm cursor-pointer select-none transition-colors
+                ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
+              title={disabled ? def.requires : ''}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={() => toggle(col.key)}
+                className="rounded border-gray-300 text-bx-accent focus:ring-bx-accent/30 w-3.5 h-3.5"
+              />
+              <span className={`${disabled ? 'text-gray-400' : 'text-gray-700'}`}>{col.label}</span>
+              {disabled && (
+                <span className="text-[10px] text-amber-500 flex items-center gap-0.5">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  {def.requires}
+                </span>
+              )}
+            </label>
+          )
+        })}
+      </div>
+
+      <p className="text-[11px] text-gray-400 text-right">{checkedCount} / {total} columns selected</p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Step 3: Confirmation
 // ---------------------------------------------------------------------------
-function ConfirmationView({ runType, config, selectedCount }) {
+function ConfirmationView({ runType, config, selectedCount, includedColumns, onIncludedColumnsChange, runAllMolecules, onRunAllMoleculesChange }) {
   const rt = RUN_TYPES.find(t => t.type === runType)
   if (!rt) return null
   const c = runColor(runType)
@@ -1495,8 +1560,8 @@ function ConfirmationView({ runType, config, selectedCount }) {
   }
   if (runType === 'calculation') {
     const calcTypes = config.calculation_types || []
-    const labels = calcTypes.map(k => CALCULATION_SUBTYPES.find(s => s.key === k)?.label || k)
-    configLines.push(`Calculations: ${labels.join(', ')}`)
+    const calcLabel = calcTypes[0] ? (CALCULATION_SUBTYPES.find(s => s.key === calcTypes[0])?.label || calcTypes[0]) : 'None'
+    configLines.push(`Calculation: ${calcLabel}`)
     if (calcTypes.includes('docking')) {
       const dk = config.docking || {}
       configLines.push(`Docking engine: ${dk.engine === 'gnina_gpu' ? 'GNINA (GPU)' : dk.engine === 'gnina_cpu' ? 'GNINA (CPU)' : dk.engine || 'GNINA (GPU)'}`)
@@ -1559,16 +1624,25 @@ function ConfirmationView({ runType, config, selectedCount }) {
         ))}
       </div>
 
+      {/* Column checklist for calculation runs */}
+      {runType === 'calculation' && config.calculation_types?.length === 1 && includedColumns && onIncludedColumnsChange && (
+        <ColumnChecklist
+          calcGroupKey={config.calculation_types[0]}
+          includedColumns={includedColumns}
+          onChange={onIncludedColumnsChange}
+        />
+      )}
+
       {/* Validation warnings */}
       {runType === 'calculation' && (!config.calculation_types || config.calculation_types.length === 0) && (
         <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-600">
           <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          No calculation types selected. Go back and select at least one.
+          No calculation type selected. Go back and select one.
         </div>
       )}
-      {(runType === 'calculation' || runType === 'generation') && selectedCount === 0 && (
+      {(runType === 'calculation' || runType === 'generation') && selectedCount === 0 && !runAllMolecules && (
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-sm text-amber-700">
           <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -1577,13 +1651,28 @@ function ConfirmationView({ runType, config, selectedCount }) {
         </div>
       )}
 
-      {/* Molecule selection count */}
-      {(runType === 'calculation' || runType === 'generation') && selectedCount > 0 && (
-        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-sm text-green-700">
-          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-          </svg>
-          {selectedCount} molecule{selectedCount > 1 ? 's' : ''} selected as input
+      {/* Molecule selection count + run all toggle */}
+      {(runType === 'calculation' || runType === 'generation') && (selectedCount > 0 || runAllMolecules) && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-sm text-green-700">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+            {runAllMolecules
+              ? 'All molecules in phase will be processed'
+              : `${selectedCount} molecule${selectedCount > 1 ? 's' : ''} selected as input`}
+          </div>
+          {runType === 'calculation' && onRunAllMoleculesChange && (
+            <label className="flex items-center gap-2 px-1 py-1 text-sm text-gray-600 cursor-pointer select-none hover:text-gray-800">
+              <input
+                type="checkbox"
+                checked={runAllMolecules || false}
+                onChange={e => onRunAllMoleculesChange(e.target.checked)}
+                className="rounded border-gray-300 text-bx-accent focus:ring-bx-accent/30 w-3.5 h-3.5"
+              />
+              Run on all molecules in phase (ignore selection)
+            </label>
+          )}
         </div>
       )}
 
@@ -1611,6 +1700,8 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
   const [step, setStep] = useState(1)
   const [selectedType, setSelectedType] = useState(null)
   const [config, setConfig] = useState({})
+  const [includedColumns, setIncludedColumns] = useState(null)
+  const [runAllMolecules, setRunAllMolecules] = useState(false)
 
   if (!isOpen) return null
 
@@ -1631,7 +1722,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
     }
     if (selectedType === 'calculation') {
       if (!config.calculation_types?.length) return false
-      if (!selectedMoleculeIds?.size) return false
+      if (!runAllMolecules && !selectedMoleculeIds?.size) return false
     }
     if (selectedType === 'generation' && !selectedMoleculeIds?.size) return false
     return true
@@ -1660,6 +1751,12 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
         }
       }
     }
+    if (includedColumns) {
+      payload.config = { ...payload.config, included_columns: includedColumns }
+    }
+    if (runAllMolecules) {
+      payload.config = { ...payload.config, run_all_molecules: true }
+    }
     if (onSubmit) onSubmit(payload)
     handleClose()
   }
@@ -1668,6 +1765,8 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
     setStep(1)
     setSelectedType(null)
     setConfig({})
+    setIncludedColumns(null)
+    setRunAllMolecules(false)
     onClose()
   }
 
@@ -1764,7 +1863,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
 
           {/* Step 3: Confirm */}
           {step === 3 && selectedType && (
-            <ConfirmationView runType={selectedType} config={config} selectedCount={selectedMoleculeIds?.size || 0} />
+            <ConfirmationView runType={selectedType} config={config} selectedCount={selectedMoleculeIds?.size || 0} includedColumns={includedColumns} onIncludedColumnsChange={setIncludedColumns} runAllMolecules={runAllMolecules} onRunAllMoleculesChange={setRunAllMolecules} />
           )}
         </div>
 
@@ -1779,7 +1878,13 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
 
           {step === 2 && (
             <button
-              onClick={() => setStep(3)}
+              onClick={() => {
+                // Initialize column checklist for calculation runs
+                if (selectedType === 'calculation' && config.calculation_types?.length === 1) {
+                  setIncludedColumns(getDefaultCheckedColumns(config.calculation_types[0]))
+                }
+                setStep(3)
+              }}
               className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-bx-surface hover:bg-bx-elevated text-white transition-colors"
             >
               Review

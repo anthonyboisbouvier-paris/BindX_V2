@@ -723,137 +723,24 @@ def _run_import(run_id: str, run_data: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Safety profile computation helpers
-# ---------------------------------------------------------------------------
-
-def _compute_safety_profile(smiles: str, props: dict, pains: bool) -> dict:
-    """Compute per-molecule safety predictions using RDKit descriptors.
-
-    Uses molecular descriptors as proxy indicators:
-    - hERG risk: correlated with logP (lipophilic) and MW
-    - Hepatotoxicity: correlated with TPSA, MW, logP
-    - AMES mutagenicity: presence of aromatic amines, nitro groups
-    - Skin sensitization: electrophilic reactivity (Michael acceptors)
-    - Carcinogenicity: MW, aromatic ring count, heteroatom ratio
-    """
-    import hashlib
-    logP = props.get("logP") or 0.0
-    mw = props.get("MW") or 100.0
-    tpsa = props.get("tpsa") or 50.0
-    hbd = props.get("hbd") or 0
-    hba = props.get("hba") or 0
-    qed = props.get("qed") or 0.5
-
-    # Use SMILES hash for reproducible per-molecule variation
-    h = hashlib.sha256(smiles.encode()).hexdigest()
-    noise = int(h[:6], 16) / 0xFFFFFF  # 0.0–1.0 deterministic noise
-
-    # --- hERG risk: lipophilic + large molecules bind hERG ---
-    herg_base = 0.0
-    if logP > 3.5:
-        herg_base += (logP - 3.5) * 0.08
-    if mw > 400:
-        herg_base += (mw - 400) / 2000
-    herg_risk = round(min(1.0, max(0.0, herg_base + noise * 0.08)), 3)
-
-    # --- Hepatotoxicity: high MW + low TPSA + high logP ---
-    hepato_base = 0.02
-    if logP > 4:
-        hepato_base += (logP - 4) * 0.05
-    if mw > 500:
-        hepato_base += (mw - 500) / 3000
-    if tpsa < 40:
-        hepato_base += 0.05
-    hepato = round(min(1.0, max(0.0, hepato_base + noise * 0.06)), 3)
-
-    # --- AMES mutagenicity: structural alerts ---
-    ames = False
-    try:
-        from rdkit import Chem
-        mol = Chem.MolFromSmiles(smiles)
-        if mol:
-            ames_smarts = [
-                "[NX3;H2]-c",            # aromatic amine
-                "[N+](=O)[O-]",          # nitro group
-                "c1ccnc2ccccc12",         # quinoline
-                "[NH2]c1ccccc1",          # aniline
-            ]
-            for sp in ames_smarts:
-                pat = Chem.MolFromSmarts(sp)
-                if pat and mol.HasSubstructMatch(pat):
-                    ames = True
-                    break
-    except Exception:
-        ames = None  # unknown — RDKit unavailable
-
-    # --- Skin sensitization: electrophilic groups ---
-    skin_sens = False
-    try:
-        from rdkit import Chem
-        mol = Chem.MolFromSmiles(smiles)
-        if mol:
-            skin_smarts = [
-                "[CH]=[CH][C](=O)",       # Michael acceptor
-                "[C](=O)[Cl,Br,I]",       # acyl halide
-                "C(=O)OC(=O)",            # anhydride
-                "[N]=[C]=[S]",            # isothiocyanate
-            ]
-            for sp in skin_smarts:
-                pat = Chem.MolFromSmarts(sp)
-                if pat and mol.HasSubstructMatch(pat):
-                    skin_sens = True
-                    break
-    except Exception:
-        skin_sens = None  # unknown — RDKit unavailable
-
-    # --- Carcinogenicity: aromatic rings, MW, heteroatom density ---
-    carcino_base = 0.01
-    try:
-        from rdkit import Chem
-        from rdkit.Chem import rdMolDescriptors
-        mol = Chem.MolFromSmiles(smiles)
-        if mol:
-            arom_rings = rdMolDescriptors.CalcNumAromaticRings(mol)
-            n_heavy = mol.GetNumHeavyAtoms() or 1
-            n_hetero = rdMolDescriptors.CalcNumHeteroatoms(mol)
-            hetero_ratio = n_hetero / n_heavy
-            if arom_rings >= 4:
-                carcino_base += (arom_rings - 3) * 0.04
-            if mw > 500:
-                carcino_base += 0.03
-            if hetero_ratio < 0.15:
-                carcino_base += 0.02  # very hydrophobic
-    except Exception:
-        pass
-    carcino = round(min(1.0, max(0.0, carcino_base + noise * 0.05)), 3)
-
-    # --- Overall safety color ---
-    max_risk = max(herg_risk, hepato, carcino)
-    any_alert = ames or skin_sens or pains
-    if max_risk > 0.3 or any_alert:
-        color = "yellow" if max_risk <= 0.5 and not pains else "red"
-    else:
-        color = "green"
-
-    return {
-        "herg_risk": herg_risk,
-        "ames_mutagenicity": ames,
-        "hepatotoxicity": hepato,
-        "skin_sensitization": skin_sens,
-        "carcinogenicity": carcino,
-        "safety_color_code": color,
-    }
-
-
-# ---------------------------------------------------------------------------
 # Calculation run
 # ---------------------------------------------------------------------------
+
+def _filter_cols(props: dict, included: set | None) -> dict:
+    """Filter a properties dict to only keep included columns. Pass-through if None."""
+    if included is None:
+        return props
+    return {k: v for k, v in props.items() if k in included}
+
 
 def _run_calculation(run_id: str, run_data: dict) -> dict:
     """Run calculations on selected molecules."""
     calc_types = run_data.get("calculation_types") or []
     input_ids = run_data.get("input_molecule_ids") or []
     run_uuid = uuid.UUID(run_id)
+    # Column filtering — read from run config
+    _run_config = run_data.get("config") or {}
+    _inc = set(_run_config["included_columns"]) if _run_config.get("included_columns") else None
 
     if not input_ids:
         raise ValueError("No input molecules selected")
@@ -893,25 +780,27 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 admet_results = predict_admet(smiles_list)
                 for mol, admet in zip(molecules, admet_results):
                     _db_sync(_store_property(
-                        mol["id"], run_uuid, "admet", admet
+                        mol["id"], run_uuid, "admet", _filter_cols(admet, _inc)
                     ))
                     # CNS MPO + Pfizer/GSK + Brenk (piggyback on ADMET run)
-                    try:
-                        props = compute_properties(mol["smiles"])
-                        cns_mpo = compute_cns_mpo(props)
-                        dl_rules = compute_druglikeness_rules(props)
-                        brenk = compute_brenk_alert(mol["smiles"])
-                        extra = {
-                            "cns_mpo": cns_mpo,
-                            "pfizer_alert": dl_rules["pfizer_alert"],
-                            "gsk_alert": dl_rules["gsk_alert"],
-                            "brenk_alert": brenk,
-                        }
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "druglikeness_rules", extra
-                        ))
-                    except Exception as e:
-                        logger.debug("CNS MPO/Brenk failed for %s: %s", mol["smiles"][:40], e)
+                    _piggyback_keys = {"cns_mpo", "pfizer_alert", "gsk_alert", "brenk_alert"}
+                    if _inc is None or _piggyback_keys & _inc:
+                        try:
+                            props = compute_properties(mol["smiles"])
+                            cns_mpo = compute_cns_mpo(props)
+                            dl_rules = compute_druglikeness_rules(props)
+                            brenk = compute_brenk_alert(mol["smiles"])
+                            extra = {
+                                "cns_mpo": cns_mpo,
+                                "pfizer_alert": dl_rules["pfizer_alert"],
+                                "gsk_alert": dl_rules["gsk_alert"],
+                                "brenk_alert": brenk,
+                            }
+                            _db_sync(_store_property(
+                                mol["id"], run_uuid, "druglikeness_rules", _filter_cols(extra, _inc)
+                            ))
+                        except Exception as e:
+                            logger.debug("CNS MPO/Brenk failed for %s: %s", mol["smiles"][:40], e)
                 _write_log(run_id, "info", f"ADMET complete: {len(admet_results)} molecules profiled (+ CNS MPO, Pfizer/GSK, Brenk)")
                 results["admet"] = f"{len(admet_results)} molecules processed"
 
@@ -924,22 +813,24 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     try:
                         props = _cached_compute("scoring", mol["smiles"], compute_properties)
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "physicochemical", props
+                            mol["id"], run_uuid, "physicochemical", _filter_cols(props, _inc)
                         ))
                         # SA Score
-                        sa = compute_sa_score(mol["smiles"])
-                        if sa is not None:
-                            _db_sync(_store_property(
-                                mol["id"], run_uuid, "sa_score", {"sa_score": sa}
-                            ))
+                        if _inc is None or "sa_score" in _inc:
+                            sa = compute_sa_score(mol["smiles"])
+                            if sa is not None:
+                                _db_sync(_store_property(
+                                    mol["id"], run_uuid, "sa_score", {"sa_score": sa}
+                                ))
                         # Ligand Efficiency (if docking score available)
-                        docking_score = mol.get("docking_score") or mol.get("affinity")
-                        ha_count = props.get("heavy_atom_count")
-                        le = compute_ligand_efficiency(docking_score, ha_count)
-                        if le is not None:
-                            _db_sync(_store_property(
-                                mol["id"], run_uuid, "ligand_efficiency", {"ligand_efficiency": le}
-                            ))
+                        if _inc is None or "ligand_efficiency" in _inc:
+                            docking_score = mol.get("docking_score") or mol.get("affinity")
+                            ha_count = props.get("heavy_atom_count")
+                            le = compute_ligand_efficiency(docking_score, ha_count)
+                            if le is not None:
+                                _db_sync(_store_property(
+                                    mol["id"], run_uuid, "ligand_efficiency", {"ligand_efficiency": le}
+                                ))
                         scored += 1
                     except Exception as e:
                         logger.warning("Scoring failed for %s: %s", mol["smiles"], e)
@@ -1050,7 +941,11 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         elif dr.get("pose_molblock"):
                             # GPU docking provides molblock directly (parsed from docked SDF)
                             docking_props["pose_molblock"] = dr["pose_molblock"][:50000]
-                        _db_sync(_store_property(mol["id"], run_uuid, "docking", docking_props))
+                        # Filter columns but always keep pose_molblock
+                        filtered_docking = _filter_cols(docking_props, _inc)
+                        if "pose_molblock" in docking_props:
+                            filtered_docking["pose_molblock"] = docking_props["pose_molblock"]
+                        _db_sync(_store_property(mol["id"], run_uuid, "docking", filtered_docking))
                         stored += 1
 
                     _write_log(run_id, "info",
@@ -1073,7 +968,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     scored, eliminated, summary = enrich_results(mol_dicts)
                     for mol, enrichment in zip(molecules, scored):
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "enrichment", enrichment
+                            mol["id"], run_uuid, "enrichment", _filter_cols(enrichment, _inc)
                         ))
                     _write_log(run_id, "info", f"Enrichment complete: {len(scored)} enriched, {len(eliminated)} eliminated")
                     results["enrichment"] = f"{len(scored)} molecules enriched ({len(eliminated)} eliminated)"
@@ -1088,10 +983,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     clustered = cluster_results(mol_dicts)
                     n_clusters = len(set(c.get("cluster_id", 0) for c in clustered))
                     for mol, cl_data in zip(molecules, clustered):
+                        cl_props = {"cluster_id": cl_data.get("cluster_id"),
+                                    "is_representative": cl_data.get("is_representative")}
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "clustering",
-                            {"cluster_id": cl_data.get("cluster_id"),
-                             "is_representative": cl_data.get("is_representative")}
+                            mol["id"], run_uuid, "clustering", _filter_cols(cl_props, _inc)
                         ))
                     _write_log(run_id, "info", f"Clustering complete: {n_clusters} clusters from {len(molecules)} molecules")
                     results["clustering"] = f"{len(molecules)} molecules clustered"
@@ -1110,15 +1005,15 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         # Flatten for table columns + keep full results for detail panel
                         off_target_hits = ot["n_total"] - ot["n_safe"]
                         selectivity_ratio = ot["n_safe"] / ot["n_total"] if ot["n_total"] > 0 else 0.0
+                        ot_props = {"selectivity_score": ot["selectivity_score"],
+                                    "off_target_hits": off_target_hits,
+                                    "selectivity_ratio": round(selectivity_ratio, 3),
+                                    "n_safe": ot["n_safe"],
+                                    "n_total": ot["n_total"],
+                                    "results": ot["results"],
+                                    "warnings": ot["warnings"]}
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "off_target",
-                            {"selectivity_score": ot["selectivity_score"],
-                             "off_target_hits": off_target_hits,
-                             "selectivity_ratio": round(selectivity_ratio, 3),
-                             "n_safe": ot["n_safe"],
-                             "n_total": ot["n_total"],
-                             "results": ot["results"],
-                             "warnings": ot["warnings"]}
+                            mol["id"], run_uuid, "off_target", _filter_cols(ot_props, _inc)
                         ))
                     except Exception as e:
                         logger.warning("Off-target failed for %s: %s", mol["smiles"], e)
@@ -1144,7 +1039,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         conf["confidence_score"] = conf["overall"]
                         conf["confidence_flags"] = ["pains"] if pains else []
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "confidence", conf
+                            mol["id"], run_uuid, "confidence", _filter_cols(conf, _inc)
                         ))
                     except Exception as e:
                         logger.warning("Confidence failed for %s: %s", mol["smiles"], e)
@@ -1176,28 +1071,12 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                             "reagent_availability": route.get("reagent_availability", []),
                         }
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "retrosynthesis", stored
+                            mol["id"], run_uuid, "retrosynthesis", _filter_cols(stored, _inc)
                         ))
                     except Exception as e:
                         logger.warning("Retrosynthesis failed for %s: %s", mol["smiles"], e)
                 _write_log(run_id, "info", f"Retrosynthesis complete: {len(molecules)} molecules — routes planned")
                 results["retrosynthesis"] = f"{len(molecules)} molecules analyzed"
-
-            elif calc_type == "safety":
-                # Full safety profile — per-molecule predictions via RDKit descriptors
-                from pipeline.scoring import compute_pains_alert, compute_properties
-                for mol in molecules:
-                    try:
-                        pains = compute_pains_alert(mol["smiles"])
-                        props = compute_properties(mol["smiles"])
-                        safety = _compute_safety_profile(mol["smiles"], props, pains)
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "safety", safety
-                        ))
-                    except Exception as e:
-                        logger.warning("Safety failed for %s: %s", mol["smiles"], e)
-                _write_log(run_id, "info", f"Safety profiling complete: {len(molecules)} molecules (hERG, AMES, hepatotox, PAINS)")
-                results["safety"] = f"{len(molecules)} molecules profiled"
 
             elif calc_type == "pharmacophore":
                 from pipeline.pharmacophore import extract_pharmacophore, compute_pharmacophore_similarity
@@ -1247,7 +1126,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 n_cliffs = 0
                 for mol, cliff in zip(molecules, cliff_results):
                     _db_sync(_store_property(
-                        mol["id"], run_uuid, "activity_cliffs", cliff
+                        mol["id"], run_uuid, "activity_cliffs", _filter_cols(cliff, _inc)
                     ))
                     if cliff.get("is_cliff"):
                         n_cliffs += 1
