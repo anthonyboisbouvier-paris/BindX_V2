@@ -482,16 +482,9 @@ function ImportFilters({ filters, onChange, selectedDBs }) {
 // ---------------------------------------------------------------------------
 // Step 2: Configuration forms
 // ---------------------------------------------------------------------------
-function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
+function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEngines }) {
   const set = (key, value) => onChange({ ...config, [key]: value })
 
-  // GPU health state — fetched once on mount
-  const [gpuEngines, setGpuEngines] = useState(null) // null = loading, object = loaded
-  useEffect(() => {
-    v9GpuHealth()
-      .then(data => setGpuEngines(data.engines || {}))
-      .catch(() => setGpuEngines({ gnina_gpu: false, gnina_cpu: true, vina: true, diffdock: false }))
-  }, [])
   // Auto-switch engine if GPU is unavailable and current selection is gnina_gpu
   useEffect(() => {
     if (!gpuEngines || gpuEngines.gnina_gpu) return
@@ -726,48 +719,7 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0 }) {
           </FormSection>
 
           {/* Per-subtype config panels */}
-          {selectedCalc === 'docking' && (
-            <FormSection title="Docking configuration">
-              <div className="space-y-2 bg-blue-50/50 rounded-xl p-3">
-                <EngineCard id="gnina_gpu" label="GNINA (GPU)"
-                  badges={[{ text: 'Fastest', color: 'bg-green-100 text-green-700' }]}
-                  selected={(config.docking?.engine || 'gnina_gpu') === 'gnina_gpu'}
-                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })}
-                  disabled={gpuEngines && !gpuEngines.gnina_gpu}
-                  disabledReason="RunPod not configured" />
-                <EngineCard id="gnina_cpu" label="GNINA (CPU)"
-                  badges={[{ text: 'CNN rescoring', color: 'bg-blue-100 text-blue-700' }]}
-                  selected={(config.docking?.engine) === 'gnina_cpu'}
-                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
-                <EngineCard id="vina" label="AutoDock Vina"
-                  badges={[{ text: 'Classic', color: 'bg-gray-100 text-gray-600' }]}
-                  selected={(config.docking?.engine) === 'vina'}
-                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })} />
-                <EngineCard id="diffdock" label="DiffDock"
-                  badges={[{ text: 'Deep Learning', color: 'bg-purple-100 text-purple-700' }, { text: 'Blind docking', color: 'bg-amber-100 text-amber-700' }]}
-                  selected={(config.docking?.engine) === 'diffdock'}
-                  onClick={v => onChange({ ...config, docking: { ...config.docking, engine: v } })}
-                  disabled={true}
-                  disabledReason="Coming soon" />
-                <div className="flex items-center gap-4 mt-2">
-                  <div>
-                    <label className="text-[10px] font-medium text-gray-500">Exhaustiveness</label>
-                    <Stepper value={config.docking?.exhaustiveness ?? 32} min={8} max={64}
-                      onChange={v => onChange({ ...config, docking: { ...config.docking, exhaustiveness: v } })} />
-                  </div>
-                </div>
-              </div>
-            </FormSection>
-          )}
-
-          {selectedCalc === 'scoring' && (
-            <FormSection title="Scoring weights">
-              <ScoringWeightsEditor
-                weights={config.scoring?.weights || DEFAULT_CONFIGS.calculation.scoring.weights}
-                onChange={(w) => onChange({ ...config, scoring: { ...config.scoring, weights: w } })}
-              />
-            </FormSection>
-          )}
+          {/* Docking + scoring config panels moved to Step 3 (Review) */}
 
           {!selectedCalc && (
             <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-700">
@@ -1531,7 +1483,7 @@ function ColumnChecklist({ calcGroupKey, includedColumns, onChange }) {
 // ---------------------------------------------------------------------------
 // Step 3: Confirmation
 // ---------------------------------------------------------------------------
-function ConfirmationView({ runType, config, selectedCount, includedColumns, onIncludedColumnsChange, runAllMolecules, onRunAllMoleculesChange }) {
+function ConfirmationView({ runType, config, selectedCount, includedColumns, onIncludedColumnsChange, runAllMolecules, onRunAllMoleculesChange, onConfigChange, gpuEngines }) {
   const rt = RUN_TYPES.find(t => t.type === runType)
   if (!rt) return null
   const c = runColor(runType)
@@ -1562,10 +1514,7 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
     const calcTypes = config.calculation_types || []
     const calcLabel = calcTypes[0] ? (CALCULATION_SUBTYPES.find(s => s.key === calcTypes[0])?.label || calcTypes[0]) : 'None'
     configLines.push(`Calculation: ${calcLabel}`)
-    if (calcTypes.includes('docking')) {
-      const dk = config.docking || {}
-      configLines.push(`Docking engine: ${dk.engine === 'gnina_gpu' ? 'GNINA (GPU)' : dk.engine === 'gnina_cpu' ? 'GNINA (CPU)' : dk.engine || 'GNINA (GPU)'}`)
-    }
+    // Docking/scoring details shown as interactive panels below — no text summary needed
   }
   if (runType === 'docking') {
     configLines.push(`Engine: ${config.engine === 'gnina_gpu' ? 'GNINA (GPU)' : config.engine === 'gnina_cpu' ? 'GNINA (CPU)' : 'AutoDock Vina'}`)
@@ -1623,6 +1572,46 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
           </div>
         ))}
       </div>
+
+      {/* Per-subtype config panels (editable in review) */}
+      {runType === 'calculation' && config.calculation_types?.[0] === 'docking' && onConfigChange && (
+        <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-3">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Docking Configuration</p>
+          <div className="space-y-2">
+            <EngineCard id="gnina_gpu" label="GNINA (GPU)"
+              badges={[{ text: 'Fastest', color: 'bg-green-100 text-green-700' }]}
+              selected={(config.docking?.engine || 'gnina_gpu') === 'gnina_gpu'}
+              onClick={v => onConfigChange({ ...config, docking: { ...config.docking, engine: v } })}
+              disabled={gpuEngines && !gpuEngines.gnina_gpu}
+              disabledReason="RunPod not configured" />
+            <EngineCard id="gnina_cpu" label="GNINA (CPU)"
+              badges={[{ text: 'CNN rescoring', color: 'bg-blue-100 text-blue-700' }]}
+              selected={(config.docking?.engine) === 'gnina_cpu'}
+              onClick={v => onConfigChange({ ...config, docking: { ...config.docking, engine: v } })} />
+            <EngineCard id="vina" label="AutoDock Vina"
+              badges={[{ text: 'Classic', color: 'bg-gray-100 text-gray-600' }]}
+              selected={(config.docking?.engine) === 'vina'}
+              onClick={v => onConfigChange({ ...config, docking: { ...config.docking, engine: v } })} />
+          </div>
+          <div className="flex items-center gap-4 mt-1">
+            <div>
+              <label className="text-[10px] font-medium text-gray-500">Exhaustiveness</label>
+              <Stepper value={config.docking?.exhaustiveness ?? 32} min={8} max={64}
+                onChange={v => onConfigChange({ ...config, docking: { ...config.docking, exhaustiveness: v } })} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {runType === 'calculation' && config.calculation_types?.[0] === 'scoring' && onConfigChange && (
+        <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-2">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Scoring Weights</p>
+          <ScoringWeightsEditor
+            weights={config.scoring?.weights || DEFAULT_CONFIGS.calculation.scoring.weights}
+            onChange={(w) => onConfigChange({ ...config, scoring: { ...config.scoring, weights: w } })}
+          />
+        </div>
+      )}
 
       {/* Column checklist for calculation runs */}
       {runType === 'calculation' && config.calculation_types?.length === 1 && includedColumns && onIncludedColumnsChange && (
@@ -1707,6 +1696,14 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
   const [config, setConfig] = useState({})
   const [includedColumns, setIncludedColumns] = useState(null)
   const [runAllMolecules, setRunAllMolecules] = useState(false)
+  const [gpuEngines, setGpuEngines] = useState(null)
+
+  useEffect(() => {
+    if (!isOpen) return
+    v9GpuHealth()
+      .then(data => setGpuEngines(data.engines || {}))
+      .catch(() => setGpuEngines({ gnina_gpu: false, gnina_cpu: true, vina: true, diffdock: false }))
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -1863,12 +1860,13 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
               onChange={setConfig}
               phase={phaseType}
               selectedCount={selectedMoleculeIds?.size || 0}
+              gpuEngines={gpuEngines}
             />
           )}
 
           {/* Step 3: Confirm */}
           {step === 3 && selectedType && (
-            <ConfirmationView runType={selectedType} config={config} selectedCount={selectedMoleculeIds?.size || 0} includedColumns={includedColumns} onIncludedColumnsChange={setIncludedColumns} runAllMolecules={runAllMolecules} onRunAllMoleculesChange={setRunAllMolecules} />
+            <ConfirmationView runType={selectedType} config={config} selectedCount={selectedMoleculeIds?.size || 0} includedColumns={includedColumns} onIncludedColumnsChange={setIncludedColumns} runAllMolecules={runAllMolecules} onRunAllMoleculesChange={setRunAllMolecules} onConfigChange={setConfig} gpuEngines={gpuEngines} />
           )}
         </div>
 
