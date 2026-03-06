@@ -751,11 +751,51 @@ def _run_import(run_id: str, run_data: dict) -> dict:
 # Calculation run
 # ---------------------------------------------------------------------------
 
+# Frontend column key → backend property key(s) mapping.
+# The frontend uses display keys (e.g. "BBB", "HBD") while the backend pipeline
+# stores different keys (e.g. "bbb_permeability", "hbd"). This map allows
+# _filter_cols to match backend keys against frontend included_columns.
+_FRONTEND_TO_BACKEND = {
+    "HBD": "hbd", "HBA": "hba", "QED": "qed", "TPSA": "tpsa",
+    "BBB": "bbb_permeability", "hERG": "herg_inhibition",
+    "safety_color_code": "color_code",
+    "docking_score": "affinity",
+}
+# Build reverse: backend key → frontend key
+_BACKEND_TO_FRONTEND = {v: k for k, v in _FRONTEND_TO_BACKEND.items()}
+
+
+def _expand_included(included: set | None) -> set | None:
+    """Expand frontend column keys to include their backend aliases."""
+    if included is None:
+        return None
+    expanded = set(included)
+    for frontend_key in list(included):
+        backend_key = _FRONTEND_TO_BACKEND.get(frontend_key)
+        if backend_key:
+            expanded.add(backend_key)
+    return expanded
+
+
 def _filter_cols(props: dict, included: set | None) -> dict:
-    """Filter a properties dict to only keep included columns. Pass-through if None."""
+    """Filter a properties dict keeping only keys whose frontend column is included.
+
+    Handles nested dicts (e.g. ADMET absorption/distribution/toxicity sub-dicts)
+    by recursively filtering. Pass-through if included is None.
+    """
     if included is None:
         return props
-    return {k: v for k, v in props.items() if k in included}
+    result = {}
+    for k, v in props.items():
+        # Check if this key (or its frontend alias) is in the included set
+        if k in included or _BACKEND_TO_FRONTEND.get(k) in included:
+            result[k] = v
+        elif isinstance(v, dict) and k not in included:
+            # Recurse into nested dicts (e.g. admet.absorption, admet.toxicity)
+            filtered_sub = _filter_cols(v, included)
+            if filtered_sub:
+                result[k] = filtered_sub
+    return result
 
 
 def _run_calculation(run_id: str, run_data: dict) -> dict:
@@ -763,9 +803,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
     calc_types = run_data.get("calculation_types") or []
     input_ids = run_data.get("input_molecule_ids") or []
     run_uuid = uuid.UUID(run_id)
-    # Column filtering — only used to skip optional sub-computations
+    # Column filtering from RunCreator checklist
     _run_config = run_data.get("config") or {}
-    _inc = set(_run_config["included_columns"]) if _run_config.get("included_columns") else None
+    _inc_raw = set(_run_config["included_columns"]) if _run_config.get("included_columns") else None
+    _inc = _expand_included(_inc_raw)
 
     # Run on all molecules in phase (ignore selection)
     if _run_config.get("run_all_molecules"):
@@ -812,7 +853,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 admet_results = predict_admet(smiles_list)
                 for mol, admet in zip(molecules, admet_results):
                     _db_sync(_store_property(
-                        mol["id"], run_uuid, "admet", admet
+                        mol["id"], run_uuid, "admet", _filter_cols(admet, _inc)
                     ))
                     # CNS MPO + Pfizer/GSK + Brenk (piggyback on ADMET run)
                     _piggyback_keys = {"cns_mpo", "pfizer_alert", "gsk_alert", "brenk_alert"}
@@ -829,7 +870,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 "brenk_alert": brenk,
                             }
                             _db_sync(_store_property(
-                                mol["id"], run_uuid, "druglikeness_rules", extra
+                                mol["id"], run_uuid, "druglikeness_rules", _filter_cols(extra, _inc)
                             ))
                         except Exception as e:
                             logger.debug("CNS MPO/Brenk failed for %s: %s", mol["smiles"][:40], e)
@@ -845,7 +886,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     try:
                         props = _cached_compute("scoring", mol["smiles"], compute_properties)
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "physicochemical", props
+                            mol["id"], run_uuid, "physicochemical", _filter_cols(props, _inc)
                         ))
                         # SA Score
                         if _inc is None or "sa_score" in _inc:
@@ -973,7 +1014,12 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         elif dr.get("pose_molblock"):
                             # GPU docking provides molblock directly (parsed from docked SDF)
                             docking_props["pose_molblock"] = dr["pose_molblock"][:50000]
-                        _db_sync(_store_property(mol["id"], run_uuid, "docking", docking_props))
+                        # Filter but always keep pose_molblock + docking_engine
+                        filtered_dock = _filter_cols(docking_props, _inc)
+                        for always_keep in ("pose_molblock", "docking_engine"):
+                            if always_keep in docking_props:
+                                filtered_dock[always_keep] = docking_props[always_keep]
+                        _db_sync(_store_property(mol["id"], run_uuid, "docking", filtered_dock))
                         stored += 1
 
                     _write_log(run_id, "info",
@@ -996,7 +1042,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     scored, eliminated, summary = enrich_results(mol_dicts)
                     for mol, enrichment in zip(molecules, scored):
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "enrichment", enrichment
+                            mol["id"], run_uuid, "enrichment", _filter_cols(enrichment, _inc)
                         ))
                     _write_log(run_id, "info", f"Enrichment complete: {len(scored)} enriched, {len(eliminated)} eliminated")
                     results["enrichment"] = f"{len(scored)} molecules enriched ({len(eliminated)} eliminated)"
@@ -1011,10 +1057,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     clustered = cluster_results(mol_dicts)
                     n_clusters = len(set(c.get("cluster_id", 0) for c in clustered))
                     for mol, cl_data in zip(molecules, clustered):
+                        cl_props = {"cluster_id": cl_data.get("cluster_id"),
+                                    "is_representative": cl_data.get("is_representative")}
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "clustering",
-                            {"cluster_id": cl_data.get("cluster_id"),
-                             "is_representative": cl_data.get("is_representative")}
+                            mol["id"], run_uuid, "clustering", _filter_cols(cl_props, _inc)
                         ))
                     _write_log(run_id, "info", f"Clustering complete: {n_clusters} clusters from {len(molecules)} molecules")
                     results["clustering"] = f"{len(molecules)} molecules clustered"
@@ -1033,15 +1079,15 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         # Flatten for table columns + keep full results for detail panel
                         off_target_hits = ot["n_total"] - ot["n_safe"]
                         selectivity_ratio = ot["n_safe"] / ot["n_total"] if ot["n_total"] > 0 else 0.0
+                        ot_props = {"selectivity_score": ot["selectivity_score"],
+                                    "off_target_hits": off_target_hits,
+                                    "selectivity_ratio": round(selectivity_ratio, 3),
+                                    "n_safe": ot["n_safe"],
+                                    "n_total": ot["n_total"],
+                                    "results": ot["results"],
+                                    "warnings": ot["warnings"]}
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "off_target",
-                            {"selectivity_score": ot["selectivity_score"],
-                             "off_target_hits": off_target_hits,
-                             "selectivity_ratio": round(selectivity_ratio, 3),
-                             "n_safe": ot["n_safe"],
-                             "n_total": ot["n_total"],
-                             "results": ot["results"],
-                             "warnings": ot["warnings"]}
+                            mol["id"], run_uuid, "off_target", _filter_cols(ot_props, _inc)
                         ))
                     except Exception as e:
                         logger.warning("Off-target failed for %s: %s", mol["smiles"], e)
@@ -1067,7 +1113,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         conf["confidence_score"] = conf["overall"]
                         conf["confidence_flags"] = ["pains"] if pains else []
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "confidence", conf
+                            mol["id"], run_uuid, "confidence", _filter_cols(conf, _inc)
                         ))
                     except Exception as e:
                         logger.warning("Confidence failed for %s: %s", mol["smiles"], e)
@@ -1099,7 +1145,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                             "reagent_availability": route.get("reagent_availability", []),
                         }
                         _db_sync(_store_property(
-                            mol["id"], run_uuid, "retrosynthesis", stored
+                            mol["id"], run_uuid, "retrosynthesis", _filter_cols(stored, _inc)
                         ))
                     except Exception as e:
                         logger.warning("Retrosynthesis failed for %s: %s", mol["smiles"], e)
@@ -1154,7 +1200,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 n_cliffs = 0
                 for mol, cliff in zip(molecules, cliff_results):
                     _db_sync(_store_property(
-                        mol["id"], run_uuid, "activity_cliffs", cliff
+                        mol["id"], run_uuid, "activity_cliffs", _filter_cols(cliff, _inc)
                     ))
                     if cliff.get("is_cliff"):
                         n_cliffs += 1
