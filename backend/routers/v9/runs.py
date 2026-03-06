@@ -75,7 +75,8 @@ async def create_run(
                 status_code=422,
                 detail=f"Invalid calculation types: {', '.join(invalid)}",
             )
-        if not body.input_molecule_ids:
+        run_all = (body.config or {}).get("run_all_molecules", False)
+        if not body.input_molecule_ids and not run_all:
             raise HTTPException(
                 status_code=422, detail="input_molecule_ids required for calculation runs"
             )
