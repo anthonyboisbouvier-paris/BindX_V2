@@ -1016,8 +1016,8 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     )
 
                     # Store results as molecule properties (batch insert)
-                    # Build id→molecule mapping (collision-free since IDs are UUIDs)
-                    name_to_mol = {m["id"]: m for m in molecules}
+                    # Build id→molecule mapping (str keys to match docking result names)
+                    name_to_mol = {str(m["id"]): m for m in molecules}
 
                     dock_entries = []  # (mol_id, run_id, prop_name, prop_value)
                     for dr in dock_results:
