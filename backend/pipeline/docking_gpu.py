@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -92,20 +92,22 @@ def _smiles_to_sdf_block(args: tuple) -> Optional[tuple[int, str, dict]]:
 def _prepare_sdf_parallel(ligands: list[dict]) -> tuple[list[str], list[dict]]:
     """Prepare SDF blocks from SMILES using parallel processes.
 
-    For small batches (<50), runs sequentially to avoid process overhead.
-    For larger batches, uses ProcessPoolExecutor for ~4x speedup.
+    For small batches (<50), runs sequentially to avoid thread overhead.
+    For larger batches, uses ThreadPoolExecutor (RDKit releases the GIL
+    during conformer generation, so threads give real parallelism).
+    Note: ProcessPoolExecutor cannot be used inside Celery daemon workers.
     """
     n = len(ligands)
     args = [(i, lig) for i, lig in enumerate(ligands)]
 
     if n < 50:
-        # Sequential — faster for small batches (no process spawn overhead)
+        # Sequential — faster for small batches
         results = [_smiles_to_sdf_block(a) for a in args]
     else:
-        # Parallel — significant speedup for 100+ molecules
+        # Threaded — works inside Celery daemons, RDKit releases GIL
         n_workers = min(os.cpu_count() or 4, 8)
-        with ProcessPoolExecutor(max_workers=n_workers) as pool:
-            results = list(pool.map(_smiles_to_sdf_block, args, chunksize=max(1, n // n_workers)))
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            results = list(pool.map(_smiles_to_sdf_block, args))
 
     # Collect successful results, preserving order
     valid = [r for r in results if r is not None]
@@ -116,8 +118,26 @@ def _prepare_sdf_parallel(ligands: list[dict]) -> tuple[list[str], list[dict]]:
 
 
 # ---------------------------------------------------------------------------
-# Low-level RunPod API: submit + poll (single batch)
+# Low-level RunPod API: submit + poll + cancel
 # ---------------------------------------------------------------------------
+
+def _cancel_job(job_id: str) -> bool:
+    """Cancel a RunPod job. Returns True if cancelled successfully."""
+    api_key = os.environ.get("RUNPOD_API_KEY", RUNPOD_API_KEY)
+    endpoint_id = os.environ.get("GNINA_ENDPOINT_ID", GNINA_ENDPOINT_ID)
+    url = f"https://api.runpod.ai/v2/{endpoint_id}/cancel/{job_id}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        resp = requests.post(url, headers=headers, timeout=10)
+        ok = resp.status_code in (200, 204)
+        if ok:
+            logger.info("Cancelled RunPod job %s", job_id)
+        else:
+            logger.warning("Failed to cancel RunPod job %s: %s", job_id, resp.status_code)
+        return ok
+    except Exception as e:
+        logger.warning("Error cancelling RunPod job %s: %s", job_id, e)
+        return False
 
 def _submit_job(
     receptor_pdb_content: str,
@@ -509,6 +529,11 @@ def dock_all_runpod_batch(
         seed=seed, autobox_add=autobox_add,
     )
 
+    # Track all submitted job IDs for cleanup on failure
+    submitted_jobs: list[str] = []
+    import threading
+    jobs_lock = threading.Lock()
+
     def _run_single_batch(batch: dict) -> tuple[int, dict, list[dict]]:
         """Submit and poll a single batch. Returns (batch_idx, gpu_result, batch_ligands)."""
         job_id, error = _submit_job(
@@ -519,54 +544,79 @@ def dock_all_runpod_batch(
         if error:
             return (batch["idx"], {"error": error, "results": []}, batch["ligands"])
 
+        with jobs_lock:
+            submitted_jobs.append(job_id)
+
         logger.info("GPU batch %d/%d submitted: job=%s (%d mols)",
                      batch["idx"] + 1, n_batches, job_id, len(batch["ligands"]))
 
         result = _poll_job(job_id, timeout=timeout)
+
+        # Remove from tracked jobs on completion
+        with jobs_lock:
+            if job_id in submitted_jobs:
+                submitted_jobs.remove(job_id)
+
         return (batch["idx"], result, batch["ligands"])
+
+    def _cancel_all_pending():
+        """Cancel all tracked RunPod jobs that haven't completed."""
+        with jobs_lock:
+            to_cancel = list(submitted_jobs)
+        if to_cancel:
+            logger.warning("Cancelling %d pending RunPod jobs...", len(to_cancel))
+            for jid in to_cancel:
+                _cancel_job(jid)
 
     all_results = []
     docked_sdfs = []
     completed_batches = 0
 
-    if n_batches == 1:
-        # Single batch — no threading overhead
-        batch_idx, gpu_result, batch_ligs = _run_single_batch(batches[0])
-        if gpu_result.get("error"):
-            raise RuntimeError(f"GPU docking failed: {gpu_result['error']}")
-        all_results.extend(_parse_batch_results(gpu_result, batch_ligs))
-        docked_sdfs.append(gpu_result.get("docked_sdf", ""))
-        if progress_callback:
-            progress_callback(85, f"GPU docking done: {len(all_results)} results")
-    else:
-        # Parallel batch submission
-        max_workers = min(n_batches, MAX_PARALLEL_BATCHES)
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_run_single_batch, b): b["idx"] for b in batches}
+    try:
+        if n_batches == 1:
+            # Single batch — no threading overhead
+            batch_idx, gpu_result, batch_ligs = _run_single_batch(batches[0])
+            if gpu_result.get("error"):
+                raise RuntimeError(f"GPU docking failed: {gpu_result['error']}")
+            all_results.extend(_parse_batch_results(gpu_result, batch_ligs))
+            docked_sdfs.append(gpu_result.get("docked_sdf", ""))
+            if progress_callback:
+                progress_callback(85, f"GPU docking done: {len(all_results)} results")
+        else:
+            # Parallel batch submission
+            max_workers = min(n_batches, MAX_PARALLEL_BATCHES)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(_run_single_batch, b): b["idx"] for b in batches}
 
-            for future in as_completed(futures):
-                batch_idx, gpu_result, batch_ligs = future.result()
-                completed_batches += 1
+                for future in as_completed(futures):
+                    batch_idx, gpu_result, batch_ligs = future.result()
+                    completed_batches += 1
 
-                if gpu_result.get("error"):
-                    error = gpu_result["error"]
-                    logger.error("GPU batch %d failed: %s", batch_idx + 1, error)
-                    raise RuntimeError(f"GPU batch {batch_idx + 1}/{n_batches} failed: {error}")
+                    if gpu_result.get("error"):
+                        error = gpu_result["error"]
+                        logger.error("GPU batch %d failed: %s", batch_idx + 1, error)
+                        # Cancel remaining jobs before raising
+                        _cancel_all_pending()
+                        raise RuntimeError(f"GPU batch {batch_idx + 1}/{n_batches} failed: {error}")
 
-                parsed = _parse_batch_results(gpu_result, batch_ligs)
-                all_results.extend(parsed)
-                docked_sdfs.append(gpu_result.get("docked_sdf", ""))
+                    parsed = _parse_batch_results(gpu_result, batch_ligs)
+                    all_results.extend(parsed)
+                    docked_sdfs.append(gpu_result.get("docked_sdf", ""))
 
-                logger.info("GPU batch %d/%d done: %d results",
-                           batch_idx + 1, n_batches, len(parsed))
+                    logger.info("GPU batch %d/%d done: %d results",
+                               batch_idx + 1, n_batches, len(parsed))
 
-                if progress_callback:
-                    pct = int(40 + (completed_batches / n_batches) * 45)
-                    progress_callback(
-                        pct,
-                        f"GPU: {completed_batches}/{n_batches} batches done "
-                        f"({len(all_results)} molecules)",
-                    )
+                    if progress_callback:
+                        pct = int(40 + (completed_batches / n_batches) * 45)
+                        progress_callback(
+                            pct,
+                            f"GPU: {completed_batches}/{n_batches} batches done "
+                            f"({len(all_results)} molecules)",
+                        )
+    except Exception:
+        # Ensure all RunPod jobs are cancelled on any failure
+        _cancel_all_pending()
+        raise
 
     # --- 5. Attach pose molblocks from all docked SDFs ---
     _attach_pose_molblocks(all_results, docked_sdfs, work_dir)
