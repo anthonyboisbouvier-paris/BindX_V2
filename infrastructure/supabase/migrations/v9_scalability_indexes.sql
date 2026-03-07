@@ -16,3 +16,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_molecules_phase_name
 -- Index for property lookups (lateral join for sort-by-property)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mol_props_mol_name
   ON molecule_properties(molecule_id, property_name);
+
+-- Index for CASCADE deletes on run deletion
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mol_props_run_id
+  ON molecule_properties(run_id);

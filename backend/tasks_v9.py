@@ -979,7 +979,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         f"Docking {len(molecules)} molecules — center={pocket_center}, size={pocket_size}")
 
                     # Prepare ligand list — use molecule UUID as name for collision-free mapping
-                    ligands = [{"name": m["id"], "smiles": m["smiles"]}
+                    ligands = [{"name": str(m["id"]), "smiles": m["smiles"]}
                                for m in molecules]
 
                     # Read advanced docking config from run config
