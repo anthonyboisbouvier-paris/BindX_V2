@@ -234,6 +234,32 @@ async def _cache_get(cache_key: str):
         return row if row else None
 
 
+async def _cache_get_batch(cache_keys: list[str]) -> dict[str, dict]:
+    """Batch lookup cached results. Returns {cache_key: result} for hits."""
+    from database_v9 import AsyncSessionV9
+    from models_v9 import CalculationCacheORM_V9
+    from sqlalchemy import select
+
+    if not cache_keys:
+        return {}
+
+    hits = {}
+    # Query in chunks to avoid oversized IN clauses
+    chunk_size = 500
+    for i in range(0, len(cache_keys), chunk_size):
+        chunk = cache_keys[i : i + chunk_size]
+        async with AsyncSessionV9() as session:
+            result = await session.execute(
+                select(
+                    CalculationCacheORM_V9.cache_key,
+                    CalculationCacheORM_V9.result,
+                ).where(CalculationCacheORM_V9.cache_key.in_(chunk))
+            )
+            for row in result.fetchall():
+                hits[row[0]] = row[1]
+    return hits
+
+
 async def _cache_set(cache_key: str, result: dict):
     """Store a calculation result in cache."""
     from database_v9 import AsyncSessionV9
@@ -246,6 +272,27 @@ async def _cache_set(cache_key: str, result: dict):
             await session.commit()
         except Exception:
             await session.rollback()  # duplicate key — ignore
+
+
+async def _cache_set_batch(entries: list[tuple[str, dict]]):
+    """Batch store cache entries. entries: [(cache_key, result), ...]."""
+    from database_v9 import AsyncSessionV9
+    from models_v9 import CalculationCacheORM_V9
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    if not entries:
+        return
+
+    table = CalculationCacheORM_V9.__table__
+    chunk_size = 500
+    for i in range(0, len(entries), chunk_size):
+        chunk = entries[i : i + chunk_size]
+        rows = [{"cache_key": k, "result": v} for k, v in chunk]
+        stmt = pg_insert(table).values(rows)
+        stmt = stmt.on_conflict_do_nothing(index_elements=["cache_key"])
+        async with AsyncSessionV9() as session:
+            await session.execute(stmt)
+            await session.commit()
 
 
 async def _get_docking_context(phase_id):
@@ -922,11 +969,19 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 from pipeline.scoring import (
                     compute_properties, compute_sa_score,
                 )
+                # Batch cache lookup (1 query instead of N)
+                cache_keys = [f"scoring:{m['smiles']}" for m in molecules]
+                cached = _db_sync(_cache_get_batch(cache_keys))
+
                 physchem_entries = []
                 sa_entries = []
-                for mol in molecules:
+                new_cache = []  # (key, result) pairs to batch-store
+                for mol, ck in zip(molecules, cache_keys):
                     try:
-                        props = _cached_compute("scoring", mol["smiles"], compute_properties)
+                        props = cached.get(ck)
+                        if props is None:
+                            props = compute_properties(mol["smiles"])
+                            new_cache.append((ck, props))
                         physchem_entries.append((mol["id"], run_uuid, "physicochemical", _filter_cols(props, _inc)))
                         if _inc is None or "sa_score" in _inc:
                             sa = compute_sa_score(mol["smiles"])
@@ -934,6 +989,9 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 sa_entries.append((mol["id"], run_uuid, "sa_score", {"sa_score": sa}))
                     except Exception as e:
                         logger.warning("Scoring failed for %s: %s", mol["smiles"], e)
+                # Batch store: cache + properties (3-4 queries total instead of N×3)
+                if new_cache:
+                    _db_sync(_cache_set_batch(new_cache))
                 _db_sync(_store_properties_batch(physchem_entries))
                 if sa_entries:
                     _db_sync(_store_properties_batch(sa_entries))
