@@ -178,6 +178,35 @@ async def _store_property(molecule_id, run_id, prop_name, prop_value):
         await session.commit()
 
 
+async def _store_properties_batch(entries: list[tuple], batch_size: int = 500):
+    """Bulk-insert molecule properties in batches.
+
+    entries: list of (molecule_id, run_id, prop_name, prop_value) tuples.
+    Commits in chunks of batch_size to avoid oversized transactions.
+    """
+    from database_v9 import AsyncSessionV9
+    from models_v9 import MoleculePropertyORM_V9
+
+    if not entries:
+        return
+
+    for i in range(0, len(entries), batch_size):
+        chunk = entries[i : i + batch_size]
+        async with AsyncSessionV9() as session:
+            session.add_all([
+                MoleculePropertyORM_V9(
+                    molecule_id=mol_id,
+                    run_id=run_id,
+                    property_name=prop_name,
+                    property_value=prop_value,
+                )
+                for mol_id, run_id, prop_name, prop_value in chunk
+            ])
+            await session.commit()
+    logger.info("Batch stored %d properties (%d chunks of %d)",
+                len(entries), (len(entries) + batch_size - 1) // batch_size, batch_size)
+
+
 async def _cache_get(cache_key: str):
     """Look up a cached calculation result. Returns dict or None."""
     from database_v9 import AsyncSessionV9
@@ -851,10 +880,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     compute_druglikeness_rules, compute_brenk_alert,
                 )
                 admet_results = predict_admet(smiles_list)
+                admet_entries = []
+                druglike_entries = []
                 for mol, admet in zip(molecules, admet_results):
-                    _db_sync(_store_property(
-                        mol["id"], run_uuid, "admet", _filter_cols(admet, _inc)
-                    ))
+                    admet_entries.append((mol["id"], run_uuid, "admet", _filter_cols(admet, _inc)))
                     # CNS MPO + Pfizer/GSK + Brenk (piggyback on ADMET run)
                     _piggyback_keys = {"cns_mpo", "pfizer_alert", "gsk_alert", "brenk_alert"}
                     if _inc is None or _piggyback_keys & _inc:
@@ -869,11 +898,12 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 "gsk_alert": dl_rules["gsk_alert"],
                                 "brenk_alert": brenk,
                             }
-                            _db_sync(_store_property(
-                                mol["id"], run_uuid, "druglikeness_rules", _filter_cols(extra, _inc)
-                            ))
+                            druglike_entries.append((mol["id"], run_uuid, "druglikeness_rules", _filter_cols(extra, _inc)))
                         except Exception as e:
                             logger.debug("CNS MPO/Brenk failed for %s: %s", mol["smiles"][:40], e)
+                _db_sync(_store_properties_batch(admet_entries))
+                if druglike_entries:
+                    _db_sync(_store_properties_batch(druglike_entries))
                 _write_log(run_id, "info", f"ADMET complete: {len(admet_results)} molecules profiled (+ CNS MPO, Pfizer/GSK, Brenk)")
                 results["admet"] = f"{len(admet_results)} molecules processed"
 
@@ -881,24 +911,22 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 from pipeline.scoring import (
                     compute_properties, compute_sa_score,
                 )
-                scored = 0
+                physchem_entries = []
+                sa_entries = []
                 for mol in molecules:
                     try:
                         props = _cached_compute("scoring", mol["smiles"], compute_properties)
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "physicochemical", _filter_cols(props, _inc)
-                        ))
-                        # SA Score
+                        physchem_entries.append((mol["id"], run_uuid, "physicochemical", _filter_cols(props, _inc)))
                         if _inc is None or "sa_score" in _inc:
                             sa = compute_sa_score(mol["smiles"])
                             if sa is not None:
-                                _db_sync(_store_property(
-                                    mol["id"], run_uuid, "sa_score", {"sa_score": sa}
-                                ))
-                        scored += 1
+                                sa_entries.append((mol["id"], run_uuid, "sa_score", {"sa_score": sa}))
                     except Exception as e:
                         logger.warning("Scoring failed for %s: %s", mol["smiles"], e)
-                _write_log(run_id, "info", f"Scoring complete: {scored}/{len(molecules)} molecules scored (+ SA, InChIKey, Ro3)")
+                _db_sync(_store_properties_batch(physchem_entries))
+                if sa_entries:
+                    _db_sync(_store_properties_batch(sa_entries))
+                _write_log(run_id, "info", f"Scoring complete: {len(physchem_entries)}/{len(molecules)} molecules scored (+ SA, InChIKey, Ro3)")
                 results["scoring"] = f"{len(molecules)} molecules scored"
 
             elif calc_type == "docking":
@@ -976,14 +1004,14 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         docking_engine=dock_engine,
                     )
 
-                    # Store results as molecule properties
+                    # Store results as molecule properties (batch insert)
                     # Build name→molecule mapping
                     name_to_mol = {}
                     for m in molecules:
                         name_to_mol[m["name"]] = m
                         name_to_mol[m["name"] or f"mol_{molecules.index(m)}"] = m
 
-                    stored = 0
+                    dock_entries = []  # (mol_id, run_id, prop_name, prop_value)
                     for dr in dock_results:
                         mol = name_to_mol.get(dr.get("name"))
                         if not mol:
@@ -1012,20 +1040,21 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                             except Exception as pe:
                                 logger.debug("Could not read pose file for %s: %s", dr.get("name"), pe)
                         elif dr.get("pose_molblock"):
-                            # GPU docking provides molblock directly (parsed from docked SDF)
                             docking_props["pose_molblock"] = dr["pose_molblock"][:50000]
                         # Filter but always keep pose_molblock + docking_engine
                         filtered_dock = _filter_cols(docking_props, _inc)
                         for always_keep in ("pose_molblock", "docking_engine"):
                             if always_keep in docking_props:
                                 filtered_dock[always_keep] = docking_props[always_keep]
-                        _db_sync(_store_property(mol["id"], run_uuid, "docking", filtered_dock))
-                        stored += 1
+                        dock_entries.append((mol["id"], run_uuid, "docking", filtered_dock))
+
+                    _db_sync(_store_properties_batch(dock_entries))
+                    stored = len(dock_entries)
 
                     # Ligand Efficiency (computed after docking scores are available)
                     if _inc is None or "ligand_efficiency" in _inc:
                         from pipeline.scoring import compute_ligand_efficiency, compute_properties
-                        le_count = 0
+                        le_entries = []
                         for dr in dock_results:
                             mol = name_to_mol.get(dr.get("name"))
                             if not mol:
@@ -1033,7 +1062,6 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                             docking_score_val = dr.get("affinity")
                             if docking_score_val is None:
                                 continue
-                            # Get heavy atom count from molecule
                             try:
                                 props = compute_properties(mol["smiles"])
                                 ha_count = props.get("heavy_atom_count")
@@ -1041,12 +1069,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 ha_count = None
                             le = compute_ligand_efficiency(docking_score_val, ha_count)
                             if le is not None:
-                                _db_sync(_store_property(
-                                    mol["id"], run_uuid, "ligand_efficiency", {"ligand_efficiency": le}
-                                ))
-                                le_count += 1
-                        if le_count:
-                            _write_log(run_id, "info", f"Ligand efficiency computed for {le_count} molecules")
+                                le_entries.append((mol["id"], run_uuid, "ligand_efficiency", {"ligand_efficiency": le}))
+                        if le_entries:
+                            _db_sync(_store_properties_batch(le_entries))
+                            _write_log(run_id, "info", f"Ligand efficiency computed for {len(le_entries)} molecules")
 
                     _write_log(run_id, "info",
                         f"Docking complete: {stored}/{len(molecules)} molecules docked")
@@ -1066,10 +1092,11 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 try:
                     from pipeline.enrich import enrich_results
                     scored, eliminated, summary = enrich_results(mol_dicts)
-                    for mol, enrichment in zip(molecules, scored):
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "enrichment", _filter_cols(enrichment, _inc)
-                        ))
+                    enrich_entries = [
+                        (mol["id"], run_uuid, "enrichment", _filter_cols(enrichment, _inc))
+                        for mol, enrichment in zip(molecules, scored)
+                    ]
+                    _db_sync(_store_properties_batch(enrich_entries))
                     _write_log(run_id, "info", f"Enrichment complete: {len(scored)} enriched, {len(eliminated)} eliminated")
                     results["enrichment"] = f"{len(scored)} molecules enriched ({len(eliminated)} eliminated)"
                 except Exception as e:
@@ -1082,12 +1109,13 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 try:
                     clustered = cluster_results(mol_dicts)
                     n_clusters = len(set(c.get("cluster_id", 0) for c in clustered))
-                    for mol, cl_data in zip(molecules, clustered):
-                        cl_props = {"cluster_id": cl_data.get("cluster_id"),
-                                    "is_representative": cl_data.get("is_representative")}
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "clustering", _filter_cols(cl_props, _inc)
-                        ))
+                    cluster_entries = [
+                        (mol["id"], run_uuid, "clustering", _filter_cols(
+                            {"cluster_id": cl_data.get("cluster_id"),
+                             "is_representative": cl_data.get("is_representative")}, _inc))
+                        for mol, cl_data in zip(molecules, clustered)
+                    ]
+                    _db_sync(_store_properties_batch(cluster_entries))
                     _write_log(run_id, "info", f"Clustering complete: {n_clusters} clusters from {len(molecules)} molecules")
                     results["clustering"] = f"{len(molecules)} molecules clustered"
                 except Exception as e:
@@ -1099,10 +1127,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 from pipeline.off_target import screen_off_targets
                 import tempfile
                 tmp_dir = Path(tempfile.mkdtemp(prefix="off_target_"))
+                ot_entries = []
                 for mol in molecules:
                     try:
                         ot = screen_off_targets(mol["smiles"], tmp_dir)
-                        # Flatten for table columns + keep full results for detail panel
                         off_target_hits = ot["n_total"] - ot["n_safe"]
                         selectivity_ratio = ot["n_safe"] / ot["n_total"] if ot["n_total"] > 0 else 0.0
                         ot_props = {"selectivity_score": ot["selectivity_score"],
@@ -1112,11 +1140,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                     "n_total": ot["n_total"],
                                     "results": ot["results"],
                                     "warnings": ot["warnings"]}
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "off_target", _filter_cols(ot_props, _inc)
-                        ))
+                        ot_entries.append((mol["id"], run_uuid, "off_target", _filter_cols(ot_props, _inc)))
                     except Exception as e:
                         logger.warning("Off-target failed for %s: %s", mol["smiles"], e)
+                _db_sync(_store_properties_batch(ot_entries))
                 _write_log(run_id, "info", f"Off-target screening complete: {len(molecules)} molecules vs 10 anti-targets")
                 results["off_target"] = f"{len(molecules)} molecules analyzed"
 
@@ -1124,80 +1151,73 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 # Multi-component confidence scoring
                 from pipeline.confidence import calculate_confidence
                 from pipeline.scoring import compute_pains_alert
+                conf_entries = []
                 for mol in molecules:
                     try:
-                        # Build molecule dict with available properties
                         mol_dict = {"smiles": mol["smiles"], "name": mol["name"]}
                         for prop_key in ("affinity", "vina_score", "cnn_score", "admet",
                                          "synthesis_route", "docking_method", "source"):
                             if mol.get(prop_key) is not None:
                                 mol_dict[prop_key] = mol[prop_key]
                         conf = calculate_confidence(mol_dict)
-                        # Add PAINS check to confidence data
                         pains = compute_pains_alert(mol["smiles"])
                         conf["pains_alert"] = pains
                         conf["confidence_score"] = conf["overall"]
                         conf["confidence_flags"] = ["pains"] if pains else []
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "confidence", _filter_cols(conf, _inc)
-                        ))
+                        conf_entries.append((mol["id"], run_uuid, "confidence", _filter_cols(conf, _inc)))
                     except Exception as e:
                         logger.warning("Confidence failed for %s: %s", mol["smiles"], e)
+                _db_sync(_store_properties_batch(conf_entries))
                 _write_log(run_id, "info", f"Confidence scoring complete: {len(molecules)} molecules assessed")
                 results["confidence"] = f"{len(molecules)} molecules assessed"
 
             elif calc_type == "retrosynthesis":
                 # Full retrosynthesis planning via pipeline/retrosynthesis.py
                 from pipeline.retrosynthesis import plan_synthesis
+                retro_entries = []
                 for mol in molecules:
                     try:
                         route = plan_synthesis(mol["smiles"])
-                        # Store full route + backward-compatible flat keys for table columns
-                        stored = {
-                            # Flat keys for table columns (deepFlatten picks these up)
+                        stored_val = {
                             "n_synth_steps": route.get("n_steps", 0),
                             "synth_confidence": route.get("confidence", 0),
                             "synth_cost_estimate": route.get("estimated_cost"),
                             "reagents_available": route.get("all_reagents_available", True),
-                            # Full structured data for SynthesisTree component
                             "n_steps": route.get("n_steps", 0),
                             "confidence": route.get("confidence", 0),
                             "estimated_cost": route.get("estimated_cost"),
                             "all_reagents_available": route.get("all_reagents_available"),
                             "steps": route.get("steps", []),
                             "tree": route.get("tree"),
-                            # reagent list is inside reagent_availability
                             "cost_estimate": route.get("cost_estimate"),
                             "reagent_availability": route.get("reagent_availability", []),
                         }
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "retrosynthesis", _filter_cols(stored, _inc)
-                        ))
+                        retro_entries.append((mol["id"], run_uuid, "retrosynthesis", _filter_cols(stored_val, _inc)))
                     except Exception as e:
                         logger.warning("Retrosynthesis failed for %s: %s", mol["smiles"], e)
+                _db_sync(_store_properties_batch(retro_entries))
                 _write_log(run_id, "info", f"Retrosynthesis complete: {len(molecules)} molecules — routes planned")
                 results["retrosynthesis"] = f"{len(molecules)} molecules analyzed"
 
             elif calc_type == "pharmacophore":
                 from pipeline.pharmacophore import extract_pharmacophore, compute_pharmacophore_similarity
+                pharma_entries = []
                 for mol in molecules:
                     try:
                         pharma = extract_pharmacophore(mol["smiles"])
-                        _db_sync(_store_property(
-                            mol["id"], run_uuid, "pharmacophore", {
-                                "feature_counts": pharma.get("feature_counts", {}),
-                                "n_features": pharma.get("n_features", 0),
-                                "fingerprint_bits": len(pharma.get("fingerprint", [])),
-                            }
-                        ))
+                        pharma_entries.append((mol["id"], run_uuid, "pharmacophore", {
+                            "feature_counts": pharma.get("feature_counts", {}),
+                            "n_features": pharma.get("n_features", 0),
+                            "fingerprint_bits": len(pharma.get("fingerprint", [])),
+                        }))
                     except Exception as e:
                         logger.warning("Pharmacophore failed for %s: %s", mol["smiles"], e)
+                _db_sync(_store_properties_batch(pharma_entries))
 
                 # Compute pairwise similarity
                 try:
                     all_smiles = [m["smiles"] for m in molecules]
                     sim_result = compute_pharmacophore_similarity(all_smiles)
-                    # Store similarity data on first molecule as run-level result
                     if molecules:
                         _db_sync(_store_property(
                             molecules[0]["id"], run_uuid, "pharmacophore_similarity", sim_result
@@ -1223,13 +1243,13 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         d["docking_score"] = d["affinity"]
                     mol_dicts.append(d)
                 cliff_results = detect_activity_cliffs(mol_dicts, activity_key="docking_score")
+                cliff_entries = []
                 n_cliffs = 0
                 for mol, cliff in zip(molecules, cliff_results):
-                    _db_sync(_store_property(
-                        mol["id"], run_uuid, "activity_cliffs", _filter_cols(cliff, _inc)
-                    ))
+                    cliff_entries.append((mol["id"], run_uuid, "activity_cliffs", _filter_cols(cliff, _inc)))
                     if cliff.get("is_cliff"):
                         n_cliffs += 1
+                _db_sync(_store_properties_batch(cliff_entries))
                 _write_log(run_id, "info",
                     f"Activity cliff detection complete: {n_cliffs}/{len(molecules)} molecules are cliffs")
                 results["activity_cliffs"] = f"{n_cliffs} cliffs detected in {len(molecules)} molecules"
