@@ -207,7 +207,7 @@ async def _store_properties_batch(entries: list[tuple], batch_size: int = 500):
         ]
         stmt = pg_insert(table).values(rows)
         stmt = stmt.on_conflict_do_update(
-            constraint="uq_mol_props_mol_name_run",
+            index_elements=["molecule_id", "property_name", "run_id"],
             set_={"property_value": stmt.excluded.property_value},
         )
         async with AsyncSessionV9() as session:
