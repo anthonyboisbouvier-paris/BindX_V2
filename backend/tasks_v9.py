@@ -179,31 +179,42 @@ async def _store_property(molecule_id, run_id, prop_name, prop_value):
 
 
 async def _store_properties_batch(entries: list[tuple], batch_size: int = 500):
-    """Bulk-insert molecule properties in batches.
+    """Bulk-upsert molecule properties in batches.
 
     entries: list of (molecule_id, run_id, prop_name, prop_value) tuples.
+    Uses PostgreSQL ON CONFLICT DO UPDATE to handle re-runs gracefully.
     Commits in chunks of batch_size to avoid oversized transactions.
     """
     from database_v9 import AsyncSessionV9
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
     from models_v9 import MoleculePropertyORM_V9
 
     if not entries:
         return
 
+    table = MoleculePropertyORM_V9.__table__
+
     for i in range(0, len(entries), batch_size):
         chunk = entries[i : i + batch_size]
+        rows = [
+            {
+                "molecule_id": mol_id,
+                "run_id": run_id,
+                "property_name": prop_name,
+                "property_value": prop_value,
+            }
+            for mol_id, run_id, prop_name, prop_value in chunk
+        ]
+        stmt = pg_insert(table).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_mol_props_mol_name_run",
+            set_={"property_value": stmt.excluded.property_value},
+        )
         async with AsyncSessionV9() as session:
-            session.add_all([
-                MoleculePropertyORM_V9(
-                    molecule_id=mol_id,
-                    run_id=run_id,
-                    property_name=prop_name,
-                    property_value=prop_value,
-                )
-                for mol_id, run_id, prop_name, prop_value in chunk
-            ])
+            await session.execute(stmt)
             await session.commit()
-    logger.info("Batch stored %d properties (%d chunks of %d)",
+
+    logger.info("Batch upserted %d properties (%d chunks of %d)",
                 len(entries), (len(entries) + batch_size - 1) // batch_size, batch_size)
 
 
@@ -967,9 +978,9 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     _write_log(run_id, "info",
                         f"Docking {len(molecules)} molecules — center={pocket_center}, size={pocket_size}")
 
-                    # Prepare ligand list
-                    ligands = [{"name": m["name"] or f"mol_{i}", "smiles": m["smiles"]}
-                               for i, m in enumerate(molecules)]
+                    # Prepare ligand list — use molecule UUID as name for collision-free mapping
+                    ligands = [{"name": m["id"], "smiles": m["smiles"]}
+                               for m in molecules]
 
                     # Read advanced docking config from run config
                     run_config = run_data.get("config") or {}
@@ -1005,11 +1016,8 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     )
 
                     # Store results as molecule properties (batch insert)
-                    # Build name→molecule mapping
-                    name_to_mol = {}
-                    for m in molecules:
-                        name_to_mol[m["name"]] = m
-                        name_to_mol[m["name"] or f"mol_{molecules.index(m)}"] = m
+                    # Build id→molecule mapping (collision-free since IDs are UUIDs)
+                    name_to_mol = {m["id"]: m for m in molecules}
 
                     dock_entries = []  # (mol_id, run_id, prop_name, prop_value)
                     for dr in dock_results:
