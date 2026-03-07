@@ -73,6 +73,9 @@ services:
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
       - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
       - GNINA_ENDPOINT_ID=${GNINA_ENDPOINT_ID:-weeeiy6z4jdsv3}
+      - GPU_BATCH_SIZE=${GPU_BATCH_SIZE:-250}
+      - GPU_MAX_PARALLEL=${GPU_MAX_PARALLEL:-8}
+      - RUNPOD_TIMEOUT=${RUNPOD_TIMEOUT:-600}
     depends_on:
       redis:
         condition: service_healthy
