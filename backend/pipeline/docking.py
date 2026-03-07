@@ -617,8 +617,6 @@ def _run_vina_real(
             "affinity": affinity,
             "pose_pdbqt_path": out_path if out_path.exists() else None,
             "vina_score": affinity,
-            "cnn_score": 0.0,  # Not available from Vina
-            "cnn_affinity": 0.0,  # Not available from Vina
             "docking_engine": "vina",
         }
 
@@ -902,24 +900,36 @@ def dock_all_ligands(
             logger.warning("Docking failed for %s: %s", name, exc)
             continue
 
-        # Clamp CNN score to valid [0, 1] range
-        raw_cnn = dock_result.get("cnn_score", 0.0) or 0.0
-        clamped_cnn = max(0.0, min(1.0, raw_cnn))
-
-        results.append({
+        entry = {
             **lig,  # preserve original keys
             "affinity": dock_result["affinity"],
             "vina_score": dock_result.get("vina_score", dock_result["affinity"]),
-            "cnn_score": round(clamped_cnn, 3),
-            "cnn_affinity": dock_result.get("cnn_affinity", 0.0),
             "docking_engine": dock_result.get("docking_engine", "unknown"),
             "pose_pdbqt_path": str(dock_result["pose_pdbqt_path"])
             if dock_result.get("pose_pdbqt_path") else None,
-        })
+        }
 
-    # Apply consensus ranking across all results
+        # CNN metrics only available from GNINA (not Vina)
+        if "cnn_score" in dock_result:
+            raw_cnn = dock_result["cnn_score"] or 0.0
+            clamped_cnn = max(0.0, min(1.0, raw_cnn))
+            entry["cnn_score"] = round(clamped_cnn, 3)
+            entry["cnn_affinity"] = dock_result.get("cnn_affinity", 0.0)
+            # CNN_VS composite (CNNscore × CNNaffinity)
+            entry["cnn_vs"] = round(clamped_cnn * entry["cnn_affinity"], 4)
+
+        results.append(entry)
+
+    # Apply ranking: consensus (GNINA, 3 scores) or affinity-only (Vina)
     if results:
-        results = consensus_rank(results)
+        has_cnn = any("cnn_score" in r for r in results)
+        if has_cnn:
+            results = consensus_rank(results)
+        else:
+            # Vina: rank by affinity only (lower = better)
+            results.sort(key=lambda r: r.get("affinity", 0))
+            for i, r in enumerate(results):
+                r["consensus_rank"] = i + 1
 
     logger.info(
         "Docking complete: %d/%d ligands succeeded (engine=%s)",

@@ -778,23 +778,7 @@ export default function MoleculeTable({
     [effectiveWidths]
   )
 
-  // Map group → run label from actual phase runs
-  const groupRunLabels = useMemo(() => {
-    const labels = {}
-    for (const run of runs) {
-      if (run.status !== 'completed') continue
-      if (run.type === 'import') {
-        labels['molecule'] = labels['molecule'] || 'Import'
-      } else if (run.type === 'generation') {
-        labels['generation'] = labels['generation'] || 'Generation'
-      } else if (run.type === 'calculation' && run.calculation_types) {
-        for (const ct of run.calculation_types) {
-          labels[ct] = labels[ct] || (ct.charAt(0).toUpperCase() + ct.slice(1))
-        }
-      }
-    }
-    return labels
-  }, [runs])
+  // No custom label mapping — GROUP_META is the single source of truth
 
   // Group runs: merge consecutive columns with the same group for the group header row
   const groupRuns = useMemo(() => {
@@ -892,7 +876,7 @@ export default function MoleculeTable({
             {/* Group spans */}
             {groupRuns.map((run, i) => {
               const meta = GROUP_META[run.group] || GROUP_META.molecule
-              const label = groupRunLabels[run.group] || meta.label
+              const label = meta.label
               return (
                 <div
                   key={`${run.group}-${i}`}

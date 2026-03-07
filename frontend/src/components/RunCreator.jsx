@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react'
-import { RUN_TYPES, CALCULATION_SUBTYPES, GROUP_META, ESTIMATED_TIMES, COLUMN_DEFAULTS, ALL_COLUMNS, getDefaultCheckedColumns } from '../lib/columns.js'
+import { RUN_TYPES, CALCULATION_SUBTYPES, GROUP_META, ESTIMATED_TIMES, COLUMN_DEFAULTS, ALL_COLUMNS, getDefaultCheckedColumns, isColumnAvailable, getAvailableColumns } from '../lib/columns.js'
 import ScoringWeightsEditor from './ScoringWeightsEditor.jsx'
 import Badge from './Badge.jsx'
 import BindXLogo from './BindXLogo.jsx'
@@ -103,6 +103,50 @@ function StepIndicator({ current, labels }) {
           </React.Fragment>
         )
       })}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Exhaustiveness slider — conformational search depth
+// ---------------------------------------------------------------------------
+const EXHAUST_STEPS = [
+  { value: 8,  label: 'Fast',       desc: 'Large-scale screening' },
+  { value: 16, label: 'Standard',   desc: 'Balanced exploration' },
+  { value: 32, label: 'Thorough',   desc: 'Best accuracy/speed trade-off' },
+  { value: 64, label: 'Intensive',  desc: 'Final validation, max conformations' },
+]
+
+function ExhaustivenessSlider({ value, onChange }) {
+  const idx = EXHAUST_STEPS.findIndex(s => s.value >= value)
+  const activeIdx = idx === -1 ? EXHAUST_STEPS.length - 1 : idx
+  const active = EXHAUST_STEPS[activeIdx]
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-sm font-medium text-gray-600">Search Depth</label>
+        <span className="text-xs font-semibold text-bx-accent bg-bx-accent/10 px-2 py-0.5 rounded-full">
+          {active.label} ({active.value})
+        </span>
+      </div>
+      <p className="text-[10px] text-gray-400 mb-2">Conformations explored per ligand</p>
+      <input
+        type="range" min={0} max={EXHAUST_STEPS.length - 1} step={1}
+        value={activeIdx}
+        onChange={e => onChange(EXHAUST_STEPS[Number(e.target.value)].value)}
+        className="w-full accent-bx-mint"
+      />
+      <div className="flex justify-between mt-1">
+        {EXHAUST_STEPS.map((s, i) => (
+          <button key={s.value} type="button"
+            onClick={() => onChange(s.value)}
+            className={`text-[10px] transition-colors ${i === activeIdx ? 'text-bx-accent font-semibold' : 'text-gray-400 hover:text-gray-600'}`}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-gray-400 mt-1 text-center italic">{active.desc}</p>
     </div>
   )
 }
@@ -756,21 +800,10 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
 
           <FormSection title="Search Parameters">
             <div className="space-y-3">
-              <div>
-                <div className="flex items-center justify-between text-sm mb-1">
-                  <label className="font-medium text-gray-600">Exhaustiveness</label>
-                  <span className="font-bold text-bx-light-text tabular-nums">{config.exhaustiveness ?? 32}</span>
-                </div>
-                <input
-                  type="range" min={8} max={64} step={8}
-                  value={config.exhaustiveness ?? 32}
-                  onChange={e => set('exhaustiveness', Number(e.target.value))}
-                  className="w-full accent-bx-mint"
-                />
-                <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
-                  {[8, 16, 32, 64].map(v => <span key={v}>{v}</span>)}
-                </div>
-              </div>
+              <ExhaustivenessSlider
+                value={config.exhaustiveness ?? 32}
+                onChange={v => set('exhaustiveness', v)}
+              />
 
               <div className="flex items-center justify-between">
                 <div>
@@ -1401,11 +1434,24 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
 // ---------------------------------------------------------------------------
 // Column checklist for calculation runs (Step 3)
 // ---------------------------------------------------------------------------
-function ColumnChecklist({ calcGroupKey, includedColumns, onChange }) {
+function ColumnChecklist({ calcGroupKey, includedColumns, onChange, config = {} }) {
   const sub = CALCULATION_SUBTYPES.find(s => s.key === calcGroupKey)
   if (!sub || !sub.columns.length) return null
 
-  const colDefs = sub.columns.map(k => ALL_COLUMNS.find(c => c.key === k)).filter(Boolean)
+  // Filter columns based on current config (e.g. engine selection)
+  const availableKeys = getAvailableColumns(calcGroupKey, config)
+  const colDefs = availableKeys.map(k => ALL_COLUMNS.find(c => c.key === k)).filter(Boolean)
+
+  // Auto-clean includedColumns when config changes (e.g. engine switch removes CNN cols)
+  const availableKeyStr = availableKeys.join(',')
+  useEffect(() => {
+    const avail = new Set(availableKeys)
+    const cleaned = includedColumns.filter(k => avail.has(k) || !sub.columns.includes(k))
+    if (cleaned.length !== includedColumns.length) {
+      onChange(cleaned)
+    }
+  }, [availableKeyStr]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const total = colDefs.length
   const checkedCount = colDefs.filter(c => includedColumns.includes(c.key)).length
   const allChecked = checkedCount === total
@@ -1593,12 +1639,11 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
               selected={(config.docking?.engine) === 'vina'}
               onClick={v => onConfigChange({ ...config, docking: { ...config.docking, engine: v } })} />
           </div>
-          <div className="flex items-center gap-4 mt-1">
-            <div>
-              <label className="text-[10px] font-medium text-gray-500">Exhaustiveness</label>
-              <Stepper value={config.docking?.exhaustiveness ?? 32} min={8} max={64}
-                onChange={v => onConfigChange({ ...config, docking: { ...config.docking, exhaustiveness: v } })} />
-            </div>
+          <div className="mt-2">
+            <ExhaustivenessSlider
+              value={config.docking?.exhaustiveness ?? 32}
+              onChange={v => onConfigChange({ ...config, docking: { ...config.docking, exhaustiveness: v } })}
+            />
           </div>
         </div>
       )}
@@ -1619,6 +1664,7 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
           calcGroupKey={config.calculation_types[0]}
           includedColumns={includedColumns}
           onChange={onIncludedColumnsChange}
+          config={config}
         />
       )}
 
@@ -1882,9 +1928,9 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
           {step === 2 && (
             <button
               onClick={() => {
-                // Initialize column checklist for calculation runs
+                // Initialize column checklist for calculation runs (filtered by config options like engine)
                 if (selectedType === 'calculation' && config.calculation_types?.length === 1) {
-                  setIncludedColumns(getDefaultCheckedColumns(config.calculation_types[0]))
+                  setIncludedColumns(getDefaultCheckedColumns(config.calculation_types[0], config))
                 }
                 setStep(3)
               }}

@@ -59,7 +59,7 @@ export const ALL_COLUMNS = [
   { key: 'sa_score', label: 'SA Score', type: 'number', group: 'scoring', width: 70, sortable: true, colorScale: 'lower-better' },
   { key: 'ro3_pass', label: 'Ro3', type: 'boolean', group: 'scoring', width: 50, sortable: true },
   { key: 'inchikey', label: 'InChIKey', type: 'text', group: 'scoring', width: 180, sortable: true },
-  { key: 'ligand_efficiency', label: 'LE', type: 'number', group: 'scoring', width: 55, sortable: true, colorScale: 'higher-better' },
+  { key: 'ligand_efficiency', label: 'LE', type: 'number', group: 'docking', width: 55, sortable: true, colorScale: 'higher-better' },
   // ADMET Properties (from admet run: ADME + toxicity + druglikeness rules + ADMET score)
   { key: 'solubility', label: 'Solubility', type: 'number', group: 'admet', width: 80, sortable: true, colorScale: 'higher-better' },
   { key: 'BBB', label: 'BBB', type: 'number', group: 'admet', width: 60, sortable: true },
@@ -219,9 +219,9 @@ export const RUN_TYPES = [
 
 // Labels come from GROUP_META — single source of truth for naming
 export const CALCULATION_SUBTYPES = [
-  { key: 'docking', icon: 'target', description: 'Dock molecules against the target protein', columns: ['docking_score', 'cnn_score', 'cnn_affinity', 'cnn_vs', 'consensus_ecr'] },
+  { key: 'docking', icon: 'target', description: 'Dock molecules against the target protein', columns: ['docking_score', 'cnn_score', 'cnn_affinity', 'ligand_efficiency', 'cnn_vs', 'consensus_ecr'] },
   { key: 'admet', icon: 'shield', description: 'Predict absorption, distribution, metabolism, excretion, toxicity', columns: ['solubility', 'BBB', 'hERG', 'metabolic_stability', 'oral_bioavailability', 'plasma_protein_binding', 'cns_mpo', 'pfizer_alert', 'gsk_alert', 'brenk_alert', 'ames_mutagenicity', 'hepatotoxicity', 'skin_sensitization', 'carcinogenicity', 'safety_color_code', 'composite_score'] },
-  { key: 'scoring', icon: 'star', description: 'Physicochemical descriptors (MW, LogP, TPSA), drug-likeness rules (Lipinski, QED, Ro3), SA score', columns: ['logP', 'MW', 'HBD', 'HBA', 'TPSA', 'QED', 'lipinski_pass', 'heavy_atom_count', 'sa_score', 'ro3_pass', 'inchikey', 'ligand_efficiency'] },
+  { key: 'scoring', icon: 'star', description: 'Physicochemical descriptors (MW, LogP, TPSA), drug-likeness rules (Lipinski, QED, Ro3), SA score', columns: ['logP', 'MW', 'HBD', 'HBA', 'TPSA', 'QED', 'lipinski_pass', 'heavy_atom_count', 'sa_score', 'ro3_pass', 'inchikey'] },
   { key: 'enrichment', icon: 'layers', description: 'ProLIF interactions, scaffold analysis', columns: ['interactions_count', 'scaffold'] },
   { key: 'clustering', icon: 'grid', description: 'Cluster by scaffold, compute Tanimoto similarity', columns: ['cluster_id', 'scaffold_smiles', 'tanimoto_to_centroid'] },
   { key: 'off_target', icon: 'crosshair', description: 'Assess selectivity against off-target proteins', columns: ['selectivity_score', 'off_target_hits', 'selectivity_ratio'] },
@@ -249,22 +249,47 @@ export const COLUMN_DEFAULTS = {
   heavy_atom_count:  { checked: false },
   ro3_pass:          { checked: false },
   inchikey:          { checked: false },
-  ligand_efficiency: { checked: true, requires: 'Requires a Molecular Docking run' },
+  ligand_efficiency: { checked: true },
   // ADMET — piggyback optionals
   cns_mpo:      { checked: false },
   pfizer_alert: { checked: false },
   gsk_alert:    { checked: false },
   brenk_alert:  { checked: false },
-  // Docking — optional
-  cnn_vs:        { checked: false },
-  consensus_ecr: { checked: false },
+  // Docking — key metrics (GNINA only)
+  cnn_score:     { checked: true, requiresEngine: 'gnina' },
+  cnn_affinity:  { checked: true, requiresEngine: 'gnina' },
+  cnn_vs:        { checked: true, requiresEngine: 'gnina' },
+  consensus_ecr: { checked: true, requiresEngine: 'gnina' },
+}
+
+/**
+ * Check if a column is available given the current run config.
+ * Columns with requiresEngine are only available when the engine matches.
+ */
+export function isColumnAvailable(colKey, config = {}) {
+  const def = COLUMN_DEFAULTS[colKey]
+  if (!def?.requiresEngine) return true
+  const engine = config?.docking?.engine || config?.engine || ''
+  // 'gnina' matches gnina_gpu and gnina_cpu
+  if (def.requiresEngine === 'gnina') {
+    return engine.startsWith('gnina')
+  }
+  return engine === def.requiresEngine
+}
+
+/**
+ * Get the list of available columns for a calculation subtype given the config.
+ */
+export function getAvailableColumns(calcKey, config = {}) {
+  const sub = CALCULATION_SUBTYPES.find(s => s.key === calcKey)
+  if (!sub) return []
+  return sub.columns.filter(k => isColumnAvailable(k, config))
 }
 
 /**
  * Get default checked column keys for a given calculation subtype.
  */
-export function getDefaultCheckedColumns(calcKey) {
-  const sub = CALCULATION_SUBTYPES.find(s => s.key === calcKey)
-  if (!sub) return []
-  return sub.columns.filter(k => COLUMN_DEFAULTS[k]?.checked ?? true)
+export function getDefaultCheckedColumns(calcKey, config = {}) {
+  const available = getAvailableColumns(calcKey, config)
+  return available.filter(k => COLUMN_DEFAULTS[k]?.checked ?? true)
 }

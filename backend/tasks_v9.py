@@ -879,7 +879,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
 
             elif calc_type == "scoring":
                 from pipeline.scoring import (
-                    compute_properties, compute_sa_score, compute_ligand_efficiency,
+                    compute_properties, compute_sa_score,
                 )
                 scored = 0
                 for mol in molecules:
@@ -895,19 +895,10 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 _db_sync(_store_property(
                                     mol["id"], run_uuid, "sa_score", {"sa_score": sa}
                                 ))
-                        # Ligand Efficiency (if docking score available)
-                        if _inc is None or "ligand_efficiency" in _inc:
-                            docking_score = mol.get("docking_score") or mol.get("affinity")
-                            ha_count = props.get("heavy_atom_count")
-                            le = compute_ligand_efficiency(docking_score, ha_count)
-                            if le is not None:
-                                _db_sync(_store_property(
-                                    mol["id"], run_uuid, "ligand_efficiency", {"ligand_efficiency": le}
-                                ))
                         scored += 1
                     except Exception as e:
                         logger.warning("Scoring failed for %s: %s", mol["smiles"], e)
-                _write_log(run_id, "info", f"Scoring complete: {scored}/{len(molecules)} molecules scored (+ SA, LE, InChIKey, Ro3)")
+                _write_log(run_id, "info", f"Scoring complete: {scored}/{len(molecules)} molecules scored (+ SA, InChIKey, Ro3)")
                 results["scoring"] = f"{len(molecules)} molecules scored"
 
             elif calc_type == "docking":
@@ -964,13 +955,18 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     # vina      → local Vina only
                     # auto      → GPU → GNINA → Vina → mock
 
+                    # Prepare receptor: convert PDB → PDBQT (required for Vina, accepted by GNINA)
+                    from pipeline.prepare import prepare_receptor
+                    receptor_pdbqt = prepare_receptor(pdb_path, tmp_path)
+                    _write_log(run_id, "info", f"Receptor prepared: {receptor_pdbqt.name}")
+
                     # Progress callback
                     def progress_cb(pct, msg):
                         _db_sync(_update_run(run_id, current_step=msg, progress=base_pct + int(pct / total_steps)))
 
                     from pipeline.docking import dock_all_ligands
                     dock_results = dock_all_ligands(
-                        receptor_pdbqt=pdb_path,
+                        receptor_pdbqt=receptor_pdbqt,
                         ligands=ligands,
                         center=pocket_center,
                         work_dir=tmp_path,
@@ -995,11 +991,15 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         docking_props = {
                             "affinity": dr.get("affinity"),
                             "vina_score": dr.get("vina_score"),
-                            "cnn_score": dr.get("cnn_score"),
-                            "cnn_affinity": dr.get("cnn_affinity"),
                             "consensus_rank": dr.get("consensus_rank"),
+                            "consensus_ecr": dr.get("consensus_ecr"),
                             "docking_engine": dr.get("docking_engine"),
                         }
+                        # CNN metrics only present for GNINA engine
+                        if "cnn_score" in dr:
+                            docking_props["cnn_score"] = dr["cnn_score"]
+                            docking_props["cnn_affinity"] = dr.get("cnn_affinity")
+                            docking_props["cnn_vs"] = dr.get("cnn_vs")
                         # Read pose 3D coordinates:
                         # 1. From file path (CPU docking — GNINA/Vina)
                         # 2. From inline molblock (GPU docking — RunPod)
@@ -1021,6 +1021,32 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 filtered_dock[always_keep] = docking_props[always_keep]
                         _db_sync(_store_property(mol["id"], run_uuid, "docking", filtered_dock))
                         stored += 1
+
+                    # Ligand Efficiency (computed after docking scores are available)
+                    if _inc is None or "ligand_efficiency" in _inc:
+                        from pipeline.scoring import compute_ligand_efficiency, compute_properties
+                        le_count = 0
+                        for dr in dock_results:
+                            mol = name_to_mol.get(dr.get("name"))
+                            if not mol:
+                                continue
+                            docking_score_val = dr.get("affinity")
+                            if docking_score_val is None:
+                                continue
+                            # Get heavy atom count from molecule
+                            try:
+                                props = compute_properties(mol["smiles"])
+                                ha_count = props.get("heavy_atom_count")
+                            except Exception:
+                                ha_count = None
+                            le = compute_ligand_efficiency(docking_score_val, ha_count)
+                            if le is not None:
+                                _db_sync(_store_property(
+                                    mol["id"], run_uuid, "ligand_efficiency", {"ligand_efficiency": le}
+                                ))
+                                le_count += 1
+                        if le_count:
+                            _write_log(run_id, "info", f"Ligand efficiency computed for {le_count} molecules")
 
                     _write_log(run_id, "info",
                         f"Docking complete: {stored}/{len(molecules)} molecules docked")
