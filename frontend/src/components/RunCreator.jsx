@@ -32,6 +32,9 @@ function RunTypeIcon({ icon, className = 'w-5 h-5' }) {
     case 'sparkles':
       return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
         d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" /></svg>
+    case 'trophy':
+      return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+        d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-4.5A3.375 3.375 0 0013.125 10.875h-2.25A3.375 3.375 0 007.5 14.25v4.5m9-13.5V3.375c0-.621-.504-1.125-1.125-1.125h-6.75C8.004 2.25 7.5 2.754 7.5 3.375V5.25m9 0h1.875c.621 0 1.125.504 1.125 1.125v2.25c0 1.035-.84 1.875-1.875 1.875H16.5m-9-5.25H5.625C5.004 5.25 4.5 5.754 4.5 6.375v2.25c0 1.035.84 1.875 1.875 1.875H7.5" /></svg>
     case 'grid':
       return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
         d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
@@ -187,27 +190,18 @@ function Stepper({ value, min, max, onChange }) {
 // ---------------------------------------------------------------------------
 const DEFAULT_CONFIGS = {
   import:      {
-    sourceMode: 'external', format: 'sdf', sourceName: '', databases: [], maxPerSource: 50,
-    filters: {
-      mw_min: 200, mw_max: 500, logp_min: -1, logp_max: 5,
-      hbd_max: 5, hba_max: 10, tpsa_min: 0, tpsa_max: 140,
-      rotatable_max: 10, qed_min: 0.3, lipinski: true, pains: true,
-      // ChEMBL-specific
-      activity_types: ['IC50', 'Ki'], activity_cutoff: 10000, pchembl_min: 5.0,
-      // PubChem-specific
-      pubchem_activity_type: 'IC50', pubchem_active_only: true,
-      // Enamine-specific
-      scaffold_complexity: 'mixed',
-      // Fragment-specific
-      ro3_strict: true,
-    },
+    sourceMode: 'database', database: null, databases: [], maxPerSource: 100,
+    zinc_subset: 'in-stock',
+    filters: {},
   },
   calculation: {
     calculation_types: [],
     // Per-subtype configs
     docking: { engine: 'gnina_gpu', exhaustiveness: 32, num_modes: 9, seed: 0, boxSizeX: '', boxSizeY: '', boxSizeZ: '' },
-    admet: { properties: ['logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'CYP', 'oral_bioavailability', 'ames'] },
-    scoring: { weights: { docking_score: 0.30, cnn_score: 0.20, logP: 0.15, solubility: 0.10, selectivity: 0.15, novelty: 0.10 } },
+    adme: {},
+    toxicity: {},
+    scoring: {},
+    composite: { weights: { docking_score: 0.30, cnn_score: 0.20, logP: 0.15, solubility: 0.10, selectivity: 0.15, novelty: 0.10 } },
     enrichment: { analyses: ['prolif', 'clustering', 'scaffold', 'pharmacophore'] },
     clustering: { method: 'butina', cutoff: 0.5 },
     off_target: {},
@@ -526,7 +520,7 @@ function ImportFilters({ filters, onChange, selectedDBs }) {
 // ---------------------------------------------------------------------------
 // Step 2: Configuration forms
 // ---------------------------------------------------------------------------
-function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEngines }) {
+function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEngines, project }) {
   const set = (key, value) => onChange({ ...config, [key]: value })
 
   // Auto-switch engine if GPU is unavailable and current selection is gnina_gpu
@@ -551,169 +545,47 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
 
   switch (runType) {
     case 'import': {
-      const DB_OPTIONS = [
-        { key: 'chembl', label: 'ChEMBL', desc: 'Known bioactive compounds for your target', icon: '🧬', needsTarget: true },
-        { key: 'pubchem', label: 'PubChem', desc: 'NCBI compound database with bioactivity data', icon: '🔬', needsTarget: true },
-        { key: 'zinc', label: 'ZINC20', desc: 'Drug-like commercially available molecules', icon: '💊' },
-        { key: 'enamine', label: 'Enamine REAL', desc: 'Virtual combinatorial library (37B+ compounds)', icon: '🏭' },
-        { key: 'fragments', label: 'Fragment Library', desc: 'Rule-of-3 fragments for FBDD screening', icon: '🧩' },
+      const IMPORT_SOURCES = [
+        { key: 'zinc', label: 'ZINC20', desc: 'Drug-like commercially available molecules (~389M)', icon: '💊', sourceMode: 'database' },
+        { key: 'chembl', label: 'ChEMBL', desc: 'Known bioactive compounds for your target', icon: '🧬', sourceMode: 'database', needsTarget: true },
+        { key: 'pubchem', label: 'PubChem', desc: 'NCBI compound database with bioactivity data', icon: '🔬', sourceMode: 'database', needsTarget: true },
+        { key: 'enamine', label: 'Enamine REAL', desc: 'Virtual combinatorial library (37B+ compounds)', icon: '🏭', sourceMode: 'database' },
+        { key: 'fragments', label: 'Fragment Library', desc: 'Rule-of-3 fragments for FBDD screening', icon: '🧩', sourceMode: 'database' },
+        { key: 'external', label: 'Upload File', desc: 'Import from SDF, SMILES, or CSV file', icon: '📁', sourceMode: 'external' },
+        { key: 'internal', label: 'Phase Bookmarks', desc: 'Import bookmarked molecules from previous phase', icon: '🔖', sourceMode: 'internal' },
       ]
-      const selectedDBs = config.databases || []
-      const toggleDB = (key) => {
-        const updated = selectedDBs.includes(key) ? selectedDBs.filter(k => k !== key) : [...selectedDBs, key]
-        onChange({ ...config, databases: updated })
-      }
+      const selectedSource = config.database || null
 
       return (
         <div className="space-y-4">
-          <FormSection title="Source">
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { value: 'database', label: 'Public Databases', icon: '🗄️' },
-                { value: 'external', label: 'Upload File', icon: '📁' },
-                { value: 'internal', label: 'Phase Bookmarks', icon: '🔖' },
-              ].map(opt => (
-                <label key={opt.value}
-                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 cursor-pointer transition-all text-center ${
-                    config.sourceMode === opt.value
+          <FormSection title="Select a source">
+            <div className="space-y-2">
+              {IMPORT_SOURCES.map(src => (
+                <button key={src.key}
+                  onClick={() => onChange({ ...config, database: src.key, sourceMode: src.sourceMode, databases: [src.key] })}
+                  className={`w-full flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
+                    selectedSource === src.key
                       ? 'border-bx-mint bg-emerald-50'
-                      : 'border-gray-100 hover:border-gray-200'
+                      : 'border-gray-100 hover:border-gray-200 hover:shadow-sm'
                   }`}
                 >
-                  <input
-                    type="radio"
-                    checked={config.sourceMode === opt.value}
-                    onChange={() => set('sourceMode', opt.value)}
-                    className="sr-only"
-                  />
-                  <span className="text-lg">{opt.icon}</span>
-                  <span className="text-xs font-semibold text-gray-700">{opt.label}</span>
-                </label>
+                  <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 border-2 transition-colors ${
+                    selectedSource === src.key ? 'border-bx-mint bg-bx-surface' : 'border-gray-300'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span>{src.icon}</span>
+                      <span className="text-sm font-semibold text-gray-800">{src.label}</span>
+                      {src.needsTarget && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded font-medium">target-aware</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">{src.desc}</p>
+                  </div>
+                </button>
               ))}
             </div>
           </FormSection>
-
-          {config.sourceMode === 'database' && (
-            <>
-              <FormSection title="Select databases">
-                <div className="space-y-2">
-                  {DB_OPTIONS.map(db => (
-                    <label key={db.key}
-                      className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
-                        selectedDBs.includes(db.key)
-                          ? 'border-bx-mint bg-emerald-50'
-                          : 'border-gray-100 hover:border-gray-200'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedDBs.includes(db.key)}
-                        onChange={() => toggleDB(db.key)}
-                        className="accent-bx-mint mt-0.5"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span>{db.icon}</span>
-                          <span className="text-sm font-semibold text-gray-800">{db.label}</span>
-                          {db.needsTarget && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded font-medium">target-aware</span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-500 mt-0.5">{db.desc}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </FormSection>
-              <FormSection title="Max compounds per source">
-                <input
-                  type="number"
-                  value={config.maxPerSource || 50}
-                  onChange={e => set('maxPerSource', parseInt(e.target.value) || 50)}
-                  min={10} max={500} step={10}
-                  className="w-32 text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white
-                             focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint"
-                />
-              </FormSection>
-
-              {/* Import Filters */}
-              <ImportFilters
-                filters={config.filters || {}}
-                onChange={f => set('filters', f)}
-                selectedDBs={selectedDBs}
-              />
-            </>
-          )}
-
-          {config.sourceMode === 'external' && (
-            <>
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer
-                           hover:border-bx-mint/40 hover:bg-blue-50/30 transition-all group"
-              >
-                {config._file ? (
-                  <div className="flex items-center justify-center gap-2">
-                    <svg className="w-5 h-5 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span className="text-sm font-semibold text-gray-700">{config._file.name}</span>
-                    <span className="text-xs text-gray-400">({(config._file.size / 1024).toFixed(1)} KB)</span>
-                  </div>
-                ) : (
-                  <>
-                    <svg className="w-9 h-9 text-gray-300 mx-auto mb-2 group-hover:text-bx-light-text/40 transition-colors"
-                      fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <p className="text-sm font-medium text-gray-500 mb-1">Drop file here or click to browse</p>
-                    <div className="flex justify-center gap-2 mt-2">
-                      {['SDF', 'SMILES', 'CSV'].map(f => (
-                        <span key={f} className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500">.{f.toLowerCase()}</span>
-                      ))}
-                    </div>
-                  </>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".sdf,.smi,.smiles,.csv"
-                  className="hidden"
-                  onChange={e => {
-                    const f = e.target.files?.[0]
-                    if (f) onChange({ ...config, _file: f, sourceName: config.sourceName || f.name })
-                  }}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">Source name (optional)</label>
-                <input
-                  type="text"
-                  value={config.sourceName || ''}
-                  onChange={e => set('sourceName', e.target.value)}
-                  placeholder="e.g. ChEMBL EGFR batch 1"
-                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white
-                             focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint"
-                />
-              </div>
-            </>
-          )}
-
-          {config.sourceMode === 'internal' && (
-            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                </svg>
-                <p className="text-sm font-semibold text-blue-700">From previous phase (bookmarked)</p>
-              </div>
-              <p className="text-sm text-blue-500">
-                Imports all bookmarked molecules from the previous phase into this one.
-              </p>
-            </div>
-          )}
         </div>
       )
     }
@@ -764,6 +636,17 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
 
           {/* Per-subtype config panels */}
           {/* Docking + scoring config panels moved to Step 3 (Review) */}
+
+          {selectedCalc === 'docking' && !project?.receptor_prep_report && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 flex items-start gap-2">
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span>
+                <strong>Receptor not prepared.</strong> Go to Target Setup and click "Prepare Receptor" before running docking.
+              </span>
+            </div>
+          )}
 
           {!selectedCalc && (
             <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-700">
@@ -884,6 +767,14 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
                       </button>
                     ))}
                   </div>
+                  {config.cnn_scoring === 'refinement' && (
+                    <div className="flex items-center gap-1.5 mt-2 text-[10px] text-amber-600 bg-amber-50 rounded-lg px-2.5 py-1.5 border border-amber-200">
+                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      ~3x slower, may reject ~17% of molecules (positive Vina scores)
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -910,76 +801,23 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
         </div>
       )
 
-    case 'admet': {
-      const allProps = [
-        { key: 'logP',                 label: 'LogP',                  desc: 'Lipophilicity' },
-        { key: 'solubility',           label: 'Solubility',            desc: 'Aqueous solubility' },
-        { key: 'BBB',                  label: 'BBB Penetration',       desc: 'Blood-brain barrier' },
-        { key: 'hERG',                 label: 'hERG Risk',             desc: 'Cardiotoxicity risk' },
-        { key: 'metabolic_stability',  label: 'Metabolic Stability',   desc: 'CYP stability' },
-        { key: 'CYP',                  label: 'CYP Inhibition',        desc: '5 isoforms' },
-        { key: 'oral_bioavailability', label: 'Oral Bioavailability',  desc: 'F% prediction' },
-        { key: 'ames',                 label: 'Ames Mutagenicity',     desc: 'Genotoxicity flag' },
-      ]
-      const all = config.properties || []
-      const allSelected = allProps.every(p => all.includes(p.key))
-      return (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Properties</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => onChange({ ...config, properties: allProps.map(p => p.key) })}
-                className={`text-sm px-2 py-1 rounded font-medium transition-colors ${
-                  allSelected ? 'bg-bx-surface text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => onChange({ ...config, properties: [] })}
-                className="text-sm px-2 py-1 rounded font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-              >
-                None
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-1.5">
-            {allProps.map(prop => {
-              const checked = all.includes(prop.key)
-              return (
-                <label key={prop.key}
-                  className={`flex items-start gap-2 p-2.5 rounded-xl cursor-pointer border transition-all ${
-                    checked
-                      ? 'border-green-200 bg-green-50'
-                      : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleArr('properties', prop.key)}
-                    className="accent-green-600 mt-0.5 flex-shrink-0"
-                  />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-700">{prop.label}</p>
-                    <p className="text-[10px] text-gray-400">{prop.desc}</p>
-                  </div>
-                </label>
-              )
-            })}
-          </div>
-        </div>
-      )
-    }
+    case 'adme':
+    case 'toxicity':
+      return null  // No extra config — column selection handled in Step 3 checklist
 
-    case 'scoring': {
-      const weights = config.weights || DEFAULT_CONFIGS.scoring.weights
+    case 'scoring':
+      return null  // No extra config — physicochemical descriptors only
+
+    case 'composite': {
+      const weights = config.weights || DEFAULT_CONFIGS.composite.weights
       const total = Object.values(weights).reduce((a, b) => a + b, 0)
       const totalOk = Math.abs(total - 1.0) < 0.01
       return (
         <div className="space-y-4">
           <FormSection title="Score Weights">
+            <p className="text-xs text-gray-400 mb-2">
+              Adjust the importance of each metric. The composite score will aggregate results from your previous runs.
+            </p>
             {Object.entries(weights).map(([key, val]) => (
               <div key={key}>
                 <div className="flex items-center justify-between text-sm mb-1">
@@ -1006,7 +844,7 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
               {totalOk ? ' — OK' : ' — must sum to 1.0'}
             </div>
             <button
-              onClick={() => onChange({ ...config, weights: DEFAULT_CONFIGS.scoring.weights })}
+              onClick={() => onChange({ ...config, weights: DEFAULT_CONFIGS.composite.weights })}
               className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors font-medium"
             >
               Reset defaults
@@ -1527,6 +1365,292 @@ function ColumnChecklist({ calcGroupKey, includedColumns, onChange, config = {} 
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ZINC20 subsets (synced with backend ZINC20_SUBSETS)
+// ---------------------------------------------------------------------------
+const ZINC20_SUBSETS = [
+  { key: 'in-stock', label: 'In Stock', desc: '~12M', count: 12000000 },
+  { key: 'for-sale', label: 'For Sale', desc: '~389M', count: 389000000 },
+  { key: 'fda', label: 'FDA Approved', desc: '~1.4K', count: 1400 },
+  { key: 'in-trials', label: 'In Trials', desc: '~5.8K', count: 5800 },
+  { key: 'in-vivo', label: 'In Vivo', desc: '~115K', count: 115000 },
+  { key: 'in-vitro', label: 'In Vitro Active', desc: '~276K', count: 276000 },
+  { key: 'natural-products', label: 'Natural Products', desc: '~80K', count: 80000 },
+  { key: 'biogenic', label: 'Biogenic', desc: '~135K', count: 135000 },
+  { key: 'clean', label: 'PAINS-Filtered', desc: '~125M', count: 125000000 },
+  { key: 'endogenous', label: 'Metabolites', desc: '~50K', count: 50000 },
+  { key: 'world', label: 'World Approved', desc: '~3.4K', count: 3400 },
+]
+
+// ---------------------------------------------------------------------------
+// Import source-specific configuration (displayed in Step 3 / Review)
+// ---------------------------------------------------------------------------
+function ImportSourceConfig({ config, onConfigChange }) {
+  const db = config.database
+  const f = config.filters || {}
+  const setFilter = (key, val) => onConfigChange({ ...config, filters: { ...f, [key]: val } })
+  const set = (key, val) => onConfigChange({ ...config, [key]: val })
+
+  if (db === 'zinc') {
+    // Multi-subset: zinc_subset is a "+" joined string (e.g. "in-stock+fda")
+    const selectedSubsets = (config.zinc_subset || 'in-stock').split('+').filter(Boolean)
+    const toggleSubset = (key) => {
+      let next
+      if (selectedSubsets.includes(key)) {
+        next = selectedSubsets.filter(k => k !== key)
+      } else {
+        next = [...selectedSubsets, key]
+      }
+      if (next.length === 0) next = ['in-stock'] // at least one required
+      set('zinc_subset', next.join('+'))
+    }
+    // Approximate total count (union — may overlap, shown as "up to")
+    const approxCount = selectedSubsets.reduce((sum, k) => {
+      const s = ZINC20_SUBSETS.find(x => x.key === k)
+      return sum + (s?.count || 0)
+    }, 0)
+    const formatCount = (n) => {
+      if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
+      if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+      if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`
+      return String(n)
+    }
+
+    return (
+      <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-4">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">ZINC20 Configuration</p>
+
+        {/* Subsets — multi-select checkboxes */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-gray-600">Subsets</p>
+            <p className="text-[10px] tabular-nums text-gray-500">
+              ~<span className="font-semibold text-gray-700">{formatCount(approxCount)}</span> compounds available
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {ZINC20_SUBSETS.map(s => {
+              const checked = selectedSubsets.includes(s.key)
+              return (
+                <label key={s.key}
+                  className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-colors text-xs ${
+                    checked
+                      ? 'bg-blue-50 border-blue-200 text-blue-800'
+                      : 'bg-white border-gray-150 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  <input type="checkbox" checked={checked} onChange={() => toggleSubset(s.key)}
+                    className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500/30" />
+                  <span className="font-medium">{s.label}</span>
+                  <span className="text-[10px] text-gray-400 ml-auto">{s.desc}</span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Property filters */}
+        <div>
+          <p className="text-xs font-medium text-gray-600 mb-2">Property Filters</p>
+          <div className="grid grid-cols-2 gap-3">
+            <RangeInputDual label="MW (Da)" min={0} max={1000} step={10}
+              valueMin={f.mwt_min ?? 200} valueMax={f.mwt_max ?? 500}
+              onChangeMin={v => setFilter('mwt_min', v)} onChangeMax={v => setFilter('mwt_max', v)} unit=" Da" />
+            <RangeInputDual label="LogP" min={-5} max={10} step={0.5}
+              valueMin={f.logp_min ?? -1} valueMax={f.logp_max ?? 5}
+              onChangeMin={v => setFilter('logp_min', v)} onChangeMax={v => setFilter('logp_max', v)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            <RangeInput label="HBD max" min={0} max={15} value={f.hbd_max ?? 5} onChange={v => setFilter('hbd_max', v)} />
+            <RangeInput label="HBA max" min={0} max={20} value={f.hba_max ?? 10} onChange={v => setFilter('hba_max', v)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            <RangeInputDual label="TPSA (A²)" min={0} max={300} step={5}
+              valueMin={f.tpsa_min ?? 0} valueMax={f.tpsa_max ?? 140}
+              onChangeMin={v => setFilter('tpsa_min', v)} onChangeMax={v => setFilter('tpsa_max', v)} unit=" A²" />
+            <RangeInput label="RotBonds max" min={0} max={20} value={f.rotatable_max ?? 10} onChange={v => setFilter('rotatable_max', v)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            <RangeInputDual label="Rings" min={0} max={10} step={1}
+              valueMin={f.num_rings_min ?? 0} valueMax={f.num_rings_max ?? 6}
+              onChangeMin={v => setFilter('num_rings_min', v)} onChangeMax={v => setFilter('num_rings_max', v)} />
+            <RangeInputDual label="Heavy atoms" min={0} max={80} step={1}
+              valueMin={f.num_heavy_atoms_min ?? 10} valueMax={f.num_heavy_atoms_max ?? 50}
+              onChangeMin={v => setFilter('num_heavy_atoms_min', v)} onChangeMax={v => setFilter('num_heavy_atoms_max', v)} />
+          </div>
+        </div>
+
+        {/* Max compounds — after filters */}
+        <div>
+          <p className="text-xs font-medium text-gray-600 mb-1">Max compounds to import</p>
+          <input type="number" min={10} max={1000000} step={10}
+            value={config.maxPerSource || 100}
+            onChange={e => set('maxPerSource', Math.max(10, parseInt(e.target.value) || 100))}
+            className="w-40 text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white tabular-nums
+                       focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint" />
+          <p className="text-[10px] text-gray-400 mt-1">Up to 1,000,000 — large imports may take several minutes</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (db === 'chembl') {
+    return (
+      <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-4">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">ChEMBL Configuration</p>
+        <div>
+          <p className="text-xs font-medium text-gray-600 mb-1">Max compounds</p>
+          <input type="number" min={10} max={10000} step={10}
+            value={config.maxPerSource || 50}
+            onChange={e => set('maxPerSource', Math.max(10, parseInt(e.target.value) || 50))}
+            className="w-32 text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white tabular-nums
+                       focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-[10px] text-gray-500 font-medium mb-1">Activity types</p>
+            <div className="flex flex-wrap gap-1.5">
+              {['IC50', 'Ki', 'EC50', 'Kd'].map(at => {
+                const active = (f.activity_types || ['IC50', 'Ki']).includes(at)
+                return (
+                  <button key={at} onClick={() => {
+                    const arr = f.activity_types || ['IC50', 'Ki']
+                    setFilter('activity_types', active ? arr.filter(x => x !== at) : [...arr, at])
+                  }}
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-colors ${
+                      active ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-blue-200'
+                    }`}
+                  >{at}</button>
+                )
+              })}
+            </div>
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-500 font-medium mb-1">Activity cutoff (nM)</p>
+            <input type="number" min={1} max={100000} step={100}
+              value={f.activity_cutoff ?? 10000}
+              onChange={e => setFilter('activity_cutoff', parseInt(e.target.value) || 10000)}
+              className="w-28 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white tabular-nums
+                         focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint" />
+          </div>
+        </div>
+        <RangeInput label="pChEMBL min" min={3} max={10} step={0.1}
+          value={f.pchembl_min ?? 5.0} onChange={v => setFilter('pchembl_min', v)} />
+      </div>
+    )
+  }
+
+  if (db === 'pubchem') {
+    return (
+      <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-4">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">PubChem Configuration</p>
+        <div>
+          <p className="text-xs font-medium text-gray-600 mb-1">Max compounds</p>
+          <input type="number" min={10} max={10000} step={10}
+            value={config.maxPerSource || 50}
+            onChange={e => set('maxPerSource', Math.max(10, parseInt(e.target.value) || 50))}
+            className="w-32 text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white tabular-nums
+                       focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-[10px] text-gray-500 font-medium mb-1">Activity type</p>
+            <select
+              value={f.pubchem_activity_type || 'IC50'}
+              onChange={e => setFilter('pubchem_activity_type', e.target.value)}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white
+                         focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint"
+            >
+              {['IC50', 'Ki', 'EC50', 'Potency'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <FilterToggle label="Active only" checked={f.pubchem_active_only ?? true}
+            onChange={v => setFilter('pubchem_active_only', v)} description="Only fetch 'active' compounds" />
+        </div>
+      </div>
+    )
+  }
+
+  if (db === 'enamine') {
+    return (
+      <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-4">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Enamine REAL Configuration</p>
+        <div>
+          <p className="text-xs font-medium text-gray-600 mb-1">Max compounds</p>
+          <input type="number" min={10} max={10000} step={10}
+            value={config.maxPerSource || 500}
+            onChange={e => set('maxPerSource', Math.max(10, parseInt(e.target.value) || 500))}
+            className="w-32 text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white tabular-nums
+                       focus:outline-none focus:ring-2 focus:ring-bx-mint/30 focus:border-bx-mint" />
+        </div>
+        <div>
+          <p className="text-[10px] text-gray-500 font-medium mb-1">Scaffold complexity</p>
+          <div className="flex gap-2">
+            {['2-fragment', '3-fragment', 'mixed'].map(sc => (
+              <button key={sc} onClick={() => setFilter('scaffold_complexity', sc)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                  (f.scaffold_complexity || 'mixed') === sc ? 'bg-orange-100 border-orange-300 text-orange-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-orange-200'
+                }`}
+              >{sc}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (db === 'fragments') {
+    return (
+      <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-4">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Fragment Library Configuration</p>
+        <FilterToggle label="Rule-of-3 strict" checked={f.ro3_strict ?? true}
+          onChange={v => setFilter('ro3_strict', v)}
+          description="MW<=300, logP<=3, HBD<=3, HBA<=3, RotBonds<=3" />
+      </div>
+    )
+  }
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Docking time/cost estimate (benchmark-based)
+// ---------------------------------------------------------------------------
+function DockingEstimate({ nMols, exhaustiveness = 8, cnnScoring = 'rescore' }) {
+  if (!nMols || nMols <= 0) return null
+
+  // Throughput model (from GNINA GPU benchmark 2026-03-10)
+  const baseThroughput = Math.min(30, 10 + 0.068 * nMols) // mol/min, sub-linear scaling
+  const exhMultiplier = 1 + (exhaustiveness - 8) * 0.0125 // exh=32 → 1.3x
+  const refMultiplier = cnnScoring === 'refinement' ? 2.7 : 1.0
+
+  const effectiveThroughput = baseThroughput / (exhMultiplier * refMultiplier)
+  const timeMin = nMols / effectiveThroughput
+  const timeSec = timeMin * 60
+  const cost = timeSec * 0.00016
+
+  const fmtTime = timeMin < 1 ? `${Math.round(timeSec)}s` : timeMin < 60 ? `~${Math.round(timeMin)} min` : `~${(timeMin / 60).toFixed(1)}h`
+  const fmtCost = cost < 0.01 ? `<$0.01` : `~$${cost.toFixed(2)}`
+  const fmtThroughput = `${effectiveThroughput.toFixed(0)} mol/min`
+
+  return (
+    <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 space-y-1">
+      <p className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wide">GPU Estimate</p>
+      <div className="flex items-center gap-4 text-sm">
+        <div>
+          <span className="text-indigo-500">Time: </span>
+          <span className="font-bold text-indigo-800">{fmtTime}</span>
+        </div>
+        <div>
+          <span className="text-indigo-500">Cost: </span>
+          <span className="font-bold text-indigo-800">{fmtCost}</span>
+        </div>
+        <div className="ml-auto text-xs text-indigo-400">{fmtThroughput}</div>
+      </div>
+    </div>
+  )
+}
+
 // Step 3: Confirmation
 // ---------------------------------------------------------------------------
 function ConfirmationView({ runType, config, selectedCount, includedColumns, onIncludedColumnsChange, runAllMolecules, onRunAllMoleculesChange, onConfigChange, gpuEngines }) {
@@ -1536,22 +1660,13 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
 
   const configLines = []
   if (runType === 'import') {
-    if (config.sourceMode === 'database') {
-      const dbs = config.databases || []
-      configLines.push(`Source: Public Databases (${dbs.join(', ')})`)
-      configLines.push(`Max per source: ${config.maxPerSource || 50}`)
-      // Filter summary
-      const f = config.filters || {}
-      const filterParts = []
-      filterParts.push(`MW ${f.mw_min ?? 200}–${f.mw_max ?? 500}`)
-      filterParts.push(`logP ${f.logp_min ?? -1}–${f.logp_max ?? 5}`)
-      if (f.lipinski) filterParts.push('Lipinski')
-      if (f.pains) filterParts.push('PAINS')
-      configLines.push(`Filters: ${filterParts.join(', ')}`)
-      if (dbs.includes('chembl')) configLines.push(`ChEMBL: ${(f.activity_types || []).join('/')} ≤${f.activity_cutoff ?? 10000}nM, pChEMBL≥${f.pchembl_min ?? 5.0}`)
+    const db = config.database
+    const sourceLabels = { zinc: 'ZINC20', chembl: 'ChEMBL', pubchem: 'PubChem', enamine: 'Enamine REAL', fragments: 'Fragment Library', external: 'File Upload', internal: 'Phase Bookmarks' }
+    if (config.sourceMode === 'database' && db) {
+      configLines.push(`Source: ${sourceLabels[db] || db}`)
     } else if (config.sourceMode === 'internal') {
       configLines.push('Source: Phase bookmarks')
-    } else {
+    } else if (config.sourceMode === 'external') {
       configLines.push(`Source: File upload${config._file ? ` (${config._file.name})` : ''}`)
     }
     if (config.sourceName) configLines.push(`Label: ${config.sourceName}`)
@@ -1568,14 +1683,20 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
     const boxX = config.boxSizeX || 'auto', boxY = config.boxSizeY || 'auto', boxZ = config.boxSizeZ || 'auto'
     configLines.push(`Box: ${boxX} x ${boxY} x ${boxZ} A`)
   }
-  if (runType === 'admet') {
-    const props = config.properties || []
-    configLines.push(`${props.length} properties: ${props.slice(0, 3).join(', ')}${props.length > 3 ? ` +${props.length - 3} more` : ''}`)
+  if (runType === 'adme') {
+    configLines.push('Full pharmacokinetics profiling (absorption, distribution, metabolism, excretion)')
+  }
+  if (runType === 'toxicity') {
+    configLines.push('Full toxicological risk assessment (hERG, Ames, hepatotoxicity, carcinogenicity)')
   }
   if (runType === 'scoring') {
+    configLines.push('Physicochemical descriptors (MW, LogP, TPSA, QED, Lipinski, SA Score)')
+  }
+  if (runType === 'composite') {
     const ws = config.weights || {}
     const total = Object.values(ws).reduce((a, b) => a + b, 0)
     configLines.push(`${Object.keys(ws).length} score weights, total: ${total.toFixed(2)}`)
+    configLines.push('Aggregates results from previous runs (docking, ADME, scoring, etc.)')
   }
   if (runType === 'enrichment') {
     const a = config.analyses || []
@@ -1619,6 +1740,57 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
         ))}
       </div>
 
+      {/* Import source-specific config (editable in review/Step 3) */}
+      {runType === 'import' && config.sourceMode === 'database' && onConfigChange && (
+        <ImportSourceConfig config={config} onConfigChange={onConfigChange} />
+      )}
+
+      {/* Import file upload (in Step 3 for external source) */}
+      {runType === 'import' && config.sourceMode === 'external' && onConfigChange && (
+        <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-3">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">File Upload</p>
+          <div
+            onClick={() => document.getElementById('import-file-input')?.click()}
+            className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer
+                       hover:border-bx-mint/40 hover:bg-blue-50/30 transition-all group"
+          >
+            {config._file ? (
+              <div className="flex items-center justify-center gap-2">
+                <svg className="w-5 h-5 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-sm font-semibold text-gray-700">{config._file.name}</span>
+                <span className="text-xs text-gray-400">({(config._file.size / 1024).toFixed(1)} KB)</span>
+              </div>
+            ) : (
+              <>
+                <svg className="w-9 h-9 text-gray-300 mx-auto mb-2 group-hover:text-bx-light-text/40 transition-colors"
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <p className="text-sm font-medium text-gray-500 mb-1">Drop file here or click to browse</p>
+                <div className="flex justify-center gap-2 mt-2">
+                  {['SDF', 'SMILES', 'CSV'].map(f => (
+                    <span key={f} className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500">.{f.toLowerCase()}</span>
+                  ))}
+                </div>
+              </>
+            )}
+            <input
+              id="import-file-input"
+              type="file"
+              accept=".sdf,.smi,.smiles,.csv"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0]
+                if (f) onConfigChange({ ...config, _file: f, sourceName: config.sourceName || f.name })
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Per-subtype config panels (editable in review) */}
       {runType === 'calculation' && config.calculation_types?.[0] === 'docking' && onConfigChange && (
         <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-3">
@@ -1645,15 +1817,57 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
               onChange={v => onConfigChange({ ...config, docking: { ...config.docking, exhaustiveness: v } })}
             />
           </div>
+          {((config.docking?.engine || 'gnina_gpu') !== 'vina') && (
+            <div className="mt-3">
+              <label className="text-sm font-medium text-gray-600 mb-1 block">CNN scoring mode</label>
+              <div className="flex gap-2">
+                {[
+                  { id: 'rescore', label: 'Rescore', desc: 'Fast — CNN rescores Vina poses' },
+                  { id: 'refinement', label: 'Refinement', desc: 'Better quality — CNN optimizes poses (+50% time)' },
+                ].map(mode => (
+                  <button key={mode.id}
+                    onClick={() => onConfigChange({ ...config, docking: { ...config.docking, cnn_scoring: mode.id } })}
+                    className={`flex-1 text-left p-2 rounded-lg border text-xs transition-all ${
+                      (config.docking?.cnn_scoring || 'rescore') === mode.id
+                        ? 'border-blue-300 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                    }`}>
+                    <div className="font-medium">{mode.label}</div>
+                    <div className="text-[10px] opacity-70">{mode.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {(config.docking?.cnn_scoring) === 'refinement' && (
+                <div className="flex items-center gap-1.5 mt-2 text-[10px] text-amber-600 bg-amber-50 rounded-lg px-2.5 py-1.5 border border-amber-200">
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  ~3x slower, may reject ~17% of molecules (positive Vina scores)
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
-      {runType === 'calculation' && config.calculation_types?.[0] === 'scoring' && onConfigChange && (
+      {/* Docking estimate — GPU runs only */}
+      {runType === 'calculation' && config.calculation_types?.[0] === 'docking' && (config.docking?.engine || 'gnina_gpu') !== 'vina' && (
+        <DockingEstimate
+          nMols={runAllMolecules ? null : selectedCount}
+          exhaustiveness={config.docking?.exhaustiveness ?? 32}
+          cnnScoring={config.docking?.cnn_scoring || 'rescore'}
+        />
+      )}
+
+      {runType === 'calculation' && config.calculation_types?.[0] === 'composite' && onConfigChange && (
         <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-2">
-          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Scoring Weights</p>
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Score Weights</p>
+          <p className="text-xs text-gray-400 mb-2">
+            Adjust the importance of each metric. The composite score aggregates results from your previous runs.
+          </p>
           <ScoringWeightsEditor
-            weights={config.scoring?.weights || DEFAULT_CONFIGS.calculation.scoring.weights}
-            onChange={(w) => onConfigChange({ ...config, scoring: { ...config.scoring, weights: w } })}
+            weights={config.composite?.weights || DEFAULT_CONFIGS.calculation.composite.weights}
+            onChange={(w) => onConfigChange({ ...config, composite: { ...config.composite, weights: w } })}
           />
         </div>
       )}
@@ -1736,7 +1950,7 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
 // ---------------------------------------------------------------------------
 // RunCreator — main component
 // ---------------------------------------------------------------------------
-export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubmit, selectedMoleculeIds, submitting }) {
+export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubmit, selectedMoleculeIds, submitting, project }) {
   const [step, setStep] = useState(1)
   const [selectedType, setSelectedType] = useState(null)
   const [config, setConfig] = useState({})
@@ -1762,11 +1976,14 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
     setStep(2)
   }
 
+  const needsReceptorPrep = selectedType === 'calculation' && config.calculation_types?.[0] === 'docking' && !project?.receptor_prep_report
+
   const canSubmit = (() => {
     if (submitting) return false
+    if (needsReceptorPrep) return false
     if (selectedType === 'import') {
       if (config.sourceMode === 'external' && !config._file) return false
-      if (config.sourceMode === 'database' && (!config.databases?.length)) return false
+      if (config.sourceMode === 'database' && !config.database) return false
     }
     if (selectedType === 'calculation') {
       if (!config.calculation_types?.length) return false
@@ -1798,6 +2015,10 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
           variants_per_iteration: config.opt_variants_per_iteration ?? 50,
         }
       }
+    }
+    // Flatten composite weights to top-level config for backend
+    if (selectedType === 'calculation' && (config.calculation_types || [])[0] === 'composite') {
+      payload.config = { ...payload.config, weights: config.composite?.weights || DEFAULT_CONFIGS.calculation.composite.weights }
     }
     if (includedColumns) {
       payload.config = { ...payload.config, included_columns: includedColumns }
@@ -1907,6 +2128,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
               phase={phaseType}
               selectedCount={selectedMoleculeIds?.size || 0}
               gpuEngines={gpuEngines}
+              project={project}
             />
           )}
 

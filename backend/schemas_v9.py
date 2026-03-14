@@ -69,6 +69,8 @@ class ProjectUpdate(BaseModel):
     pockets_detected: Optional[list] = None
     chembl_actives_count: Optional[int] = None
     chembl_median_ic50: Optional[float] = None
+    pubchem_compounds_count: Optional[int] = None
+    receptor_prep_config: Optional[dict] = None
     status: Optional[str] = None
     notification_email: Optional[str] = None
 
@@ -92,6 +94,9 @@ class ProjectResponse(BaseModel):
     pockets_detected: Optional[list] = None
     chembl_actives_count: Optional[int] = None
     chembl_median_ic50: Optional[float] = None
+    pubchem_compounds_count: Optional[int] = None
+    receptor_prep_config: Optional[dict] = None
+    receptor_prep_report: Optional[dict] = None
     status: str
     notification_email: Optional[str] = None
     created_at: datetime
@@ -115,6 +120,9 @@ class ProjectListItem(BaseModel):
     structure_method: Optional[str] = None
     pockets_detected: Optional[list] = None
     chembl_actives_count: Optional[int] = None
+    pubchem_compounds_count: Optional[int] = None
+    receptor_prep_config: Optional[dict] = None
+    receptor_prep_report: Optional[dict] = None
     status: str
     created_at: datetime
     updated_at: datetime
@@ -319,6 +327,7 @@ class MoleculeStatsResponse(BaseModel):
     total: int = 0
     bookmarked: int = 0
     ai_generated: int = 0
+    column_ranges: dict = {}  # { col_key: { min, max } }
 
 
 class BookmarkRequest(BaseModel):

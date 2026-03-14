@@ -134,6 +134,11 @@ export async function v9DeleteProject(projectId) {
   await apiClient.delete(`/v9/projects/${projectId}`)
 }
 
+export async function v9PrepareReceptor(projectId, config = {}) {
+  const response = await apiClient.post(`/v9/projects/${projectId}/prepare-receptor`, config)
+  return response.data
+}
+
 export async function v9ListCampaigns(projectId) {
   const response = await apiClient.get(`/v9/projects/${projectId}/campaigns`)
   return response.data

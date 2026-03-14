@@ -21,6 +21,13 @@ bcrypt==4.1.2
 # BindX — AI Agents
 openai>=1.0
 
+# V9 — Ligand preparation
+dimorphite-dl>=1.2.4
+
+# V9 — Receptor preparation (state-of-the-art pipeline)
+pdbfixer>=1.9
+propka>=3.5
+
 # V2 — optional (installed separately in Dockerfile with fallbacks)
 # admet-ai
 # aizynthfinder

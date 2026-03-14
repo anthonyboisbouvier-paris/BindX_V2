@@ -33,6 +33,7 @@ GNINA_ENDPOINT_ID = os.environ.get("GNINA_ENDPOINT_ID", "weeeiy6z4jdsv3")
 RUNPOD_TIMEOUT = int(os.environ.get("RUNPOD_TIMEOUT", "600"))
 BATCH_SIZE = int(os.environ.get("GPU_BATCH_SIZE", "250"))
 MAX_PARALLEL_BATCHES = int(os.environ.get("GPU_MAX_PARALLEL", "8"))
+DEFAULT_NUM_CPU = int(os.environ.get("GNINA_NUM_CPU", "0"))  # 0 = auto on pod
 
 
 def is_gpu_available() -> bool:
@@ -54,22 +55,82 @@ def is_gpu_available() -> bool:
 def _smiles_to_sdf_block(args: tuple) -> Optional[tuple[int, str, dict]]:
     """Convert a single SMILES to SDF block. Designed for ProcessPoolExecutor.
 
+    Pipeline: parse → L1 standardize → L2 tautomer → L3 protonate pH 7.4
+              → L8 rotatable bonds filter → AddHs → ETKDGv3 → MMFF94 → SDF block
+
     Args: (index, ligand_dict)
-    Returns: (index, sdf_block, ligand_dict) or None on failure.
+    Returns: (index, sdf_block, ligand_dict_with_prep_meta) or None on failure.
+        On failure, returns (index, None, ligand_dict_with_failure_meta).
     """
     idx, lig = args
     smiles = lig.get("smiles", "")
     name = lig.get("name", "unknown")
+    meta = {"input_smiles": smiles, "standardized": False,
+            "tautomer_changed": False, "protonated": False,
+            "minimization": "none", "rotatable_bonds": None}
     if not smiles:
-        return None
+        meta["failure"] = "empty_smiles"
+        return (idx, None, {**lig, "_prep_meta": meta})
 
     try:
         from rdkit import Chem
-        from rdkit.Chem import AllChem
+        from rdkit.Chem import AllChem, Descriptors
+        from rdkit.Chem.MolStandardize import rdMolStandardize
+        from pipeline.prepare import _protonate_at_ph, MAX_ROTATABLE_BONDS
 
+        # --- Parse ---
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            return None
+            meta["failure"] = "parse"
+            return (idx, None, {**lig, "_prep_meta": meta})
+
+        input_canonical = Chem.MolToSmiles(mol)
+
+        # --- L1: Standardize ---
+        mol = rdMolStandardize.FragmentParent(mol)
+        normalizer = rdMolStandardize.Normalizer()
+        mol = normalizer.normalize(mol)
+        uncharger = rdMolStandardize.Uncharger()
+        mol = uncharger.uncharge(mol)
+        post_std = Chem.MolToSmiles(mol)
+        meta["standardized"] = (post_std != input_canonical)
+
+        # --- L2: Canonical tautomer ---
+        enumerator = rdMolStandardize.TautomerEnumerator()
+        pre_taut = post_std
+        mol = enumerator.Canonicalize(mol)
+        post_taut = Chem.MolToSmiles(mol)
+        meta["tautomer_changed"] = (post_taut != pre_taut)
+
+        # --- L3: Protonate at pH 7.4 ---
+        clean_smi = post_taut
+        try:
+            prot_smi = _protonate_at_ph(clean_smi)
+            mol = Chem.MolFromSmiles(prot_smi)
+            if mol is None:
+                mol = Chem.MolFromSmiles(clean_smi)
+                if mol is None:
+                    meta["failure"] = "protonation"
+                    return (idx, None, {**lig, "_prep_meta": meta})
+            else:
+                meta["protonated"] = True
+        except Exception:
+            mol = Chem.MolFromSmiles(clean_smi)
+            if mol is None:
+                meta["failure"] = "protonation"
+                return (idx, None, {**lig, "_prep_meta": meta})
+
+        meta["prepared_smiles"] = Chem.MolToSmiles(mol)
+
+        # --- L8: Rotatable bonds filter ---
+        rot_bonds = Descriptors.NumRotatableBonds(mol)
+        meta["rotatable_bonds"] = rot_bonds
+        if rot_bonds > MAX_ROTATABLE_BONDS:
+            logger.warning("GPU prep: skipping %s — too many rotatable bonds", name)
+            meta["failure"] = "rotatable_bonds"
+            return (idx, None, {**lig, "_prep_meta": meta})
+
+        # --- L4+L5: 3D conformer + minimize ---
         mol = Chem.AddHs(mol)
         params = AllChem.ETKDGv3()
         params.randomSeed = 42
@@ -77,25 +138,38 @@ def _smiles_to_sdf_block(args: tuple) -> Optional[tuple[int, str, dict]]:
         if status != 0:
             params2 = AllChem.ETKDGv3()
             params2.useRandomCoords = True
-            AllChem.EmbedMolecule(mol, params2)
+            if AllChem.EmbedMolecule(mol, params2) != 0:
+                meta["failure"] = "conformer"
+                return (idx, None, {**lig, "_prep_meta": meta})
         try:
             AllChem.MMFFOptimizeMolecule(mol, maxIters=200)
+            meta["minimization"] = "MMFF94"
         except Exception:
-            pass
+            try:
+                AllChem.UFFOptimizeMolecule(mol, maxIters=200)
+                meta["minimization"] = "UFF"
+            except Exception:
+                meta["minimization"] = "unoptimized"
         mol.SetProp("_Name", name)
         block = Chem.MolToMolBlock(mol)
-        return (idx, block + "$$$$\n", lig)
-    except Exception:
-        return None
+        return (idx, block + "$$$$\n", {**lig, "_prep_meta": meta})
+    except Exception as exc:
+        meta["failure"] = f"error:{exc}"
+        return (idx, None, {**lig, "_prep_meta": meta})
 
 
-def _prepare_sdf_parallel(ligands: list[dict]) -> tuple[list[str], list[dict]]:
+def _prepare_sdf_parallel(ligands: list[dict]) -> tuple[list[str], list[dict], list[dict]]:
     """Prepare SDF blocks from SMILES using parallel processes.
 
     For small batches (<50), runs sequentially to avoid thread overhead.
     For larger batches, uses ThreadPoolExecutor (RDKit releases the GIL
     during conformer generation, so threads give real parallelism).
     Note: ProcessPoolExecutor cannot be used inside Celery daemon workers.
+
+    Returns
+    -------
+    tuple[list[str], list[dict], list[dict]]
+        (sdf_blocks, valid_ligands_with_meta, failure_metas)
     """
     n = len(ligands)
     args = [(i, lig) for i, lig in enumerate(ligands)]
@@ -109,12 +183,23 @@ def _prepare_sdf_parallel(ligands: list[dict]) -> tuple[list[str], list[dict]]:
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             results = list(pool.map(_smiles_to_sdf_block, args))
 
-    # Collect successful results, preserving order
-    valid = [r for r in results if r is not None]
-    valid.sort(key=lambda x: x[0])
-    sdf_blocks = [r[1] for r in valid]
-    valid_ligands = [r[2] for r in valid]
-    return sdf_blocks, valid_ligands
+    # Separate successes from failures
+    successes = []
+    failure_metas = []
+    for r in results:
+        if r is None:
+            continue
+        idx, sdf_block, lig_with_meta = r
+        if sdf_block is not None:
+            successes.append((idx, sdf_block, lig_with_meta))
+        else:
+            # Failed preparation — collect metadata
+            failure_metas.append(lig_with_meta)
+
+    successes.sort(key=lambda x: x[0])
+    sdf_blocks = [r[1] for r in successes]
+    valid_ligands = [r[2] for r in successes]
+    return sdf_blocks, valid_ligands, failure_metas
 
 
 # ---------------------------------------------------------------------------
@@ -150,8 +235,12 @@ def _submit_job(
     cnn_scoring: str = "rescore",
     seed: int = 0,
     autobox_add: float = 4.0,
+    num_cpu: int = 0,
 ) -> tuple[Optional[str], Optional[str]]:
-    """Submit a docking job to RunPod. Returns (job_id, error)."""
+    """Submit a docking job to RunPod. Returns (job_id, error).
+
+    # Handler contract: input.num_cpu → GNINA --cpu N (0 = auto = os.cpu_count())
+    """
     api_key = os.environ.get("RUNPOD_API_KEY", RUNPOD_API_KEY)
     endpoint_id = os.environ.get("GNINA_ENDPOINT_ID", GNINA_ENDPOINT_ID)
 
@@ -177,6 +266,7 @@ def _submit_job(
             "autobox_add": autobox_add,
             "seed": seed,
             "min_rmsd_filter": 1.0,
+            "num_cpu": num_cpu,
         }
     }
 
@@ -300,7 +390,8 @@ def dock_batch_gpu(
             logger.error("RunPod submit failed: %s", error)
             return {"error": error, "results": []}
 
-        logger.info("RunPod job submitted: %s", job_id)
+        logger.info("RunPod job submitted: %s (num_cpu=%d, exhaustiveness=%d, cnn=%s)",
+                    job_id, num_cpu, exhaustiveness, cnn_scoring)
 
         if progress_callback:
             progress_callback(42, "GPU docking in progress...")
@@ -312,6 +403,9 @@ def dock_batch_gpu(
             logger.error("RunPod job %s failed: %s", job_id, result["error"])
         else:
             logger.info("RunPod job %s completed: %d molecules", job_id, result.get("n_molecules", 0))
+            if result.get("gpu_used"):
+                logger.info("RunPod GPU: %s, elapsed: %.1fs",
+                            result["gpu_used"], result.get("elapsed_seconds", 0))
 
         return result
 
@@ -376,12 +470,39 @@ def _parse_batch_results(
     return parsed
 
 
+def _molblock_centroid(molblock: str) -> Optional[tuple[float, float, float]]:
+    """Extract the centroid of a molblock from its 3D coordinates."""
+    import re
+    coords = []
+    for line in molblock.split("\n"):
+        m = re.match(r"\s*(-?\d+\.\d+)\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)", line)
+        if m:
+            coords.append((float(m.group(1)), float(m.group(2)), float(m.group(3))))
+    if not coords:
+        return None
+    n = len(coords)
+    return (
+        sum(c[0] for c in coords) / n,
+        sum(c[1] for c in coords) / n,
+        sum(c[2] for c in coords) / n,
+    )
+
+
 def _attach_pose_molblocks(
     all_results: list[dict],
     docked_sdf_contents: list[str],
     work_dir: Path,
+    center: Optional[list[float]] = None,
+    box_size: Optional[list[float]] = None,
 ) -> None:
-    """Parse docked SDFs and attach pose molblocks to results (in-place)."""
+    """Parse docked SDFs and attach pose molblocks to results (in-place).
+
+    If center and box_size are provided, validates that each pose centroid
+    is within the docking box. Poses outside the box are rejected (likely
+    input conformers returned by a failed docking handler).
+    """
+    import math
+
     name_to_molblock: dict[str, str] = {}
 
     for sdf_idx, sdf_content in enumerate(docked_sdf_contents):
@@ -405,14 +526,49 @@ def _attach_pose_molblocks(
             logger.warning("GPU: could not parse docked SDF %d: %s", sdf_idx, e)
 
     attached = 0
+    rejected = 0
     for result in all_results:
         name = result.get("name", "")
         if name in name_to_molblock:
-            result["pose_molblock"] = name_to_molblock[name]
+            molblock = name_to_molblock[name]
+
+            # Validate pose is within docking box (reject input conformers)
+            if center and box_size:
+                centroid = _molblock_centroid(molblock)
+                if centroid:
+                    half = [s / 2 for s in box_size]
+                    dx = abs(centroid[0] - center[0])
+                    dy = abs(centroid[1] - center[1])
+                    dz = abs(centroid[2] - center[2])
+                    # Allow 50% margin beyond box (GNINA can place atoms slightly outside)
+                    if dx > half[0] * 1.5 or dy > half[1] * 1.5 or dz > half[2] * 1.5:
+                        dist = math.sqrt(dx**2 + dy**2 + dz**2)
+                        logger.warning(
+                            "GPU: rejecting pose for %s — centroid (%.1f,%.1f,%.1f) is %.0fÅ from box center, "
+                            "likely an input conformer, not a docked pose",
+                            name, centroid[0], centroid[1], centroid[2], dist,
+                        )
+                        rejected += 1
+                        continue
+
+            result["pose_molblock"] = molblock
+
+            # Compute distance from pose centroid to pocket center
+            if center:
+                pose_centroid = _molblock_centroid(molblock)
+                if pose_centroid:
+                    dist = math.sqrt(
+                        (pose_centroid[0] - center[0])**2 +
+                        (pose_centroid[1] - center[1])**2 +
+                        (pose_centroid[2] - center[2])**2
+                    )
+                    result["pocket_distance"] = round(dist, 1)
+
             attached += 1
 
     if name_to_molblock:
-        logger.info("GPU: attached %d/%d pose molblocks", attached, len(all_results))
+        logger.info("GPU: attached %d/%d pose molblocks (%d rejected as outside box)",
+                    attached, len(all_results), rejected)
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +588,8 @@ def dock_all_runpod_batch(
     cnn_scoring: str = "rescore",
     seed: int = 0,
     autobox_add: float = 4.0,
+    num_cpu: int = 0,
+    batch_callback: Optional[Callable[[list[dict]], None]] = None,
 ) -> list[dict]:
     """Dock all ligands via RunPod GPU with parallel batch submission.
 
@@ -469,10 +627,19 @@ def dock_all_runpod_batch(
     overall_start = time.time()
 
     # --- 1. Read receptor PDB content ---
+    # Priority: prepared PDB (7-step pipeline) > raw PDB > PDBQT fallback
     receptor_path = Path(receptor_pdbqt)
+    parent = receptor_path.parent
+
+    # Look for the prepared PDB first (output of prepare_receptor pipeline)
+    prepared_candidates = list(parent.glob("*_prepared.pdb"))
     pdb_path = receptor_path.with_suffix(".pdb")
-    if not pdb_path.exists():
-        pdb_candidates = list(receptor_path.parent.glob("*.pdb"))
+
+    if prepared_candidates:
+        pdb_path = prepared_candidates[0]
+        logger.info("GPU docking: using prepared PDB %s", pdb_path.name)
+    elif not pdb_path.exists():
+        pdb_candidates = list(parent.glob("*.pdb"))
         if pdb_candidates:
             pdb_path = pdb_candidates[0]
         else:
@@ -484,13 +651,32 @@ def dock_all_runpod_batch(
         logger.error("Cannot read receptor file %s: %s", pdb_path, e)
         return []
 
-    logger.info("GPU batch docking: receptor=%s, %d ligands", pdb_path.name, len(ligands))
+    # Resolve num_cpu: parameter > env var > 0 (auto)
+    num_cpu = num_cpu or DEFAULT_NUM_CPU
+
+    # --- Refinement guard ---
+    # Refinement is ~2.7x slower and rejects ~17% of molecules.
+    # refinement + exh>=32 systematically timeouts on RunPod.
+    if cnn_scoring == "refinement":
+        if exhaustiveness >= 32:
+            logger.warning(
+                "Refinement + exhaustiveness=%d will timeout — capping exhaustiveness to 16",
+                exhaustiveness,
+            )
+            exhaustiveness = 16
+
+    logger.info("GPU batch docking: receptor=%s, %d ligands, num_cpu=%d",
+                pdb_path.name, len(ligands), num_cpu)
 
     # --- 2. Parallel SDF preparation ---
     if progress_callback:
-        progress_callback(30, f"Preparing {len(ligands)} molecules (3D conformers)...")
+        progress_callback(
+            30,
+            f"Preparing {len(ligands)} molecules "
+            "(standardize, tautomers, pH 7.4 protonation, 3D conformers)...",
+        )
 
-    sdf_blocks, valid_ligands = _prepare_sdf_parallel(ligands)
+    sdf_blocks, valid_ligands, failure_metas = _prepare_sdf_parallel(ligands)
 
     if not sdf_blocks:
         logger.warning("GPU: no valid SDF blocks generated")
@@ -505,6 +691,9 @@ def dock_all_runpod_batch(
 
     # --- 3. Split into batches ---
     batch_size = BATCH_SIZE
+    if cnn_scoring == "refinement":
+        batch_size = min(batch_size, 10)
+        logger.info("Refinement mode: reduced batch_size to %d", batch_size)
     batches = []
     for i in range(0, total, batch_size):
         end = min(i + batch_size, total)
@@ -520,6 +709,9 @@ def dock_all_runpod_batch(
 
     # --- 4. Submit all batches in parallel + poll ---
     timeout = int(os.environ.get("RUNPOD_TIMEOUT", str(RUNPOD_TIMEOUT)))
+    if cnn_scoring == "refinement":
+        timeout = timeout * 2
+        logger.info("Refinement mode: doubled polling timeout to %ds", timeout)
 
     # Shared docking params
     dock_params = dict(
@@ -527,6 +719,7 @@ def dock_all_runpod_batch(
         exhaustiveness=exhaustiveness, num_modes=num_modes,
         energy_range=energy_range, cnn_scoring=cnn_scoring,
         seed=seed, autobox_add=autobox_add,
+        num_cpu=num_cpu,
     )
 
     # Track all submitted job IDs for cleanup on failure
@@ -571,6 +764,16 @@ def dock_all_runpod_batch(
     all_results = []
     docked_sdfs = []
     completed_batches = 0
+    failed_batches = 0
+
+    def _on_batch_parsed(parsed: list[dict], batch_idx: int) -> None:
+        """Handle a completed batch: extend results + call batch_callback."""
+        all_results.extend(parsed)
+        if batch_callback and parsed:
+            try:
+                batch_callback(parsed)
+            except Exception as cb_err:
+                logger.warning("batch_callback error (batch %d): %s", batch_idx + 1, cb_err)
 
     try:
         if n_batches == 1:
@@ -578,7 +781,8 @@ def dock_all_runpod_batch(
             batch_idx, gpu_result, batch_ligs = _run_single_batch(batches[0])
             if gpu_result.get("error"):
                 raise RuntimeError(f"GPU docking failed: {gpu_result['error']}")
-            all_results.extend(_parse_batch_results(gpu_result, batch_ligs))
+            parsed = _parse_batch_results(gpu_result, batch_ligs)
+            _on_batch_parsed(parsed, 0)
             docked_sdfs.append(gpu_result.get("docked_sdf", ""))
             if progress_callback:
                 progress_callback(85, f"GPU docking done: {len(all_results)} results")
@@ -594,13 +798,12 @@ def dock_all_runpod_batch(
 
                     if gpu_result.get("error"):
                         error = gpu_result["error"]
-                        logger.error("GPU batch %d failed: %s", batch_idx + 1, error)
-                        # Cancel remaining jobs before raising
-                        _cancel_all_pending()
-                        raise RuntimeError(f"GPU batch {batch_idx + 1}/{n_batches} failed: {error}")
+                        failed_batches += 1
+                        logger.error("GPU batch %d/%d failed: %s (continuing)", batch_idx + 1, n_batches, error)
+                        continue
 
                     parsed = _parse_batch_results(gpu_result, batch_ligs)
-                    all_results.extend(parsed)
+                    _on_batch_parsed(parsed, batch_idx)
                     docked_sdfs.append(gpu_result.get("docked_sdf", ""))
 
                     logger.info("GPU batch %d/%d done: %d results",
@@ -613,13 +816,22 @@ def dock_all_runpod_batch(
                             f"GPU: {completed_batches}/{n_batches} batches done "
                             f"({len(all_results)} molecules)",
                         )
+
+            # If ALL batches failed, raise
+            if failed_batches == n_batches:
+                _cancel_all_pending()
+                raise RuntimeError(f"All {n_batches} GPU batches failed")
+            if failed_batches > 0:
+                logger.warning("GPU docking: %d/%d batches failed, continuing with %d results",
+                              failed_batches, n_batches, len(all_results))
     except Exception:
         # Ensure all RunPod jobs are cancelled on any failure
         _cancel_all_pending()
         raise
 
     # --- 5. Attach pose molblocks from all docked SDFs ---
-    _attach_pose_molblocks(all_results, docked_sdfs, work_dir)
+    _attach_pose_molblocks(all_results, docked_sdfs, work_dir,
+                           center=list(center), box_size=list(size))
 
     # --- 6. Consensus ranking ---
     if all_results:

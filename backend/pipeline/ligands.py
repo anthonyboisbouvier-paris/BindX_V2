@@ -45,9 +45,10 @@ def load_fragment_library() -> list[dict]:
     Returns
     -------
     list[dict]
-        Each dict has keys: ``smiles``, ``name``, ``mw``, ``logp``.
+        Each dict has keys: ``smiles``, ``name``, ``mwt``, ``logp``,
+        ``hbd``, ``hba``, ``tpsa``, ``source``.
     """
-    return [
+    raw = [
         # Aromatic rings
         {"smiles": "c1ccccc1", "name": "benzene", "mw": 78.11, "logp": 1.56},
         {"smiles": "c1ccncc1", "name": "pyridine", "mw": 79.10, "logp": 0.65},
@@ -105,6 +106,18 @@ def load_fragment_library() -> list[dict]:
         {"smiles": "Oc1ccccn1", "name": "2-pyridinol", "mw": 95.10, "logp": 0.24},
         {"smiles": "Nc1ncccn1", "name": "2-aminopyrimidine", "mw": 95.10, "logp": -0.60},
     ]
+    # Normalize: mw → mwt, add source (no RDKit calculation at import)
+    fragments: list[dict] = []
+    for frag in raw:
+        entry = {
+            "smiles": frag["smiles"],
+            "name": frag["name"],
+            "mwt": frag["mw"],
+            "logp": frag["logp"],
+            "source": "fragments",
+        }
+        fragments.append(entry)
+    return fragments
 
 
 # ---------------------------------------------------------------------------
@@ -168,9 +181,9 @@ _ENAMINE_TAILS: list[str] = [
 def sample_enamine_real(n: int = 500) -> list[dict]:
     """Sample drug-like molecules from a mock ENAMINE REAL virtual library.
 
-    Generates combinatorial SMILES by linking core fragments, linkers, and
-    tail groups. Uses hashlib-based seeding for reproducible generation
-    across runs.
+    Uses a 2-pass approach for speed:
+      1. Pure Python combinatorial SMILES generation (fast)
+      2. Batch RDKit validation + descriptor computation (single import)
 
     Parameters
     ----------
@@ -180,57 +193,56 @@ def sample_enamine_real(n: int = 500) -> list[dict]:
     Returns
     -------
     list[dict]
-        Each dict has keys: ``name``, ``smiles``, ``source``.
+        Each dict has keys: ``name``, ``smiles``, ``source``, ``canonical_smiles``,
+        ``mwt``, ``logp``, ``hbd``, ``hba``, ``tpsa``.
     """
-    ligands: list[dict] = []
+    # Pass 1: Pure Python generation (no RDKit)
+    candidates: list[str] = []
     seen_smiles: set[str] = set()
-
-    # Use a fixed seed string so results are reproducible
     base_seed = "enamine_real_v6.3_dockit"
 
-    for i in range(n * 3):  # Over-generate to account for duplicates
-        if len(ligands) >= n:
+    for i in range(n * 3):
+        if len(candidates) >= n * 2:  # Over-generate for validation losses
             break
-
-        # Deterministic hash for this index
         digest = hashlib.sha256(f"{base_seed}_{i}".encode("utf-8")).hexdigest()
         h = int(digest[:16], 16)
-
-        # Pick core, linker, tail deterministically
         core = _ENAMINE_CORES[h % len(_ENAMINE_CORES)]
         linker = _ENAMINE_LINKERS[(h >> 8) % len(_ENAMINE_LINKERS)]
         tail = _ENAMINE_TAILS[(h >> 16) % len(_ENAMINE_TAILS)]
-
-        # Decide on 2-fragment or 3-fragment molecule
-        use_three = (h >> 24) % 3 != 0  # ~67% use 3 fragments
-
-        if use_three:
-            smiles = f"{core}{linker}{tail}"
-        else:
-            smiles = f"{core}{linker}"
-
-        # Skip duplicates
+        use_three = (h >> 24) % 3 != 0
+        smiles = f"{core}{linker}{tail}" if use_three else f"{core}{linker}"
         if smiles in seen_smiles:
             continue
         seen_smiles.add(smiles)
+        candidates.append(smiles)
 
-        # Validate with RDKit if available
-        try:
-            from rdkit import Chem
-            mol = Chem.MolFromSmiles(smiles)
+    # Pass 2: Batch RDKit validation + descriptors
+    ligands: list[dict] = []
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import Descriptors
+
+        for smi in candidates:
+            if len(ligands) >= n:
+                break
+            mol = Chem.MolFromSmiles(smi)
             if mol is None:
                 continue
-            smiles = Chem.MolToSmiles(mol)  # Canonicalize
-        except ImportError:
-            pass  # Accept as-is without validation
-        except Exception:
-            continue  # Skip invalid SMILES
-
-        ligands.append({
-            "name": f"ENAMINE_{len(ligands):06d}",
-            "smiles": smiles,
-            "source": "enamine_real",
-        })
+            canonical = Chem.MolToSmiles(mol)
+            ligands.append({
+                "name": f"ENAMINE_{len(ligands):06d}",
+                "smiles": canonical,
+                "canonical_smiles": canonical,
+                "source": "enamine_real",
+            })
+    except ImportError:
+        # No RDKit — accept as-is without validation
+        for smi in candidates[:n]:
+            ligands.append({
+                "name": f"ENAMINE_{len(ligands):06d}",
+                "smiles": smi,
+                "source": "enamine_real",
+            })
 
     logger.info(
         "Sampled %d molecules from ENAMINE REAL mock library (requested %d)",
@@ -390,7 +402,11 @@ def auto_select_ligand_strategy(uniprot_id: str) -> dict:
 # ChEMBL
 # ---------------------------------------------------------------------------
 
-def fetch_chembl_ligands(uniprot_id: str, max_count: int = 50) -> list[dict]:
+def fetch_chembl_ligands(
+    uniprot_id: str,
+    max_count: int = 50,
+    filters: dict | None = None,
+) -> list[dict]:
     """Retrieve known active compounds from ChEMBL for a UniProt target.
 
     Parameters
@@ -399,14 +415,10 @@ def fetch_chembl_ligands(uniprot_id: str, max_count: int = 50) -> list[dict]:
         UniProt accession (e.g. ``"P00533"``).
     max_count : int
         Maximum number of ligands to return.
-
-    Returns
-    -------
-    list[dict]
-        Each dict has keys: ``name``, ``smiles``, ``source``, ``chembl_id``.
+    filters : dict | None
+        Optional filters: activity_types, activity_cutoff, pchembl_min.
     """
     try:
-        # Step 1: Resolve UniProt ID to ChEMBL target ID
         target_chembl_id = _resolve_target(uniprot_id)
         if not target_chembl_id:
             logger.warning("Could not resolve %s to a ChEMBL target", uniprot_id)
@@ -414,8 +426,21 @@ def fetch_chembl_ligands(uniprot_id: str, max_count: int = 50) -> list[dict]:
 
         logger.info("Resolved %s -> %s", uniprot_id, target_chembl_id)
 
-        # Step 2: Fetch activities (IC50 data)
-        ligands = _fetch_activities(target_chembl_id, max_count)
+        # Extract filter params
+        f = filters or {}
+        activity_types = f.get("activity_types") or None
+        activity_cutoff = float(f.get("activity_cutoff", 10000))
+        pchembl_min = f.get("pchembl_min")
+        if pchembl_min is not None:
+            pchembl_min = float(pchembl_min)
+
+        ligands = _fetch_activities(
+            target_chembl_id,
+            max_count,
+            activity_types=activity_types,
+            activity_cutoff_nM=activity_cutoff,
+            pchembl_min=pchembl_min,
+        )
         logger.info("Retrieved %d ligands from ChEMBL for %s", len(ligands), uniprot_id)
         return ligands
 
@@ -446,12 +471,14 @@ def _resolve_target(uniprot_id: str) -> Optional[str]:
         return None
 
 
-def _fetch_activities(target_chembl_id: str, max_count: int) -> list[dict]:
+def _fetch_activities(
+    target_chembl_id: str,
+    max_count: int,
+    activity_types: list[str] | None = None,
+    activity_cutoff_nM: float = 10000,
+    pchembl_min: float | None = None,
+) -> list[dict]:
     """Fetch bioactivity data for a ChEMBL target.
-
-    V5bis: fetches multiple activity types (IC50, Ki, EC50, Kd) and
-    filters by activity value < 10000 nM (10 uM). Stores pchembl_value
-    on each ligand dict when available.
 
     Parameters
     ----------
@@ -459,14 +486,20 @@ def _fetch_activities(target_chembl_id: str, max_count: int) -> list[dict]:
         ChEMBL target ID.
     max_count : int
         Maximum number of ligands to return.
+    activity_types : list[str] | None
+        Activity types to fetch (e.g. ["IC50", "Kd"]). Defaults to all 4.
+    activity_cutoff_nM : float
+        Max activity value in nM (default 10000 = 10 uM).
+    pchembl_min : float | None
+        If set, only include ligands with pchembl_value >= this threshold.
 
     Returns
     -------
     list[dict]
         Filtered and deduplicated ligands with activity data.
     """
-    # V5bis: Fetch multiple activity types
-    activity_types = ["IC50", "Ki", "EC50", "Kd"]
+    if not activity_types:
+        activity_types = ["IC50", "Ki", "EC50", "Kd"]
     all_activities: list[dict] = []
 
     for std_type in activity_types:
@@ -512,19 +545,29 @@ def _fetch_activities(target_chembl_id: str, max_count: int) -> list[dict]:
         standard_type = act.get("standard_type", "")
         pchembl_value = act.get("pchembl_value")
 
-        # Check if the molecule is active (< 10 uM = 10000 nM)
-        is_active = True  # Default: include if no value available
-        if standard_value is not None:
-            try:
-                value_nm = float(standard_value)
-                if value_nm >= 10000:  # 10 uM cutoff
-                    is_active = False
-                    n_inactive += 1
-            except (ValueError, TypeError):
-                pass  # Include if value cannot be parsed
-
-        if not is_active:
+        # Check if the molecule is active (below cutoff)
+        # Exclude molecules with null activity value when a cutoff filter is set
+        if standard_value is None:
+            n_inactive += 1
             continue
+        try:
+            value_nm = float(standard_value)
+            if value_nm >= activity_cutoff_nM:
+                n_inactive += 1
+                continue
+        except (ValueError, TypeError):
+            n_inactive += 1
+            continue
+
+        # pChEMBL minimum filter
+        if pchembl_min is not None:
+            if pchembl_value is None:
+                continue
+            try:
+                if float(pchembl_value) < pchembl_min:
+                    continue
+            except (ValueError, TypeError):
+                continue
 
         n_active += 1
         chembl_id = act.get("molecule_chembl_id", "")
@@ -565,37 +608,208 @@ def _fetch_activities(target_chembl_id: str, max_count: int) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# ZINC (local SDF or hardcoded fallback)
+# ZINC20 API
 # ---------------------------------------------------------------------------
 
-def fetch_zinc_ligands(max_count: int = 20) -> list[dict]:
-    """Load drug-like molecules from local ZINC SDF files.
+ZINC20_BASE = "https://zinc20.docking.org/substances"
+ZINC20_PAGE_SIZE = 3000  # Max reliable page size (4000+ returns 502)
+ZINC20_TIMEOUT = (10, 60)  # (connect, read) seconds
+ZINC20_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; BindX/1.0)"}
 
-    Falls back to a hardcoded set of common drug-like molecules if no local
-    SDF files are found.
+# Available subsets with human-readable labels
+ZINC20_SUBSETS: dict[str, str] = {
+    "in-stock": "In Stock (~12M)",
+    "for-sale": "For Sale (~389M)",
+    "fda": "FDA Approved (~1.4K)",
+    "in-trials": "In Clinical Trials (~5.8K)",
+    "in-vivo": "In Vivo Tested (~115K)",
+    "in-vitro": "In Vitro Active ≤10µM (~276K)",
+    "natural-products": "Natural Products (~80K)",
+    "biogenic": "Biogenic (~135K)",
+    "clean": "PAINS-Filtered (~125M)",
+    "endogenous": "Human Metabolites (~50K)",
+    "world": "World-Approved Drugs (~3.4K)",
+}
+
+
+def fetch_zinc_ligands(
+    max_count: int = 100,
+    subset: str | None = None,
+    filters: dict | None = None,
+) -> list[dict]:
+    """Fetch molecules from ZINC20 API.
+
+    Tries local SDF files first (``/data/zinc/*.sdf``), then the ZINC20
+    REST API with optional subset and property filters.
 
     Parameters
     ----------
     max_count : int
-        Maximum number of molecules to return.
+        Maximum number of molecules to return (up to 1M).
+    subset : str or None
+        ZINC20 subset name (e.g. ``"in-stock"``, ``"fda"``).
+    filters : dict or None
+        Property filters with keys like ``mwt_min``, ``mwt_max``,
+        ``logp_min``, ``logp_max``, ``hbd_max``, ``hba_max``,
+        ``tpsa_min``, ``tpsa_max``, ``rotatable_max``,
+        ``num_rings_min``, ``num_rings_max``,
+        ``num_heavy_atoms_min``, ``num_heavy_atoms_max``.
 
     Returns
     -------
     list[dict]
-        Each dict has keys: ``name``, ``smiles``, ``source``.
-    """
-    zinc_dir = Path("/data/zinc")
+        Each dict has keys: ``name``, ``smiles``, ``source``, and
+        optional ``zinc_id``, ``mwt``, ``logp``, ``hbd``, ``hba``, ``tpsa``.
 
-    # Try local SDF files first
+    Raises
+    ------
+    RuntimeError
+        If the ZINC20 API is unreachable after retries.
+    """
+    # Tier 1: local SDF files
+    zinc_dir = Path("/data/zinc")
     if zinc_dir.exists():
         ligands = _load_sdf_files(zinc_dir, max_count)
         if ligands:
             logger.info("Loaded %d ligands from local ZINC SDF files", len(ligands))
             return ligands
 
-    # Hardcoded drug-like molecules for testing
-    logger.info("Using hardcoded drug-like molecule set (ZINC files not found)")
-    return _hardcoded_druglike()[:max_count]
+    # Tier 2: ZINC20 API
+    return _fetch_zinc_api(max_count, subset, filters)
+
+
+def _build_zinc_url(subset: str | None) -> str:
+    """Build the ZINC20 substances URL with optional subset(s).
+
+    Supports single subset ("in-stock") or combined subsets ("in-stock+fda").
+    Combined subsets return the UNION of both sets.
+    """
+    if subset:
+        # Validate each part of combined subsets (e.g. "in-stock+fda")
+        parts = [p.strip() for p in subset.split("+") if p.strip()]
+        valid_parts = [p for p in parts if p in ZINC20_SUBSETS]
+        if valid_parts:
+            combined = "+".join(valid_parts)
+            return f"{ZINC20_BASE}/subsets/{combined}.json:zinc_id+smiles+mwt+logp+hbd+hba+tpsa"
+    return f"{ZINC20_BASE}.json:zinc_id+smiles+mwt+logp+hbd+hba+tpsa"
+
+
+def _build_zinc_params(
+    page_size: int,
+    page: int,
+    filters: dict | None,
+) -> dict:
+    """Build query params for a ZINC20 API request."""
+    params: dict = {"count": page_size, "page": page}
+
+    if not filters:
+        return params
+
+    # Map our filter keys to ZINC20 API "between" params
+    between_map = {
+        ("mwt_min", "mwt_max"): "mwt-between",
+        ("logp_min", "logp_max"): "logp-between",
+        ("hbd_min", "hbd_max"): "hbd-between",
+        ("hba_min", "hba_max"): "hba-between",
+        ("tpsa_min", "tpsa_max"): "tpsa-between",
+        ("rotatable_min", "rotatable_max"): "rb-between",
+        ("num_rings_min", "num_rings_max"): "num_rings-between",
+        ("num_heavy_atoms_min", "num_heavy_atoms_max"): "num_heavy_atoms-between",
+    }
+
+    for (key_min, key_max), api_param in between_map.items():
+        lo = filters.get(key_min)
+        hi = filters.get(key_max)
+        if lo is not None or hi is not None:
+            lo_val = lo if lo is not None else ""
+            hi_val = hi if hi is not None else ""
+            params[api_param] = f"{lo_val} {hi_val}"
+
+    return params
+
+
+def _fetch_zinc_api(
+    max_count: int,
+    subset: str | None,
+    filters: dict | None,
+) -> list[dict]:
+    """Paginated fetch from ZINC20 REST API."""
+    url = _build_zinc_url(subset)
+    ligands: list[dict] = []
+    seen_ids: set[str] = set()
+    page = 1
+    page_size = min(max_count, ZINC20_PAGE_SIZE)
+
+    logger.info(
+        "Fetching up to %d molecules from ZINC20 (subset=%s, filters=%s)",
+        max_count, subset, filters,
+    )
+
+    while len(ligands) < max_count:
+        remaining = max_count - len(ligands)
+        current_page_size = min(page_size, remaining)
+        params = _build_zinc_params(current_page_size, page, filters)
+
+        try:
+            resp = requests.get(url, params=params, timeout=ZINC20_TIMEOUT, headers=ZINC20_HEADERS)
+            resp.raise_for_status()
+        except requests.exceptions.Timeout:
+            if not ligands:
+                raise RuntimeError(
+                    "ZINC20 API timeout — the server did not respond. "
+                    "Try a smaller subset or fewer filters."
+                )
+            logger.warning("ZINC20 API timeout on page %d, returning %d molecules fetched so far", page, len(ligands))
+            break
+        except requests.exceptions.RequestException as exc:
+            if not ligands:
+                raise RuntimeError(f"ZINC20 API error: {exc}")
+            logger.warning("ZINC20 API error on page %d: %s — returning %d molecules", page, exc, len(ligands))
+            break
+
+        try:
+            data = resp.json()
+        except ValueError:
+            logger.warning("ZINC20 returned invalid JSON on page %d", page)
+            break
+
+        if not data:
+            # Empty page = no more results
+            break
+
+        for entry in data:
+            smiles = entry.get("smiles", "")
+            zinc_id = entry.get("zinc_id", "")
+            if not smiles or zinc_id in seen_ids:
+                continue
+            seen_ids.add(zinc_id)
+
+            ligands.append({
+                "name": zinc_id,
+                "smiles": smiles,
+                "source": "zinc",
+                "zinc_id": zinc_id,
+                "mwt": entry.get("mwt"),
+                "logp": entry.get("logp"),
+                "hbd": entry.get("hbd"),
+                "hba": entry.get("hba"),
+                "tpsa": entry.get("tpsa"),
+            })
+
+            if len(ligands) >= max_count:
+                break
+
+        # If we got fewer results than requested, we've exhausted results
+        if len(data) < current_page_size:
+            break
+
+        page += 1
+
+    logger.info(
+        "Fetched %d molecules from ZINC20 API (subset=%s)",
+        len(ligands), subset,
+    )
+    return ligands
 
 
 def _load_sdf_files(zinc_dir: Path, max_count: int) -> list[dict]:
@@ -761,68 +975,158 @@ def fetch_pubchem_ligands(
                      len(data.get("IdentifierList", {}).get("AID", [])),
                      gene_name, len(aids))
 
-        # Step 2: For each assay, fetch active compounds
-        ligands: list[dict] = []
-        seen_cids: set[int] = set()
+        # Step 2: Parallel fetch — active CIDs + activity values per assay
+        import math
+        import statistics
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        for aid in aids:
-            if len(ligands) >= max_count:
-                break
+        def _fetch_assay_data(aid: int) -> dict:
+            """Fetch active CIDs, activity values, and properties for one assay."""
+            result = {"aid": aid, "cids": [], "activities": {}, "properties": [], "assay_name": ""}
             try:
-                cid_url = (
-                    f"{PUBCHEM_BASE}/assay/aid/{aid}/cids/JSON"
-                    f"?cids_type=active&list_return=listkey"
+                # 2a: active CIDs
+                cid_resp = requests.get(
+                    f"{PUBCHEM_BASE}/assay/aid/{aid}/cids/JSON?cids_type=active",
+                    timeout=HTTP_TIMEOUT,
                 )
-                cid_resp = requests.get(cid_url, timeout=HTTP_TIMEOUT)
                 if cid_resp.status_code != 200:
-                    continue
+                    return result
                 cid_data = cid_resp.json()
                 cids = cid_data.get("IdentifierList", {}).get("CID", [])
                 if not cids:
-                    continue
+                    info_list = cid_data.get("InformationList", {}).get("Information", [])
+                    if info_list:
+                        cids = info_list[0].get("CID", [])
+                if not cids:
+                    return result
+                result["cids"] = cids[:30]
 
-                # Take a subset of CIDs
-                new_cids = [c for c in cids[:30] if c not in seen_cids]
-                if not new_cids:
-                    continue
-                seen_cids.update(new_cids)
+                # 2b: concise activity data
+                try:
+                    conc_resp = requests.get(
+                        f"{PUBCHEM_BASE}/assay/aid/{aid}/concise/JSON",
+                        timeout=(10, 30),
+                    )
+                    if conc_resp.status_code == 200:
+                        table = conc_resp.json().get("Table", {})
+                        cols = table.get("Columns", {}).get("Column", [])
+                        if "CID" in cols and "Activity Value [uM]" in cols:
+                            cidx = cols.index("CID")
+                            vidx = cols.index("Activity Value [uM]")
+                            oidx = cols.index("Activity Outcome") if "Activity Outcome" in cols else None
+                            nidx = cols.index("Assay Name") if "Assay Name" in cols else None
+                            cid_strs = {str(c) for c in result["cids"]}
+                            for row in table.get("Row", []):
+                                cells = row.get("Cell", [])
+                                if cells[cidx] not in cid_strs:
+                                    continue
+                                if oidx is not None and cells[oidx] != "Active":
+                                    continue
+                                if not result["assay_name"] and nidx is not None and cells[nidx]:
+                                    result["assay_name"] = cells[nidx]
+                                if cells[vidx]:
+                                    try:
+                                        result["activities"].setdefault(
+                                            int(cells[cidx]), []
+                                        ).append(float(cells[vidx]))
+                                    except (ValueError, IndexError):
+                                        pass
+                except Exception as exc:
+                    logger.debug("PubChem concise fetch for AID %d: %s", aid, exc)
 
-                # Step 3: Get SMILES for these CIDs (batch)
-                cid_str = ",".join(str(c) for c in new_cids[:20])
-                smi_url = (
+                # 2c: compound properties
+                cid_str = ",".join(str(c) for c in result["cids"][:20])
+                prop_resp = requests.get(
                     f"{PUBCHEM_BASE}/compound/cid/{cid_str}"
-                    f"/property/CanonicalSMILES,IUPACName,MolecularWeight/JSON"
+                    f"/property/CanonicalSMILES,IsomericSMILES,IUPACName,"
+                    f"MolecularWeight,XLogP,HBondDonorCount,HBondAcceptorCount,TPSA/JSON",
+                    timeout=HTTP_TIMEOUT,
                 )
-                smi_resp = requests.get(smi_url, timeout=HTTP_TIMEOUT)
-                if smi_resp.status_code != 200:
-                    continue
-                smi_data = smi_resp.json()
-                properties = smi_data.get("PropertyTable", {}).get("Properties", [])
-
-                for prop in properties:
-                    if len(ligands) >= max_count:
-                        break
-                    smiles = prop.get("CanonicalSMILES", "")
-                    if not smiles:
-                        continue
-                    cid = prop.get("CID", 0)
-                    name = prop.get("IUPACName", f"PubChem_{cid}")
-                    # Truncate very long IUPAC names
-                    if len(name) > 60:
-                        name = f"PubChem_{cid}"
-
-                    ligands.append({
-                        "name": name,
-                        "smiles": smiles,
-                        "source": "pubchem",
-                        "cid": cid,
-                    })
+                if prop_resp.status_code == 200:
+                    result["properties"] = prop_resp.json().get("PropertyTable", {}).get("Properties", [])
 
             except Exception as exc:
                 logger.debug("PubChem assay %d fetch error: %s", aid, exc)
-                continue
+            return result
 
-        logger.info("Retrieved %d ligands from PubChem for %s", len(ligands), gene_name)
+        # Run assays in parallel (3 threads to avoid PubChem rate limits)
+        assay_results = []
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {pool.submit(_fetch_assay_data, aid): aid for aid in aids}
+            for fut in as_completed(futures):
+                assay_results.append(fut.result())
+        # Sort back to original AID order for deterministic output
+        aid_order = {aid: i for i, aid in enumerate(aids)}
+        assay_results.sort(key=lambda r: aid_order.get(r["aid"], 99))
+
+        # Step 3: Assemble ligands from parallel results
+        ligands: list[dict] = []
+        seen_cids: set[int] = set()
+        cid_activities: dict[int, list[float]] = {}
+        cid_assay: dict[int, str] = {}  # CID -> first assay name
+
+        for ar in assay_results:
+            if len(ligands) >= max_count:
+                break
+            new_cids = [c for c in ar["cids"] if c not in seen_cids]
+            if not new_cids:
+                continue
+            seen_cids.update(new_cids)
+
+            # Merge activity data
+            for cid, vals in ar["activities"].items():
+                cid_activities.setdefault(cid, []).extend(vals)
+                if cid not in cid_assay and ar.get("assay_name"):
+                    cid_assay[cid] = ar["assay_name"]
+
+            for prop in ar["properties"]:
+                if len(ligands) >= max_count:
+                    break
+                smiles = (
+                    prop.get("CanonicalSMILES")
+                    or prop.get("IsomericSMILES")
+                    or prop.get("ConnectivitySMILES")
+                    or ""
+                )
+                if not smiles:
+                    continue
+                cid = prop.get("CID", 0)
+                name = prop.get("IUPACName", f"PubChem_{cid}")
+                if len(name) > 60:
+                    name = f"PubChem_{cid}"
+
+                entry = {
+                    "name": name,
+                    "smiles": smiles,
+                    "source": "pubchem",
+                    "cid": cid,
+                }
+                if prop.get("MolecularWeight") is not None:
+                    entry["mwt"] = round(float(prop["MolecularWeight"]), 2)
+                if prop.get("XLogP") is not None:
+                    entry["logp"] = round(float(prop["XLogP"]), 2)
+                if prop.get("HBondDonorCount") is not None:
+                    entry["import_hbd"] = int(prop["HBondDonorCount"])
+                if prop.get("HBondAcceptorCount") is not None:
+                    entry["import_hba"] = int(prop["HBondAcceptorCount"])
+                if prop.get("TPSA") is not None:
+                    entry["import_tpsa"] = round(float(prop["TPSA"]), 2)
+
+                activities = cid_activities.get(cid, [])
+                if activities:
+                    median_um = statistics.median(activities)
+                    entry["activity_value_nM"] = round(median_um * 1000, 2)
+                    entry["activity_type"] = activity_type
+                    if median_um > 0:
+                        entry["pchembl_value"] = round(-math.log10(median_um * 1e-6), 2)
+                if cid_assay.get(cid):
+                    entry["assay_name"] = cid_assay[cid]
+
+                ligands.append(entry)
+
+        logger.info("Retrieved %d ligands from PubChem for %s (%d with activity data)",
+                     len(ligands), gene_name,
+                     sum(1 for l in ligands if "activity_value_nM" in l))
         return ligands
 
     except Exception as exc:

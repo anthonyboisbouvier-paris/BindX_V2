@@ -395,6 +395,109 @@ def compute_sa_score(smiles: str) -> Optional[float]:
 # Composite score
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# V9: Weighted composite score (user-configurable weights)
+# ---------------------------------------------------------------------------
+
+DEFAULT_COMPOSITE_WEIGHTS = {
+    'docking_score': 0.30,
+    'cnn_score': 0.20,
+    'logP': 0.15,
+    'solubility': 0.10,
+    'selectivity': 0.15,
+    'novelty': 0.10,
+}
+
+
+def normalize_metric(key: str, value) -> Optional[float]:
+    """Normalise a raw metric to [0, 1] where higher = better.
+
+    Returns None if value is missing/invalid.
+    """
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(v) or math.isinf(v):
+        return None
+
+    if key == 'docking_score':
+        # More negative = better. Cap at -14 kcal/mol.
+        capped = max(-14.0, v) if v < 0 else v
+        return max(0.0, min(1.0, capped / -14.0))
+    elif key == 'cnn_score':
+        # Already [0, 1]
+        return max(0.0, min(1.0, v))
+    elif key == 'logP':
+        # Gaussian centered at 2.5, sigma=2.5 — optimal druglike range
+        return math.exp(-0.5 * ((v - 2.5) / 2.5) ** 2)
+    elif key == 'solubility':
+        # Already [0, 1] probability
+        return max(0.0, min(1.0, v))
+    elif key == 'selectivity':
+        # selectivity_score already [0, 1]
+        return max(0.0, min(1.0, v))
+    elif key == 'qed':
+        # Already [0, 1]
+        return max(0.0, min(1.0, v))
+    elif key == 'safety':
+        # ADMET composite_score (already [0, 1])
+        return max(0.0, min(1.0, v))
+    elif key == 'novelty':
+        # Already [0, 1] or 0 by default
+        return max(0.0, min(1.0, v))
+    else:
+        # Unknown metric — clamp to [0, 1]
+        return max(0.0, min(1.0, v))
+
+
+def compute_weighted_composite(
+    properties: dict,
+    weights: Optional[dict] = None,
+) -> tuple[Optional[float], dict]:
+    """Compute weighted composite score from existing molecule properties.
+
+    Parameters
+    ----------
+    properties : dict
+        Flat dict of molecule properties (keys matching weight keys).
+    weights : dict, optional
+        Weight per metric. Defaults to DEFAULT_COMPOSITE_WEIGHTS.
+
+    Returns
+    -------
+    tuple[float | None, dict]
+        (weighted_score, breakdown) where breakdown maps metric → normalized value.
+        weighted_score is None if no metrics are available.
+    """
+    if weights is None:
+        weights = DEFAULT_COMPOSITE_WEIGHTS
+
+    breakdown = {}
+    score = 0.0
+    total_weight = 0.0
+
+    for metric, weight in weights.items():
+        raw = properties.get(metric)
+        norm = normalize_metric(metric, raw)
+        if norm is not None:
+            breakdown[metric] = round(norm, 4)
+            score += weight * norm
+            total_weight += weight
+
+    if total_weight <= 0:
+        return None, breakdown
+
+    final = round(score / total_weight, 4)
+    return final, breakdown
+
+
+# ---------------------------------------------------------------------------
+# Legacy composite scores (kept for backward compatibility, no longer called)
+# ---------------------------------------------------------------------------
+
 def compute_composite_score(
     affinity: Optional[float] = None,
     qed: Optional[float] = None,

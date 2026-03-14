@@ -432,6 +432,7 @@ function TargetSummary({ project, onEdit }) {
   const tp = project.target_preview || {}
   const uniprot = tp.uniprot || {}
   const chembl = tp.chembl || {}
+  const pubchem = tp.pubchem || {}
   const structure = tp.structure || {}
   const pockets = project.pockets_detected || tp.pockets || []
   const selectedPocketIdx = tp.selected_pocket_index ?? 0
@@ -497,11 +498,12 @@ function TargetSummary({ project, onEdit }) {
               <span className="font-medium text-gray-700">{pockets.length}</span> pocket{pockets.length > 1 ? 's' : ''} detected
             </span>
           )}
-          {chembl.n_actives > 0 && (
-            <span className="text-gray-500">
-              <span className="font-medium text-gray-700">{chembl.n_actives.toLocaleString()}</span> ChEMBL actives
-            </span>
-          )}
+          <span className="text-gray-500">
+            <span className="font-medium text-gray-700">{(chembl.n_actives || 0).toLocaleString()}</span> ChEMBL actives
+          </span>
+          <span className="text-gray-500">
+            <span className="font-medium text-gray-700">{(project.pubchem_compounds_count || pubchem.n_compounds || 0).toLocaleString()}</span> PubChem compounds
+          </span>
         </div>
       </div>
 
@@ -561,21 +563,39 @@ function TargetSummary({ project, onEdit }) {
                     ? (typeof p.residues[0] === 'string' && p.residues[0].includes(' ') ? p.residues[0].split(' ') : p.residues)
                     : []
                   const isSelected = i === selectedPocketIdx
+                  const center = Array.isArray(p.center) ? p.center : null
                   return (
-                    <div key={i} className={`flex items-center justify-between p-2.5 rounded-lg ${isSelected ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
-                      <div className="flex items-center gap-2">
-                        <span className={`w-5 h-5 rounded-full text-sm font-bold flex items-center justify-center ${isSelected ? 'bg-amber-400 text-white' : 'bg-gray-200 text-gray-500'}`}>
-                          {i + 1}
-                        </span>
-                        <div>
-                          <span className="text-sm font-medium text-gray-700">Pocket #{i + 1}</span>
-                          {p.method && <span className="text-sm text-gray-400 ml-1.5">{p.method}</span>}
-                          <span className="text-sm text-gray-400 ml-1.5">{residues.length} residues</span>
+                    <div key={i} className={`rounded-lg p-2.5 ${isSelected ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-amber-400 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                            {i + 1}
+                          </span>
+                          <div>
+                            <span className="text-sm font-medium text-gray-700">Pocket #{i + 1}</span>
+                            {isSelected && <span className="text-[10px] text-amber-500 font-semibold ml-1.5">selected</span>}
+                          </div>
                         </div>
+                        <span className={`text-sm font-bold tabular-nums ${prob >= 80 ? 'text-green-600' : prob >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
+                          {prob}%
+                        </span>
                       </div>
-                      <span className={`text-sm font-bold ${prob >= 80 ? 'text-green-600' : prob >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
-                        {prob}%
-                      </span>
+                      <div className="mt-1.5 ml-7 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-400">
+                        {p.method && <span>Method: <span className="text-gray-600 font-medium">{p.method}</span></span>}
+                        <span>Residues: <span className="text-gray-600 font-medium">{residues.length}</span></span>
+                        {p.p2rank_score != null && <span>P2Rank: <span className="text-gray-600 font-medium tabular-nums">{p.p2rank_score.toFixed(2)}</span></span>}
+                        {p.volume > 0 && <span>Volume: <span className="text-gray-600 font-medium tabular-nums">{Math.round(p.volume)} A³</span></span>}
+                        {center && (
+                          <span>Center: <span className="text-gray-600 font-medium tabular-nums">
+                            ({center[0].toFixed(1)}, {center[1].toFixed(1)}, {center[2].toFixed(1)})
+                          </span></span>
+                        )}
+                      </div>
+                      {residues.length > 0 && (
+                        <p className="mt-1 ml-7 text-[9px] text-gray-400 leading-relaxed break-all">
+                          {residues.slice(0, 15).join(', ')}{residues.length > 15 ? `, +${residues.length - 15} more` : ''}
+                        </p>
+                      )}
                     </div>
                   )
                 })}
@@ -584,20 +604,28 @@ function TargetSummary({ project, onEdit }) {
           )}
 
           {/* ChEMBL info — compact */}
-          {chembl.has_data && (
-            <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">ChEMBL</p>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="text-gray-600"><strong className="text-gray-700">{chembl.n_actives?.toLocaleString()}</strong> actives</span>
-                {chembl.n_with_ic50 > 0 && (
-                  <span className="text-gray-500"><strong className="text-gray-600">{chembl.n_with_ic50?.toLocaleString()}</strong> IC50</span>
-                )}
-                {chembl.target_chembl_id && (
-                  <span className="text-gray-400 font-mono text-[10px]">{chembl.target_chembl_id}</span>
-                )}
-              </div>
+          <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">ChEMBL</p>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="text-gray-600"><strong className="text-gray-700">{(chembl.n_actives || 0).toLocaleString()}</strong> actives</span>
+              {chembl.n_with_ic50 > 0 && (
+                <span className="text-gray-500"><strong className="text-gray-600">{chembl.n_with_ic50?.toLocaleString()}</strong> IC50</span>
+              )}
+              {chembl.target_chembl_id && (
+                <span className="text-gray-400 font-mono text-[10px]">{chembl.target_chembl_id}</span>
+              )}
             </div>
-          )}
+          </div>
+          {/* PubChem info — compact */}
+          <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
+            <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider">PubChem</p>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="text-blue-600"><strong className="text-blue-700">{(project.pubchem_compounds_count || pubchem.n_compounds || 0).toLocaleString()}</strong> compounds</span>
+              {pubchem.gene_name && (
+                <span className="text-blue-400 font-mono text-[10px]">{pubchem.gene_name}</span>
+              )}
+            </div>
+          </div>
 
           {/* Details — collapsible: Domains + Keywords + Diseases */}
           {(uniprot.domains?.length > 0 || uniprot.keywords?.length > 0 || uniprot.diseases?.length > 0) && (
@@ -644,9 +672,439 @@ function TargetSummary({ project, onEdit }) {
               </div>
             </details>
           )}
+
+          {/* Receptor Preparation Report */}
+          <ReceptorPrepReport report={project.receptor_prep_report} config={project.receptor_prep_config} projectId={project.id} hasTarget={!!project.target_preview} />
         </div>
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ReceptorPrepReport — detailed preparation pipeline status
+// ---------------------------------------------------------------------------
+
+const PREP_STEPS = [
+  { key: 'P2_cleaning',       label: 'Smart Cleaning',         desc: 'Remove waters, buffers; keep cofactors & metals' },
+  { key: 'P3_nonstandard',    label: 'Non-standard Residues',  desc: 'Convert modified residues (MSE→MET, SEP→SER…)' },
+  { key: 'P4_altloc',         label: 'Alternate Conformations', desc: 'Keep highest-occupancy conformation only' },
+  { key: 'P5_missing_atoms',  label: 'Missing Atoms',          desc: 'Rebuild incomplete side chains' },
+  { key: 'P6_pka_analysis',   label: 'pKa Analysis (PropKa)',  desc: 'Calculate pKa of ionizable residues' },
+  { key: 'P7_hydrogens',      label: 'Add Hydrogens',          desc: 'Protonate at pH 7.4 with PDBFixer' },
+  { key: 'P8_minimization',   label: 'Energy Minimization',    desc: 'AMBER14 + Cα restraints (AlphaFold structures)' },
+  { key: 'P9_conversion',     label: 'PDBQT Conversion',       desc: 'Convert to docking format via Meeko/obabel' },
+]
+
+function ReceptorPrepReport({ report, config, projectId, hasTarget }) {
+  const [expanded, setExpanded] = useState(false)
+  const [preparing, setPreparing] = useState(false)
+  const [error, setError] = useState(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [ph, setPh] = useState(7.4)
+  const [keepMetals, setKeepMetals] = useState(true)
+  const [keepCofactors, setKeepCofactors] = useState(true)
+  const [minimize, setMinimize] = useState('auto') // 'auto' | 'yes' | 'no'
+
+  // No target configured — don't show anything
+  if (!hasTarget) return null
+
+  // Not yet prepared and not in progress — show "Prepare" button
+  if (!report && !config) {
+    const handlePrepare = async () => {
+      setPreparing(true)
+      setError(null)
+      try {
+        const { v9PrepareReceptor } = await import('../api')
+        await v9PrepareReceptor(projectId, {
+          ph,
+          keep_metals: keepMetals,
+          keep_cofactors: keepCofactors,
+          minimize: minimize === 'auto' ? null : minimize === 'yes',
+        })
+        window.location.reload()
+      } catch (err) {
+        setError(err.userMessage || err.message || 'Preparation failed')
+        setPreparing(false)
+      }
+    }
+    return (
+      <div className="card px-5 py-4">
+        <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Receptor Preparation</p>
+        <p className="text-xs text-gray-500 mb-3">
+          7-step pipeline: cleaning, non-standard residues, protonation, energy minimization, PDBQT conversion.
+        </p>
+
+        {/* Advanced settings — collapsible */}
+        <details open={showAdvanced} onToggle={e => setShowAdvanced(e.target.open)} className="mb-3">
+          <summary className="text-[11px] font-medium text-gray-400 cursor-pointer hover:text-gray-600 select-none">
+            Advanced settings
+          </summary>
+          <div className="mt-2 space-y-2.5 pl-1">
+            {/* pH */}
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <span className="text-xs font-medium text-gray-600">Protonation pH</span>
+                <p className="text-[10px] text-gray-400">Standard physiological = 7.4</p>
+              </div>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="14"
+                value={ph}
+                onChange={e => setPh(parseFloat(e.target.value) || 7.4)}
+                className="w-16 text-sm text-center px-2 py-1 rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-bx-mint/40 focus:border-bx-mint"
+              />
+            </div>
+            {/* Keep metals */}
+            <label className="flex items-center justify-between gap-3 cursor-pointer">
+              <div>
+                <span className="text-xs font-medium text-gray-600">Keep catalytic metals</span>
+                <p className="text-[10px] text-gray-400">ZN, MG, FE, MN, CA, CO…</p>
+              </div>
+              <input type="checkbox" checked={keepMetals} onChange={e => setKeepMetals(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-bx-mint focus:ring-bx-mint/30" />
+            </label>
+            {/* Keep cofactors */}
+            <label className="flex items-center justify-between gap-3 cursor-pointer">
+              <div>
+                <span className="text-xs font-medium text-gray-600">Keep cofactors</span>
+                <p className="text-[10px] text-gray-400">NAD, FAD, HEM, ATP, PLP…</p>
+              </div>
+              <input type="checkbox" checked={keepCofactors} onChange={e => setKeepCofactors(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-bx-mint focus:ring-bx-mint/30" />
+            </label>
+            {/* Minimization */}
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <span className="text-xs font-medium text-gray-600">Energy minimization</span>
+                <p className="text-[10px] text-gray-400">Auto = on for AlphaFold, off for PDB</p>
+              </div>
+              <select
+                value={minimize}
+                onChange={e => setMinimize(e.target.value)}
+                className="text-xs px-2 py-1 rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-bx-mint/40 focus:border-bx-mint bg-white"
+              >
+                <option value="auto">Auto</option>
+                <option value="yes">Force on</option>
+                <option value="no">Force off</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
+        <button
+          onClick={handlePrepare}
+          disabled={preparing}
+          className="btn-primary text-sm"
+        >
+          {preparing ? (
+            <span className="flex items-center gap-2">
+              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Preparing…
+            </span>
+          ) : 'Prepare Receptor'}
+        </button>
+      </div>
+    )
+  }
+
+  // Config set but no report yet — preparation in progress
+  if (!report) {
+    return (
+      <div className="card px-5 py-4">
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-amber-500 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+          </svg>
+          <p className="text-sm font-semibold text-amber-600">Receptor preparation in progress…</p>
+        </div>
+        <p className="text-xs text-gray-400 mt-1">This may take 1-2 minutes. Refresh the page to check.</p>
+      </div>
+    )
+  }
+
+  const stepsCompleted = report.steps_completed || []
+  const stepsSkipped = report.steps_skipped || []
+  const conversionMethod = report.conversion_method || 'unknown'
+  const shiftedPka = report.shifted_pka_residues || []
+  const nonstdResidues = report.nonstandard_residues || []
+  const missingAtoms = report.missing_atoms_added ?? 0
+  const minimizationConverged = report.minimization_converged
+  const cleaning = report.cleaning || {}
+  const removedHetCount = cleaning.hetatm_removed ?? 0
+  const keptHet = cleaning.het_kept || []
+  // Separate metals vs cofactors from het_kept list
+  const metalNames = new Set(['ZN','MG','FE','FE2','MN','CA','CO','NI','CU','CU1','MO','SE','W','CD'])
+  const keptMetals = keptHet.filter(h => metalNames.has(h))
+  const keptCofactors = keptHet.filter(h => !metalNames.has(h))
+
+  const totalSteps = PREP_STEPS.length
+  const completedCount = stepsCompleted.length
+  const allGood = completedCount >= 5 // at least 5/7 steps = good
+
+  // Determine step status — backend sends tuples as arrays ["P4_altloc", "reason"]
+  // and combined keys like "P6+P7_protonation" for grouped skips
+  function stepStatus(key) {
+    if (stepsCompleted.includes(key)) return 'done'
+    const skip = stepsSkipped.find(s => {
+      const sKey = Array.isArray(s) ? s[0] : (typeof s === 'string' ? s : s?.step)
+      return sKey === key || (sKey && sKey.includes(key.replace(/^P\d+_/, '')))
+    })
+    if (skip) return 'skipped'
+    return 'pending'
+  }
+  function skipReason(key) {
+    const skip = stepsSkipped.find(s => {
+      const sKey = Array.isArray(s) ? s[0] : (typeof s === 'string' ? s : s?.step)
+      return sKey === key || (sKey && sKey.includes(key.replace(/^P\d+_/, '')))
+    })
+    if (!skip) return null
+    if (Array.isArray(skip)) return skip[1] || 'Skipped'
+    return typeof skip === 'string' ? 'Dependency not available' : skip.reason
+  }
+
+  return (
+    <details className="card overflow-hidden group" open={expanded} onToggle={e => setExpanded(e.target.open)}>
+      <summary className="px-5 py-3 flex items-center gap-2 cursor-pointer select-none hover:bg-gray-50 transition-colors">
+        <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Receptor Preparation</span>
+        <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${allGood ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+          {completedCount}/{totalSteps} steps
+        </span>
+      </summary>
+
+      <div className="px-5 pb-4 space-y-3">
+        {/* Pipeline steps */}
+        <div className="space-y-1.5">
+          {PREP_STEPS.map(step => {
+            const status = stepStatus(step.key)
+            const reason = skipReason(step.key)
+            return (
+              <div key={step.key} className="flex items-start gap-2">
+                {status === 'done' ? (
+                  <svg className="w-4 h-4 text-green-500 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                ) : status === 'skipped' ? (
+                  <svg className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <div className="w-4 h-4 rounded-full border-2 border-gray-200 mt-0.5 shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-medium ${status === 'done' ? 'text-gray-700' : status === 'skipped' ? 'text-amber-600' : 'text-gray-400'}`}>
+                      {step.label}
+                    </span>
+                    {status === 'skipped' && reason && (
+                      <span className="text-[10px] text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded">{reason}</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-400">{step.desc}</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Details section — only when we have interesting data */}
+        {(removedHetCount > 0 || keptMetals.length > 0 || nonstdResidues.length > 0 || missingAtoms > 0 || shiftedPka.length > 0 || conversionMethod !== 'unknown') && (
+          <div className="border-t border-gray-100 pt-3 space-y-2">
+            {/* Cleaning stats */}
+            {(removedHetCount > 0 || keptMetals.length > 0 || keptCofactors.length > 0) && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                {removedHetCount > 0 && (
+                  <span className="text-gray-500">
+                    <strong className="text-gray-700">{removedHetCount}</strong> HETATM removed
+                  </span>
+                )}
+                {keptMetals.length > 0 && (
+                  <span className="text-gray-500">
+                    Metals kept: <strong className="text-gray-700">{keptMetals.join(', ')}</strong>
+                  </span>
+                )}
+                {keptCofactors.length > 0 && (
+                  <span className="text-gray-500">
+                    Cofactors: <strong className="text-gray-700">{keptCofactors.join(', ')}</strong>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Non-standard residues */}
+            {nonstdResidues.length > 0 && (
+              <div className="text-[11px] text-gray-500">
+                <span className="font-medium text-gray-600">Non-standard residues replaced:</span>{' '}
+                {nonstdResidues.map((r, i) => (
+                  <span key={i}>
+                    {i > 0 && ', '}
+                    <span className="font-mono text-gray-700">{typeof r === 'string' ? r : `${r.from}→${r.to}`}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Missing atoms */}
+            {missingAtoms > 0 && (
+              <div className="text-[11px] text-gray-500">
+                <strong className="text-gray-700">{missingAtoms}</strong> missing atoms reconstructed
+              </div>
+            )}
+
+            {/* Shifted pKa residues */}
+            {shiftedPka.length > 0 && (
+              <div>
+                <p className="text-[11px] font-medium text-amber-600 mb-1">Shifted pKa residues (>1 unit from model):</p>
+                <div className="flex flex-wrap gap-1">
+                  {shiftedPka.map((r, i) => (
+                    <span key={i} className="text-[10px] font-mono bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                      {typeof r === 'string' ? r : `${r.residue} ${r.chain || ''}${r.resnum || ''} pKa=${r.pka?.toFixed(1) ?? '?'}`}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Minimization — only show if it was actually attempted */}
+            {stepsCompleted.includes('P8_minimization') && (
+              <div className="text-[11px] text-gray-500">
+                Minimization: <strong className={minimizationConverged ? 'text-green-600' : 'text-amber-600'}>
+                  {minimizationConverged ? 'converged' : 'did not converge (500 iterations)'}
+                </strong>
+              </div>
+            )}
+
+            {/* Conversion method */}
+            <div className="text-[11px] text-gray-500">
+              PDBQT conversion: <strong className="text-gray-700 font-mono">{conversionMethod}</strong>
+            </div>
+
+            {/* Config used */}
+            {config && (
+              <div className="text-[10px] text-gray-400 mt-1">
+                pH {config.ph ?? 7.4} · metals {config.keep_metals !== false ? 'on' : 'off'} · cofactors {config.keep_cofactors !== false ? 'on' : 'off'} · minimization {config.minimize == null ? 'auto' : config.minimize ? 'on' : 'off'}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Re-prepare with different settings */}
+        <div className="border-t border-gray-100 pt-2 mt-1">
+          {!showAdvanced ? (
+            <button
+              onClick={() => {
+                // Pre-fill with current config values
+                setPh(config?.ph ?? 7.4)
+                setKeepMetals(config?.keep_metals !== false)
+                setKeepCofactors(config?.keep_cofactors !== false)
+                setMinimize(config?.minimize == null ? 'auto' : config?.minimize ? 'yes' : 'no')
+                setShowAdvanced(true)
+              }}
+              className="text-[11px] text-gray-400 hover:text-bx-light-text transition-colors"
+            >
+              Re-prepare with different settings →
+            </button>
+          ) : (
+            <div className="mt-2 space-y-2.5">
+              <p className="text-xs font-medium text-gray-600 mb-2">Preparation settings</p>
+              {/* pH */}
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-medium text-gray-600">Protonation pH</span>
+                  <p className="text-[10px] text-gray-400">Standard physiological = 7.4</p>
+                </div>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="14"
+                  value={ph}
+                  onChange={e => setPh(parseFloat(e.target.value) || 7.4)}
+                  className="w-16 text-sm text-center px-2 py-1 rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-bx-mint/40 focus:border-bx-mint"
+                />
+              </div>
+              {/* Keep metals */}
+              <label className="flex items-center justify-between gap-3 cursor-pointer">
+                <div>
+                  <span className="text-xs font-medium text-gray-600">Keep catalytic metals</span>
+                  <p className="text-[10px] text-gray-400">ZN, MG, FE, MN, CA, CO…</p>
+                </div>
+                <input type="checkbox" checked={keepMetals} onChange={e => setKeepMetals(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-bx-mint focus:ring-bx-mint/30" />
+              </label>
+              {/* Keep cofactors */}
+              <label className="flex items-center justify-between gap-3 cursor-pointer">
+                <div>
+                  <span className="text-xs font-medium text-gray-600">Keep cofactors</span>
+                  <p className="text-[10px] text-gray-400">NAD, FAD, HEM, ATP, PLP…</p>
+                </div>
+                <input type="checkbox" checked={keepCofactors} onChange={e => setKeepCofactors(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-bx-mint focus:ring-bx-mint/30" />
+              </label>
+              {/* Minimization */}
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-medium text-gray-600">Energy minimization</span>
+                  <p className="text-[10px] text-gray-400">Auto = on for AlphaFold, off for PDB</p>
+                </div>
+                <select
+                  value={minimize}
+                  onChange={e => setMinimize(e.target.value)}
+                  className="text-xs px-2 py-1 rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-bx-mint/40 focus:border-bx-mint bg-white"
+                >
+                  <option value="auto">Auto</option>
+                  <option value="yes">Force on</option>
+                  <option value="no">Force off</option>
+                </select>
+              </div>
+              {/* Action buttons */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={async () => {
+                    setPreparing(true)
+                    setError(null)
+                    try {
+                      const { v9PrepareReceptor } = await import('../api')
+                      await v9PrepareReceptor(projectId, {
+                        force: true,
+                        ph,
+                        keep_metals: keepMetals,
+                        keep_cofactors: keepCofactors,
+                        minimize: minimize === 'auto' ? null : minimize === 'yes',
+                      })
+                      window.location.reload()
+                    } catch (err) {
+                      setError(err.userMessage || err.message || 'Re-preparation failed')
+                      setPreparing(false)
+                    }
+                  }}
+                  disabled={preparing}
+                  className="btn-primary text-xs py-1.5 px-3"
+                >
+                  {preparing ? 'Re-preparing…' : 'Re-prepare'}
+                </button>
+                <button
+                  onClick={() => setShowAdvanced(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {error && <p className="text-[10px] text-red-500 mt-1">{error}</p>}
+        </div>
+      </div>
+    </details>
   )
 }
 
@@ -672,22 +1130,11 @@ export default function ProjectHome() {
 
   const project = projects.find(p => p.id === projectId)
 
-  if (!project) {
-    return (
-      <div className="text-center py-20">
-        <p className="text-gray-400 text-sm">Project not found.</p>
-        <Link to="/" className="text-bx-light-text text-sm hover:underline mt-2 inline-block">
-          Back to projects
-        </Link>
-      </div>
-    )
-  }
-
-  const campaign = project.campaigns?.[0] || null
+  const campaign = project?.campaigns?.[0] || null
   const dbPhases = campaign?.phases || []
-  const hasTarget = !!project.target_preview
+  const hasTarget = !!project?.target_preview
 
-  // Campaign KPIs aggregated from all phases
+  // Campaign KPIs aggregated from all phases (must be before early return — Rules of Hooks)
   const campaignKpi = useMemo(() => {
     if (!dbPhases.length) return null
     return dbPhases.reduce((acc, p) => {
@@ -698,6 +1145,17 @@ export default function ProjectHome() {
       return acc
     }, { totalMolecules: 0, totalBookmarked: 0, totalRuns: 0 })
   }, [dbPhases])
+
+  if (!project) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-gray-400 text-sm">Project not found.</p>
+        <Link to="/" className="text-bx-light-text text-sm hover:underline mt-2 inline-block">
+          Back to projects
+        </Link>
+      </div>
+    )
+  }
 
   // Build funnel: always show 3 slots (A/B/C), merge with existing DB phases
   const FUNNEL_TEMPLATE = ['hit_discovery', 'hit_to_lead', 'lead_optimization']

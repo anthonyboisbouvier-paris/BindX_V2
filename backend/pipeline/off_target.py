@@ -392,7 +392,7 @@ def screen_off_targets(
             status = "risk"
             warnings.append(
                 f"{target_name}: score {score:.1f} <= {threshold:.1f} kcal/mol "
-                f"-- risque de {risk_desc}"
+                f"-- risk of {risk_desc}"
             )
         else:
             status = "safe"

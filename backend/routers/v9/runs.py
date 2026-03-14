@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_v9 import require_v9_user
 from database_v9 import get_v9_db
-from models_v9 import RunORM_V9, RunLogORM_V9
+from models_v9 import CampaignORM_V9, PhaseORM_V9, ProjectORM_V9, RunORM_V9, RunLogORM_V9
 from sqlalchemy.orm import selectinload
 from routers.v9.deps import get_phase_owned, get_run_owned
 from schemas_v9 import RunCreate, RunListItem, RunResponse
@@ -30,9 +30,11 @@ router = APIRouter()
 
 VALID_RUN_TYPES = {"import", "calculation", "generation"}
 VALID_CALCULATION_TYPES = {
-    "docking", "admet", "scoring", "enrichment", "clustering",
-    "off_target", "confidence", "retrosynthesis", "safety",
+    "docking", "adme", "toxicity", "scoring", "enrichment", "clustering",
+    "off_target", "confidence", "retrosynthesis",
     "pharmacophore", "activity_cliffs",
+    "composite",   # weighted multi-criteria score (meta-analysis)
+    "admet",  # legacy alias → runs adme + toxicity together
 }
 
 
@@ -79,6 +81,22 @@ async def create_run(
         if not body.input_molecule_ids and not run_all:
             raise HTTPException(
                 status_code=422, detail="input_molecule_ids required for calculation runs"
+            )
+
+    # Validate receptor is prepared for docking
+    if body.type == "calculation" and "docking" in (body.calculation_types or []):
+        stmt_proj = (
+            select(ProjectORM_V9)
+            .join(CampaignORM_V9, CampaignORM_V9.project_id == ProjectORM_V9.id)
+            .join(PhaseORM_V9, PhaseORM_V9.campaign_id == CampaignORM_V9.id)
+            .where(PhaseORM_V9.id == phase_id)
+        )
+        result = await db.execute(stmt_proj)
+        project = result.scalar_one_or_none()
+        if not project or not project.receptor_prep_report:
+            raise HTTPException(
+                status_code=400,
+                detail="Receptor not prepared. Go to Target Setup and click 'Prepare Receptor' before running docking.",
             )
 
     # Validate import has data
@@ -300,17 +318,23 @@ async def import_from_database(
 ):
     """Create a database import run. Fetch happens async in Celery worker.
 
-    Body: {databases: ["chembl","pubchem",...], uniprot_id, max_per_source}
-    Response is instant — no ligand_list stored in config.
+    Body (single source — preferred):
+      {database: "zinc", max_compounds: 100, filters: {...}, zinc_subset: "in-stock"}
+    Body (legacy multi-source):
+      {databases: ["chembl","zinc"], uniprot_id: "...", max_per_source: 50}
     """
     phase = await get_phase_owned(phase_id, user_id, db)
 
     if phase.status == "frozen":
         raise HTTPException(status_code=400, detail="Cannot import to a frozen phase")
 
+    # Support both single "database" (new) and "databases" array (legacy)
+    database = body.get("database")
     databases = body.get("databases", [])
+    if database:
+        databases = [database]
     if not databases:
-        raise HTTPException(status_code=422, detail="No databases selected")
+        raise HTTPException(status_code=422, detail="No database selected")
 
     invalid = set(databases) - VALID_DATABASES
     if invalid:
@@ -320,16 +344,27 @@ async def import_from_database(
             f"Valid: {', '.join(sorted(VALID_DATABASES))}",
         )
 
-    # Store only parameters — fetch happens in Celery worker
+    # Build config — single source gets richer config
+    max_compounds = body.get("max_compounds", body.get("max_per_source", 50))
+    config = {
+        "source": "database",
+        "database": databases[0],
+        "databases": databases,  # Keep for backward compat
+        "uniprot_id": body.get("uniprot_id", ""),
+        "max_per_source": max_compounds,
+        "max_compounds": max_compounds,
+        "filters": body.get("filters", {}),
+    }
+    # Source-specific config
+    if databases[0] == "zinc":
+        config["zinc_subset"] = body.get("zinc_subset")
+    if databases[0] == "enamine":
+        config["scaffold_complexity"] = body.get("scaffold_complexity", "mixed")
+
     run = RunORM_V9(
         phase_id=phase_id,
         type="import",
-        config={
-            "source": "database",
-            "databases": databases,
-            "uniprot_id": body.get("uniprot_id", ""),
-            "max_per_source": body.get("max_per_source", 50),
-        },
+        config=config,
         input_source="connected_library",
         status="created",
     )

@@ -42,6 +42,7 @@ AGENT_REGISTRY = {
     "run_analysis": "pipeline.agents.run_analysis_agent.RunAnalysisAgent",
     "candidate": "pipeline.agents.candidate_agent.CandidateEvaluationAgent",
     "optimization": "pipeline.agents.optimization_agent.OptimizationStrategyAgent",
+    "chart_advisor": "pipeline.agents.chart_advisor.ChartAdvisorAgent",
 }
 
 
@@ -176,6 +177,75 @@ def _fetch_chembl_info(uniprot_id: str) -> dict:
     except Exception as exc:
         logger.warning("ChEMBL lookup failed for %s: %s", uniprot_id, exc)
         result["description"] = f"ChEMBL lookup failed: {exc}"
+    return result
+
+
+def _fetch_pubchem_info(uniprot_id: str) -> dict:
+    """Fetch PubChem bioassay compound count for a UniProt target.
+
+    Resolves UniProt → gene name → PubChem assays → active CID count.
+    """
+    result: dict = {
+        "has_data": False,
+        "n_compounds": 0,
+        "gene_name": None,
+        "description": "No PubChem data available for this target.",
+    }
+    try:
+        # Resolve gene name
+        from pipeline.ligands import resolve_gene_name
+        gene = resolve_gene_name(uniprot_id)
+        if not gene:
+            return result
+        result["gene_name"] = gene
+
+        # Query PubChem assays for this gene
+        pubchem_base = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+        aids_resp = http_requests.get(
+            f"{pubchem_base}/assay/target/genesymbol/{gene}/aids/JSON",
+            timeout=(5, 15),
+        )
+        if aids_resp.status_code == 404:
+            result["description"] = f"No PubChem assays found for gene {gene}."
+            return result
+        aids_resp.raise_for_status()
+        aids_data = aids_resp.json()
+        all_aids = aids_data.get("IdentifierList", {}).get("AID", [])
+        if not all_aids:
+            return result
+
+        # Count unique active CIDs across first 10 assays
+        seen_cids: set = set()
+        for aid in all_aids[:10]:
+            try:
+                cid_resp = http_requests.get(
+                    f"{pubchem_base}/assay/aid/{aid}/cids/JSON?cids_type=active",
+                    timeout=(5, 10),
+                )
+                if cid_resp.status_code != 200:
+                    continue
+                data = cid_resp.json()
+                # PubChem returns CIDs in two possible formats
+                cids = data.get("IdentifierList", {}).get("CID", [])
+                if not cids:
+                    info_list = data.get("InformationList", {}).get("Information", [])
+                    if info_list:
+                        cids = info_list[0].get("CID", [])
+                seen_cids.update(cids)
+            except Exception:
+                continue
+
+        n = len(seen_cids)
+        result["has_data"] = n > 0
+        result["n_compounds"] = n
+        if n > 0:
+            result["description"] = (
+                f"{n:,} active compounds found in PubChem bioassays for {gene} "
+                f"(across {min(len(all_aids), 10)} assays)."
+            )
+    except Exception as exc:
+        logger.warning("PubChem info lookup failed for %s: %s", uniprot_id, exc)
+        result["description"] = f"PubChem lookup failed: {exc}"
     return result
 
 
@@ -468,11 +538,15 @@ async def preview_target(body: dict) -> dict:
     chembl_future = loop.run_in_executor(
         _preview_pool, _fetch_chembl_info, uniprot_id,
     )
+    pubchem_future = loop.run_in_executor(
+        _preview_pool, _fetch_pubchem_info, uniprot_id,
+    )
 
-    protein_name, pdb_info, chembl_info = await asyncio.gather(
+    protein_name, pdb_info, chembl_info, pubchem_info = await asyncio.gather(
         protein_name_future,
         pdb_info_future,
         chembl_future,
+        pubchem_future,
         return_exceptions=True,
     )
 
@@ -490,6 +564,14 @@ async def preview_target(body: dict) -> dict:
             "n_with_ic50": 0,
             "target_chembl_id": None,
             "description": f"ChEMBL lookup failed: {chembl_info}",
+        }
+    if isinstance(pubchem_info, BaseException):
+        logger.warning("PubChem lookup raised: %s", pubchem_info)
+        pubchem_info = {
+            "has_data": False,
+            "n_compounds": 0,
+            "gene_name": None,
+            "description": f"PubChem lookup failed: {pubchem_info}",
         }
 
     structures_list = _build_structures_list(pdb_info, uniprot_id)
@@ -519,6 +601,7 @@ async def preview_target(body: dict) -> dict:
         "structures": structures_list,
         "pockets": pockets_info,
         "chembl_info": chembl_info,
+        "pubchem_info": pubchem_info,
     }
 
 

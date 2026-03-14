@@ -14,7 +14,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import case, func, literal, or_, select, text, tuple_
+from sqlalchemy import Float, case, func, literal, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -40,13 +40,110 @@ router = APIRouter()
 # Direct columns on the molecules table that can be sorted
 VALID_SORT_FIELDS = {
     "created_at", "smiles", "name", "bookmarked", "canonical_smiles",
-    "invalidated",
+    "invalidated", "source_run_id", "generation_level",
 }
 
-# Property-based sort fields — resolved via lateral join on molecule_properties
-PROPERTY_SORT_FIELDS = {
-    "docking_score", "QED", "logP", "MW", "TPSA", "HBD", "HBA",
-    "cnn_score", "cnn_affinity", "composite_score",
+# Legacy property_name aliases for backward compat with old "admet" runs.
+# When sorting/filtering, we search both the new name and the legacy name.
+_PROP_NAME_ALIASES = {
+    "adme": "admet",      # new ADME runs store as "adme", old ones as "admet"
+    "toxicity": "admet",  # new Toxicity runs store as "toxicity", old ones as "admet"
+}
+
+# Maps frontend sort key → (property_name, jsonb_path_keys)
+# Used to resolve nested JSON properties for server-side sorting.
+# json_path=[] means flat EAV (property_value is a bare scalar).
+SORT_FIELD_MAP = {
+    # --- physicochemical ---
+    "MW": ("physicochemical", ["MW"]),
+    "HBD": ("physicochemical", ["hbd"]),
+    "HBA": ("physicochemical", ["hba"]),
+    "QED": ("physicochemical", ["qed"]),
+    "logP": ("physicochemical", ["logP"]),
+    "TPSA": ("physicochemical", ["tpsa"]),
+    "rotatable_bonds": ("physicochemical", ["rotatable_bonds"]),
+    "lipinski_pass": ("physicochemical", ["lipinski_pass"]),
+    "heavy_atom_count": ("physicochemical", ["heavy_atom_count"]),
+    "ro3_pass": ("physicochemical", ["ro3_pass"]),
+    "inchikey": ("physicochemical", ["inchikey"]),
+    # --- sa_score ---
+    "sa_score": ("sa_score", ["sa_score"]),
+    # --- ligand_efficiency ---
+    "ligand_efficiency": ("ligand_efficiency", ["ligand_efficiency"]),
+    # --- docking ---
+    "docking_score": ("docking", ["affinity"]),
+    "cnn_score": ("docking", ["cnn_score"]),
+    "cnn_affinity": ("docking", ["cnn_affinity"]),
+    "cnn_vs": ("docking", ["cnn_vs"]),
+    "consensus_ecr": ("docking", ["consensus_ecr"]),
+    "pocket_distance": ("docking", ["pocket_distance"]),
+    # --- adme — absorption ---
+    "solubility": ("adme", ["absorption", "solubility"]),
+    "oral_bioavailability": ("adme", ["absorption", "oral_bioavailability"]),
+    "pgp_substrate": ("adme", ["absorption", "pgp_substrate"]),
+    "intestinal_permeability": ("adme", ["absorption", "intestinal_permeability"]),
+    # --- adme — distribution ---
+    "BBB": ("adme", ["distribution", "bbb_permeability"]),
+    "vd": ("adme", ["distribution", "vd"]),
+    "plasma_protein_binding": ("adme", ["distribution", "plasma_protein_binding"]),
+    # --- adme — metabolism ---
+    "cyp1a2_inhibitor": ("adme", ["metabolism", "cyp1a2_inhibitor"]),
+    "cyp2c9_inhibitor": ("adme", ["metabolism", "cyp2c9_inhibitor"]),
+    "cyp2d6_inhibitor": ("adme", ["metabolism", "cyp2d6_inhibitor"]),
+    "cyp3a4_inhibitor": ("adme", ["metabolism", "cyp3a4_inhibitor"]),
+    "cyp2c19_inhibitor": ("adme", ["metabolism", "cyp2c19_inhibitor"]),
+    # --- adme — excretion ---
+    "half_life": ("adme", ["excretion", "half_life"]),
+    # --- toxicity ---
+    "composite_score": ("toxicity", ["composite_score"]),
+    "safety_color_code": ("toxicity", ["color_code"]),
+    "hERG": ("toxicity", ["toxicity", "herg_inhibition"]),
+    "hepatotoxicity": ("toxicity", ["toxicity", "hepatotoxicity"]),
+    "carcinogenicity": ("toxicity", ["toxicity", "carcinogenicity"]),
+    "ames_mutagenicity": ("toxicity", ["toxicity", "ames_mutagenicity"]),
+    "skin_sensitization": ("toxicity", ["toxicity", "skin_sensitization"]),
+    # --- druglikeness_rules (piggyback on ADME run) ---
+    "cns_mpo": ("druglikeness_rules", ["cns_mpo"]),
+    "pfizer_alert": ("druglikeness_rules", ["pfizer_alert"]),
+    "gsk_alert": ("druglikeness_rules", ["gsk_alert"]),
+    "brenk_alert": ("druglikeness_rules", ["brenk_alert"]),
+    # --- confidence ---
+    "confidence_score": ("confidence", ["confidence_score"]),
+    "pains_alert": ("confidence", ["pains_alert"]),
+    "applicability_domain": ("confidence", ["applicability_domain"]),
+    # --- clustering ---
+    "cluster_id": ("clustering", ["cluster_id"]),
+    "tanimoto_to_centroid": ("clustering", ["tanimoto_to_centroid"]),
+    "is_representative": ("clustering", ["is_representative"]),
+    # --- off_target ---
+    "selectivity_score": ("off_target", ["selectivity_score"]),
+    "off_target_hits": ("off_target", ["off_target_hits"]),
+    "selectivity_ratio": ("off_target", ["selectivity_ratio"]),
+    # --- enrichment ---
+    "interactions_count": ("enrichment", ["interactions_count"]),
+    "scaffold": ("enrichment", ["scaffold"]),
+    # --- retrosynthesis ---
+    "n_synth_steps": ("retrosynthesis", ["n_synth_steps"]),
+    "synth_confidence": ("retrosynthesis", ["synth_confidence"]),
+    "synth_cost_estimate": ("retrosynthesis", ["synth_cost_estimate"]),
+    "reagents_available": ("retrosynthesis", ["reagents_available"]),
+    # --- activity_cliffs ---
+    "is_cliff": ("activity_cliffs", ["is_cliff"]),
+    "sali_max": ("activity_cliffs", ["sali_max"]),
+    "n_cliffs": ("activity_cliffs", ["n_cliffs"]),
+    # --- pharmacophore ---
+    "pharmacophore_features": ("pharmacophore", ["pharmacophore_features"]),
+    "pharmacophore_similarity": ("pharmacophore", ["pharmacophore_similarity"]),
+    # --- Import metadata (flat EAV — property_value is a bare scalar) ---
+    "pchembl_value": ("pchembl_value", []),
+    "activity_value_nM": ("activity_value_nM", []),
+    "activity_type": ("activity_type", []),
+    "import_mwt": ("mwt", []),
+    "import_logp": ("logp", []),
+    "import_hbd": ("import_hbd", []),
+    "import_hba": ("import_hba", []),
+    "import_tpsa": ("import_tpsa", []),
+    "source": ("source", []),
 }
 
 
@@ -148,19 +245,42 @@ async def list_molecules(
     total = total_result.scalar() or 0
 
     # --- Determine sort column ---
-    is_property_sort = sort_by in PROPERTY_SORT_FIELDS
-    if not is_property_sort and sort_by not in VALID_SORT_FIELDS:
-        sort_by = "created_at"
+    is_property_sort = sort_by not in VALID_SORT_FIELDS
 
     if is_property_sort:
-        # Lateral join to get the property value for sorting
+        # Resolve property_name and JSON path from SORT_FIELD_MAP
+        mapping = SORT_FIELD_MAP.get(sort_by)
+        if mapping:
+            prop_name, json_path = mapping
+        else:
+            # Fallback: treat sort_by as both property_name and single-key path
+            prop_name = sort_by
+            json_path = ["value"]
+
+        # Build sort expression from JSONB path
+        json_col = MoleculePropertyORM_V9.property_value
+        if not json_path:
+            # Flat EAV: property_value is a bare scalar (e.g. "6.5"), cast directly
+            json_col = json_col.astext
+        else:
+            # Nested JSONB: ->'key1'->...->>last_key  (astext on final key for castability)
+            for key in json_path[:-1]:
+                json_col = json_col[key]          # -> returns JSONB
+            json_col = json_col[json_path[-1]].astext   # ->> returns text
+
+        # Support legacy property names (e.g. "admet" → "adme"/"toxicity")
+        prop_names = [prop_name]
+        legacy = _PROP_NAME_ALIASES.get(prop_name)
+        if legacy:
+            prop_names.append(legacy)
+
         prop_sub = (
             select(
-                MoleculePropertyORM_V9.property_value["value"].as_float().label("prop_val")
+                json_col.cast(Float).label("prop_val")
             )
             .where(
                 MoleculePropertyORM_V9.molecule_id == MoleculeORM_V9.id,
-                MoleculePropertyORM_V9.property_name == sort_by,
+                MoleculePropertyORM_V9.property_name.in_(prop_names),
             )
             .limit(1)
             .correlate(MoleculeORM_V9)
@@ -241,8 +361,10 @@ async def list_molecules(
             last_val = last_val.isoformat()
         next_cursor = _encode_cursor(last_val, last.id)
 
+    responses = [_mol_to_response(m) for m in mols]
+
     return MoleculeListResponse(
-        molecules=[_mol_to_response(m) for m in mols],
+        molecules=responses,
         total=total,
         offset=offset,
         limit=limit,
@@ -260,7 +382,7 @@ async def molecule_stats(
     user_id: str = Depends(require_v9_user),
     db: AsyncSession = Depends(get_v9_db),
 ):
-    """Lightweight stats for a phase: total, bookmarked, ai_generated."""
+    """Stats for a phase: counts + global min/max per numeric column."""
     await get_phase_owned(phase_id, user_id, db)
 
     stmt = select(
@@ -272,11 +394,52 @@ async def molecule_stats(
     result = await db.execute(stmt)
     row = result.one()
 
+    # Compute global min/max per numeric column from properties
+    column_ranges = await _compute_column_ranges(phase_id, db)
+
     return MoleculeStatsResponse(
         total=row.total,
         bookmarked=row.bookmarked,
         ai_generated=row.ai_generated,
+        column_ranges=column_ranges,
     )
+
+
+async def _compute_column_ranges(phase_id: UUID, db: AsyncSession) -> dict:
+    """Compute global min/max for each numeric property column in a phase."""
+    # Load all property rows for this phase
+    prop_stmt = (
+        select(MoleculePropertyORM_V9)
+        .where(
+            MoleculePropertyORM_V9.molecule_id.in_(
+                select(MoleculeORM_V9.id).where(MoleculeORM_V9.phase_id == phase_id)
+            )
+        )
+    )
+    prop_result = await db.execute(prop_stmt)
+    all_props = prop_result.scalars().all()
+
+    ranges: dict = {}
+    for p in all_props:
+        for col_key, (prop_name, json_path) in SORT_FIELD_MAP.items():
+            # Match current name or legacy alias
+            legacy = _PROP_NAME_ALIASES.get(prop_name)
+            if p.property_name != prop_name and p.property_name != legacy:
+                continue
+            val = p.property_value
+            for k in json_path:
+                if isinstance(val, dict):
+                    val = val.get(k)
+                else:
+                    val = None
+                    break
+            if val is not None and isinstance(val, (int, float)):
+                if col_key not in ranges:
+                    ranges[col_key] = {"min": val, "max": val}
+                else:
+                    ranges[col_key]["min"] = min(ranges[col_key]["min"], val)
+                    ranges[col_key]["max"] = max(ranges[col_key]["max"], val)
+    return ranges
 
 
 @router.get("/molecules/{molecule_id}", response_model=MoleculeResponse)

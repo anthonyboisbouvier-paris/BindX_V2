@@ -137,7 +137,7 @@ const useWorkspaceStore = create((set, get) => ({
     if (!get()._isAuthenticated) return
     await v9DeletePhase(phaseId)
     // Clear current phase immediately to stop polling on deleted phase
-    set({ currentPhaseId: null, moleculePages: [], currentPhaseRuns: [] })
+    set({ currentPhaseId: null, molecules: [], currentPhaseRuns: [] })
     await get().refreshProjects()
   },
 
@@ -146,26 +146,26 @@ const useWorkspaceStore = create((set, get) => ({
   currentCampaignId: null,
   currentPhaseId: null,
 
-  selectProject: (projectId) => set({
-    currentProjectId: projectId,
-    currentCampaignId: null,
-    currentPhaseId: null,
-    selectedMoleculeIds: new Set(),
-  }),
+  selectProject: (projectId) => {
+    if (get().currentProjectId === projectId) return
+    set({
+      currentProjectId: projectId,
+      currentCampaignId: null,
+      currentPhaseId: null,
+      selectedMoleculeIds: new Set(),
+    })
+  },
 
-  selectCampaign: (campaignId) => set({
-    currentCampaignId: campaignId,
-    currentPhaseId: null,
-    selectedMoleculeIds: new Set(),
-  }),
+  selectCampaign: (campaignId) => {
+    if (get().currentCampaignId === campaignId) return
+    set({
+      currentCampaignId: campaignId,
+      currentPhaseId: null,
+      selectedMoleculeIds: new Set(),
+    })
+  },
 
-  selectPhase: (phaseId) => set({
-    currentPhaseId: phaseId,
-    selectedMoleculeIds: new Set(),
-    bookmarkOverrides: {},
-    serverSort: { sort_by: 'created_at', sort_dir: 'desc' },
-    serverFilters: { search: '', bookmarked_only: false },
-  }),
+  selectPhase: (phaseId) => set({ currentPhaseId: phaseId }),
 
   // ===== Derived (computed from state) =====
   // NOTE: Zustand doesn't have native computed — we use getter functions
@@ -314,47 +314,52 @@ const useWorkspaceStore = create((set, get) => ({
     return created
   },
 
-  // ===== Molecules (paginated) =====
-  moleculePages: [],
+  // ===== Molecules (page-based pagination) =====
+  molecules: [],
   moleculeTotal: 0,
-  moleculeNextCursor: null,
-  moleculeHasMore: false,
-  moleculeStats: { total: 0, bookmarked: 0, ai_generated: 0 },
+  moleculePage: 1,
+  moleculePageSize: 100,
+  moleculeStats: { total: 0, bookmarked: 0, ai_generated: 0, column_ranges: {} },
   moleculesLoading: false,
   serverSort: { sort_by: 'created_at', sort_dir: 'desc' },
   serverFilters: { search: '', bookmarked_only: false },
-  _loadMoreLock: false,
+  _molRequestId: 0,
 
-  refreshMolecules: async (pId, { append = false, cursor: cursorArg } = {}) => {
+  refreshMolecules: async (pId, { page } = {}) => {
     const id = pId || get().currentPhaseId
     if (!id || !get()._isAuthenticated) return
+    // Increment request counter — only the latest request's response is applied
+    const requestId = (get()._molRequestId || 0) + 1
+    set({ _molRequestId: requestId, moleculesLoading: true })
     try {
-      if (!append) set({ moleculesLoading: true })
-
-      const { serverSort, serverFilters } = get()
+      const { serverSort, serverFilters, moleculePage, moleculePageSize } = get()
+      const effectivePage = page || moleculePage
       const params = {
         sort_by: serverSort.sort_by,
         sort_dir: serverSort.sort_dir,
-        limit: 200,
+        limit: moleculePageSize,
+        offset: (effectivePage - 1) * moleculePageSize,
       }
       if (serverFilters.search) params.search = serverFilters.search
       if (serverFilters.bookmarked_only) params.bookmarked_only = true
-      if (append && cursorArg) params.cursor = cursorArg
 
       const data = await v9ListMolecules(id, params)
+
+      // Discard stale response if a newer request was initiated
+      if (get()._molRequestId !== requestId) return
+
       const mols = Array.isArray(data) ? data : data.molecules || []
 
-      set(s => ({
-        moleculePages: append ? [...s.moleculePages, mols] : [mols],
+      set({
+        molecules: mols,
         moleculeTotal: data.total || mols.length,
-        moleculeNextCursor: data.next_cursor || null,
-        moleculeHasMore: data.has_more || false,
+        moleculePage: effectivePage,
         moleculesLoading: false,
-        _loadMoreLock: false,
-      }))
+      })
     } catch (err) {
+      if (get()._molRequestId !== requestId) return
       console.warn('[Workspace] Failed to fetch molecules:', err.message)
-      set({ moleculesLoading: false, _loadMoreLock: false })
+      set({ moleculesLoading: false })
     }
   },
 
@@ -369,28 +374,39 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
-  loadMoreMolecules: () => {
-    const { _loadMoreLock, moleculeHasMore, moleculeNextCursor, currentPhaseId } = get()
-    if (_loadMoreLock || !moleculeHasMore || !moleculeNextCursor) return
-    set({ _loadMoreLock: true })
-    get().refreshMolecules(currentPhaseId, { append: true, cursor: moleculeNextCursor })
+  goToPage: (page) => {
+    const { moleculeTotal, moleculePageSize, currentPhaseId } = get()
+    const maxPage = Math.max(1, Math.ceil(moleculeTotal / moleculePageSize))
+    const clamped = Math.max(1, Math.min(page, maxPage))
+    set({ moleculePage: clamped, selectedMoleculeIds: new Set() })
+    get().refreshMolecules(currentPhaseId, { page: clamped })
+  },
+
+  setPageSize: (size) => {
+    set({ moleculePageSize: size, moleculePage: 1, selectedMoleculeIds: new Set() })
+    get().refreshMolecules(get().currentPhaseId, { page: 1 })
   },
 
   updateServerSort: (sort_by, sort_dir) => {
-    set({ serverSort: { sort_by, sort_dir } })
+    set({ serverSort: { sort_by, sort_dir }, moleculePage: 1, selectedMoleculeIds: new Set() })
+    get().refreshMolecules(get().currentPhaseId, { page: 1 })
   },
 
   updateServerFilters: (filters) => {
-    set(s => ({ serverFilters: { ...s.serverFilters, ...filters } }))
+    set(s => ({
+      serverFilters: { ...s.serverFilters, ...filters },
+      moleculePage: 1,
+      selectedMoleculeIds: new Set(),
+    }))
+    get().refreshMolecules(get().currentPhaseId, { page: 1 })
   },
 
   // ===== Derived getters =====
   getPhaseMolecules: () => {
-    const { moleculePages, bookmarkOverrides } = get()
+    const { molecules, bookmarkOverrides } = get()
     const phase = get().getCurrentPhase()
     if (!phase) return []
-    const allMols = moleculePages.flat()
-    return allMols.map(m => ({
+    return molecules.map(m => ({
       ...m,
       bookmarked: bookmarkOverrides[m.id] !== undefined ? bookmarkOverrides[m.id] : m.bookmarked,
     }))
@@ -405,17 +421,23 @@ const useWorkspaceStore = create((set, get) => ({
   // ===== Phase change handler =====
   _onPhaseChange: async (phaseId) => {
     if (phaseId && get()._isAuthenticated) {
+      set({
+        moleculePage: 1,
+        selectedMoleculeIds: new Set(),
+        bookmarkOverrides: {},
+        serverSort: { sort_by: 'created_at', sort_dir: 'desc' },
+        serverFilters: { search: '', bookmarked_only: false },
+      })
       get().refreshRuns(phaseId)
-      get().refreshMolecules(phaseId)
+      get().refreshMolecules(phaseId, { page: 1 })
       get().refreshStats(phaseId)
     } else {
       set({
         phaseRuns: [],
-        moleculePages: [],
+        molecules: [],
         moleculeTotal: 0,
-        moleculeNextCursor: null,
-        moleculeHasMore: false,
-        moleculeStats: { total: 0, bookmarked: 0, ai_generated: 0 },
+        moleculePage: 1,
+        moleculeStats: { total: 0, bookmarked: 0, ai_generated: 0, column_ranges: {} },
       })
     }
   },

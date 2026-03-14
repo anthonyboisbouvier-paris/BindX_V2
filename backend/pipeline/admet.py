@@ -163,7 +163,11 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
         flags.append("warning: low oral bioavailability predicted")
 
     solubility = _val(absorption, "solubility", 0.5)
-    if solubility < 0.3:
+    # Solubility can be logS (negative) or 0-1 probability
+    if solubility < -4:  # logS scale: < -4 is poorly soluble
+        score -= 0.05
+        flags.append("warning: poor aqueous solubility")
+    elif 0 <= solubility < 0.3:  # probability scale
         score -= 0.05
         flags.append("warning: poor aqueous solubility")
 
@@ -607,62 +611,78 @@ def _map_admet_ai_output(preds: dict) -> dict:
                     continue
         return default
 
+    def _clamp01(v: float) -> float:
+        """Clamp a probability to [0, 1]."""
+        return max(0.0, min(1.0, v))
+
+    def _ppbr_to_frac(v: float) -> float:
+        """PPBR_AZ returns 0-100% → convert to fraction 0-1."""
+        if v > 1.0:
+            v = v / 100.0
+        return max(0.0, min(1.0, v))
+
+    # Solubility: keep raw logS from ADMET-AI (negative values are normal)
+    # Solubility_AqSolDB / ESOL return logS (mol/L), typically -10 to 0
+    raw_sol = _get(["Solubility_AqSolDB", "ESOL"], None)
+    if raw_sol is not None:
+        sol_value = round(raw_sol, 2)  # keep logS as-is
+    else:
+        sol_value = _get(["solubility"], 0.5)
+
     return {
         "absorption": {
-            "oral_bioavailability": _get([
+            "oral_bioavailability": _clamp01(_get([
                 "Bioavailability_Ma", "bioavailability", "F20_Lethal",
                 "HIA_Hou", "oral_bioavailability",
-            ], 0.5),
-            "intestinal_permeability": _get([
+            ], 0.5)),
+            "intestinal_permeability": _clamp01(_get([
                 "HIA_Hou", "Caco2_Wang", "intestinal_absorption",
                 "intestinal_permeability",
-            ], 0.5),
-            "solubility": _get([
-                "Solubility_AqSolDB", "ESOL", "solubility",
-            ], 0.5),
-            "pgp_substrate": _get([
+            ], 0.5)),
+            "solubility": sol_value,
+            "pgp_substrate": _clamp01(_get([
                 "Pgp_Broccatelli", "pgp_substrate", "P-gp",
-            ], 0.5),
+            ], 0.5)),
         },
         "distribution": {
-            "plasma_protein_binding": _get([
+            "plasma_protein_binding": _ppbr_to_frac(_get([
                 "PPBR_AZ", "ppb", "plasma_protein_binding",
-            ], 0.5),
-            "bbb_permeability": _get([
+            ], 0.5)),
+            "bbb_permeability": _clamp01(_get([
                 "BBB_Martins", "bbb_permeability", "BBB",
-            ], 0.5),
+            ], 0.5)),
             "vd": _get([
                 "VDss_Lombardo", "vd", "volume_distribution",
             ], 0.5),
         },
         "metabolism": {
-            "cyp1a2_inhibitor": _get([
+            "cyp1a2_inhibitor": _clamp01(_get([
                 "CYP1A2_Veith", "cyp1a2_inhibitor", "CYP1A2",
-            ], 0.0),
-            "cyp2c9_inhibitor": _get([
+            ], 0.0)),
+            "cyp2c9_inhibitor": _clamp01(_get([
                 "CYP2C9_Veith", "CYP2C9_Substrate_CarbonMangels",
                 "cyp2c9_inhibitor",
-            ], 0.0),
-            "cyp2c19_inhibitor": _get([
+            ], 0.0)),
+            "cyp2c19_inhibitor": _clamp01(_get([
                 "CYP2C19_Veith", "CYP2C19_Substrate_CarbonMangels",
                 "cyp2c19_inhibitor",
-            ], 0.0),
-            "cyp2d6_inhibitor": _get([
+            ], 0.0)),
+            "cyp2d6_inhibitor": _clamp01(_get([
                 "CYP2D6_Veith", "CYP2D6_Substrate_CarbonMangels",
                 "cyp2d6_inhibitor",
-            ], 0.0),
-            "cyp3a4_inhibitor": _get([
+            ], 0.0)),
+            "cyp3a4_inhibitor": _clamp01(_get([
                 "CYP3A4_Veith", "CYP3A4_Substrate_CarbonMangels",
                 "cyp3a4_inhibitor",
-            ], 0.0),
+            ], 0.0)),
         },
         "excretion": {
             "clearance": _get([
                 "CL-Hepa_Obach", "CL-Micro_Obach", "clearance",
             ], 0.5),
-            "half_life": _get([
+            "half_life": max(0.0, _get([
                 "Half_Life_Obach", "half_life", "t_half",
-            ], 0.5),
+            ], 0.5)),
         },
         "toxicity": {
             "herg_inhibition": _get([
@@ -793,15 +813,9 @@ def _rdkit_estimate(
     else:
         intestinal_perm = 0.25
 
-    # Solubility: inverse logP (highly lipophilic = poorly soluble)
-    if logp < 1:
-        solubility = 0.85
-    elif logp < 3:
-        solubility = 0.60
-    elif logp < 5:
-        solubility = 0.35
-    else:
-        solubility = 0.15
+    # Solubility: approximate logS (mol/L) from Yalkowsky-like heuristic
+    # logS ≈ -logP - 0.01*MW + 0.5 (simplified, no melting point)
+    solubility = round(-logp - 0.01 * mw + 0.5, 2)
 
     # P-gp substrate: large, polar molecules tend to be P-gp substrates
     pgp_score = 0.3

@@ -52,6 +52,11 @@ class ProjectORM_V9(BaseV9):
     # ChEMBL
     chembl_actives_count: Mapped[Optional[int]] = mapped_column(Integer)
     chembl_median_ic50: Mapped[Optional[float]] = mapped_column(Float)
+    # PubChem
+    pubchem_compounds_count: Mapped[Optional[int]] = mapped_column(Integer)
+    # Receptor preparation (project-level, persisted)
+    receptor_prep_config: Mapped[Optional[dict]] = mapped_column(JSONB)
+    receptor_prep_report: Mapped[Optional[dict]] = mapped_column(JSONB)
     #
     status: Mapped[str] = mapped_column(Text, default="active")
     notification_email: Mapped[Optional[str]] = mapped_column(Text)

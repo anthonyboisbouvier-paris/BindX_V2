@@ -10,6 +10,7 @@ V5bis: GNINA support (CNN scoring), consensus ranking, 3-score system.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import shutil
 import subprocess
@@ -761,6 +762,39 @@ def consensus_rank(molecules: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Pocket distance helpers
+# ---------------------------------------------------------------------------
+
+def _pdbqt_centroid(pdbqt_path: str) -> Optional[tuple[float, float, float]]:
+    """Extract centroid from a docked PDBQT pose file (ATOM/HETATM lines)."""
+    try:
+        path = Path(pdbqt_path)
+        if not path.exists():
+            return None
+        coords = []
+        with open(path) as f:
+            for line in f:
+                if line.startswith(("ATOM", "HETATM")):
+                    try:
+                        x = float(line[30:38])
+                        y = float(line[38:46])
+                        z = float(line[46:54])
+                        coords.append((x, y, z))
+                    except (ValueError, IndexError):
+                        continue
+        if not coords:
+            return None
+        n = len(coords)
+        return (
+            sum(c[0] for c in coords) / n,
+            sum(c[1] for c in coords) / n,
+            sum(c[2] for c in coords) / n,
+        )
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Batch docking
 # ---------------------------------------------------------------------------
 
@@ -773,6 +807,9 @@ def dock_all_ligands(
     size: tuple[float, float, float] = (20.0, 20.0, 20.0),
     exhaustiveness: int = 8,
     docking_engine: str = "auto",
+    num_cpu: int = 0,
+    cnn_scoring: str = "rescore",
+    batch_callback: Optional[Callable[[list[dict]], None]] = None,
 ) -> list[dict]:
     """Prepare, dock, and consensus-rank all ligands.
 
@@ -845,6 +882,9 @@ def dock_all_ligands(
                     progress_callback=progress_callback,
                     size=size,
                     exhaustiveness=exhaustiveness,
+                    num_cpu=num_cpu,
+                    cnn_scoring=cnn_scoring,
+                    batch_callback=batch_callback,
                 )
                 if gpu_results:
                     logger.info("GPU docking succeeded: %d results", len(gpu_results))
@@ -885,7 +925,7 @@ def dock_all_ligands(
             progress_callback(pct, f"Docking {name} ({i+1}/{total})")
 
         # Prepare ligand PDBQT
-        pdbqt_path = prepare_ligand(smiles, name, ligand_dir)
+        pdbqt_path, prep_meta = prepare_ligand(smiles, name, ligand_dir)
         if pdbqt_path is None:
             logger.warning("Skipping %s: preparation failed", name)
             continue
@@ -907,6 +947,7 @@ def dock_all_ligands(
             "docking_engine": dock_result.get("docking_engine", "unknown"),
             "pose_pdbqt_path": str(dock_result["pose_pdbqt_path"])
             if dock_result.get("pose_pdbqt_path") else None,
+            "_prep_meta": prep_meta,
         }
 
         # CNN metrics only available from GNINA (not Vina)
@@ -917,6 +958,17 @@ def dock_all_ligands(
             entry["cnn_affinity"] = dock_result.get("cnn_affinity", 0.0)
             # CNN_VS composite (CNNscore × CNNaffinity)
             entry["cnn_vs"] = round(clamped_cnn * entry["cnn_affinity"], 4)
+
+        # Compute pocket_distance from docked pose centroid
+        if center and entry.get("pose_pdbqt_path"):
+            pose_centroid = _pdbqt_centroid(entry["pose_pdbqt_path"])
+            if pose_centroid:
+                dist = math.sqrt(
+                    (pose_centroid[0] - center[0])**2 +
+                    (pose_centroid[1] - center[1])**2 +
+                    (pose_centroid[2] - center[2])**2
+                )
+                entry["pocket_distance"] = round(dist, 1)
 
         results.append(entry)
 

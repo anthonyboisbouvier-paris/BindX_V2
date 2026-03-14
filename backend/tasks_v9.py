@@ -124,16 +124,20 @@ async def _create_molecule(phase_id, smiles, canonical_smiles, name, source_run_
 
 
 async def _create_molecules_batch(phase_id, molecules: list[dict], source_run_id):
-    """Batch INSERT ... ON CONFLICT DO NOTHING. Returns (created_count, skipped_count).
+    """Batch INSERT ... ON CONFLICT DO NOTHING.
 
-    Each molecule dict: {"smiles": str, "canonical_smiles": str, "name": str|None}
+    Returns (created_count, skipped_count, created_rows) where created_rows
+    is a list of (id, canonical_smiles) for newly inserted molecules.
+
+    Each molecule dict: {"smiles": str, "canonical_smiles": str, "name": str|None,
+    plus optional metadata keys (mwt, logp, etc.)}
     Uses a single INSERT with N rows per call — dedup via DB constraint.
     """
     from database_v9 import AsyncSessionV9
     from sqlalchemy import text
 
     if not molecules:
-        return 0, 0
+        return 0, 0, []
 
     async with AsyncSessionV9() as session:
         # Build parameterized VALUES
@@ -153,13 +157,14 @@ async def _create_molecules_batch(phase_id, molecules: list[dict], source_run_id
             "INSERT INTO molecules (id, phase_id, smiles, canonical_smiles, name, source_run_id) "
             f"VALUES {', '.join(values_parts)} "
             "ON CONFLICT (phase_id, canonical_smiles) DO NOTHING "
-            "RETURNING id"
+            "RETURNING id, canonical_smiles"
         )
         result = await session.execute(sql, params)
-        created = len(result.fetchall())
+        rows = result.fetchall()
+        created = len(rows)
         await session.commit()
         skipped = len(molecules) - created
-        return created, skipped
+        return created, skipped, rows
 
 
 async def _store_property(molecule_id, run_id, prop_name, prop_value):
@@ -353,11 +358,28 @@ async def _get_docking_context(phase_id):
         elif project.target_pdb_id:
             pdb_url = f"https://files.rcsb.org/download/{project.target_pdb_id}.pdb"
 
+        # Check for project-level prepared receptor files
+        prep_report = project.receptor_prep_report or {}
+        project_dir = Path(f"/data/projects/{str(project.id)}")
+        prepared_pdbqt = None
+        prepared_pdb = None
+
+        if prep_report and not prep_report.get("error"):
+            pdbqt_candidate = Path(prep_report.get("pdbqt_path", ""))
+            pdb_candidate = Path(prep_report.get("prepared_pdb_path", ""))
+            if pdbqt_candidate.exists() and pdbqt_candidate.stat().st_size > 100:
+                prepared_pdbqt = pdbqt_candidate
+            if pdb_candidate.exists() and pdb_candidate.stat().st_size > 100:
+                prepared_pdb = pdb_candidate
+
         return {
             "pdb_url": pdb_url,
             "pocket_center": pocket_center,
             "pocket_config": pocket_config,
             "pdb_id": project.target_pdb_id,
+            "structure_source": project.structure_source,
+            "prepared_pdbqt": prepared_pdbqt,
+            "prepared_pdb": prepared_pdb,
         }
 
 
@@ -437,6 +459,47 @@ async def _get_molecules_by_run(run_id: str, phase_id: str):
         ]
 
 
+async def _get_existing_properties(molecule_ids: list) -> dict:
+    """Fetch all existing properties for a list of molecules.
+
+    Returns {molecule_id: {flat_prop_key: value, ...}} where nested
+    property dicts are flattened one level deep.
+    """
+    from database_v9 import AsyncSessionV9
+    from models_v9 import MoleculePropertyORM_V9
+    from sqlalchemy import select
+
+    result_map: dict = {}
+    if not molecule_ids:
+        return result_map
+
+    chunk_size = 500
+    for i in range(0, len(molecule_ids), chunk_size):
+        chunk = molecule_ids[i : i + chunk_size]
+        async with AsyncSessionV9() as session:
+            stmt = select(MoleculePropertyORM_V9).where(
+                MoleculePropertyORM_V9.molecule_id.in_(chunk)
+            )
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            for row in rows:
+                mid = row.molecule_id
+                if mid not in result_map:
+                    result_map[mid] = {}
+                val = row.property_value
+                if isinstance(val, dict):
+                    # Flatten one level (e.g. physicochemical → logP, MW, etc.)
+                    for k, v in val.items():
+                        if isinstance(v, dict):
+                            for kk, vv in v.items():
+                                result_map[mid][kk] = vv
+                        else:
+                            result_map[mid][k] = v
+                else:
+                    result_map[mid][row.property_name] = val
+    return result_map
+
+
 # ---------------------------------------------------------------------------
 # Run log helper
 # ---------------------------------------------------------------------------
@@ -462,6 +525,229 @@ def _write_log(run_id: str, level: str, message: str):
         _db_sync(_write_log_async(run_id, level, message))
     except Exception:
         logger.warning("Failed to write run log: %s", message)
+
+
+# ---------------------------------------------------------------------------
+# Preparation report helpers
+# ---------------------------------------------------------------------------
+
+def _aggregate_prep_stats(dock_results: list[dict], failure_metas: list[dict] | None = None) -> dict:
+    """Aggregate preparation metadata from docking results + failures.
+
+    Returns stats dict with counts for each step.
+    """
+    stats = {
+        "total_input": 0,
+        "passed": 0,
+        "failed_parse": 0,
+        "failed_protonation": 0,
+        "failed_conformer": 0,
+        "failed_rotatable_bonds": 0,
+        "failed_other": 0,
+        "tautomer_changed": 0,
+        "standardized": 0,
+        "protonated": 0,
+        "minimization_mmff94": 0,
+        "minimization_uff": 0,
+        "minimization_unoptimized": 0,
+    }
+
+    # Count successes from dock_results
+    for dr in dock_results:
+        meta = dr.get("_prep_meta", {})
+        if not meta:
+            stats["passed"] += 1
+            continue
+        stats["passed"] += 1
+        if meta.get("tautomer_changed"):
+            stats["tautomer_changed"] += 1
+        if meta.get("standardized"):
+            stats["standardized"] += 1
+        if meta.get("protonated"):
+            stats["protonated"] += 1
+        mini = meta.get("minimization", "")
+        if mini == "MMFF94":
+            stats["minimization_mmff94"] += 1
+        elif mini == "UFF":
+            stats["minimization_uff"] += 1
+        elif mini == "unoptimized":
+            stats["minimization_unoptimized"] += 1
+
+    # Count failures
+    for fm in (failure_metas or []):
+        meta = fm.get("_prep_meta", fm)
+        failure = meta.get("failure", "")
+        if failure == "parse":
+            stats["failed_parse"] += 1
+        elif failure == "protonation":
+            stats["failed_protonation"] += 1
+        elif failure == "conformer":
+            stats["failed_conformer"] += 1
+        elif failure == "rotatable_bonds":
+            stats["failed_rotatable_bonds"] += 1
+        elif failure:
+            stats["failed_other"] += 1
+
+    stats["total_input"] = stats["passed"] + stats["failed_parse"] + stats["failed_protonation"] + \
+        stats["failed_conformer"] + stats["failed_rotatable_bonds"] + stats["failed_other"]
+    return stats
+
+
+def _format_prep_summary(stats: dict) -> str:
+    """Format preparation stats into a human-readable log message."""
+    total = stats["total_input"]
+    passed = stats["passed"]
+    lines = [f"Preparation summary: {passed}/{total} passed"]
+
+    failures = []
+    if stats["failed_parse"]:
+        failures.append(f"  - {stats['failed_parse']} failed parse")
+    if stats["failed_rotatable_bonds"]:
+        failures.append(f"  - {stats['failed_rotatable_bonds']} filtered (rotatable bonds > 15)")
+    if stats["failed_protonation"]:
+        failures.append(f"  - {stats['failed_protonation']} failed protonation")
+    if stats["failed_conformer"]:
+        failures.append(f"  - {stats['failed_conformer']} failed conformer generation")
+    if stats["failed_other"]:
+        failures.append(f"  - {stats['failed_other']} failed (other)")
+    if failures:
+        lines.extend(failures)
+
+    details = []
+    if stats["tautomer_changed"]:
+        details.append(f"  - {stats['tautomer_changed']} had tautomer change")
+    if stats["standardized"]:
+        details.append(f"  - {stats['standardized']} were standardized (salts/fragments)")
+    mini_parts = []
+    if stats["minimization_mmff94"]:
+        mini_parts.append(f"{stats['minimization_mmff94']} MMFF94")
+    if stats["minimization_uff"]:
+        mini_parts.append(f"{stats['minimization_uff']} UFF fallback")
+    if stats["minimization_unoptimized"]:
+        mini_parts.append(f"{stats['minimization_unoptimized']} unoptimized")
+    if mini_parts:
+        details.append(f"  - Minimization: {', '.join(mini_parts)}")
+    if details:
+        lines.extend(details)
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Receptor preparation Celery task (project-level, one-time)
+# ---------------------------------------------------------------------------
+
+@celery_app.task(name="tasks_v9.prepare_receptor_task", bind=True, max_retries=1)
+def prepare_receptor_task(self, project_id: str, force: bool = False):
+    """Prepare receptor at project level. Downloads PDB, runs 7-step pipeline,
+    stores prepared files in /data/projects/{project_id}/."""
+    import requests as http_requests
+
+    logger.info("Starting receptor preparation for project %s (force=%s)", project_id, force)
+
+    # Fetch project data
+    async def _get_project_for_prep(pid):
+        from database_v9 import AsyncSessionV9
+        from models_v9 import ProjectORM_V9
+        from sqlalchemy import select
+
+        async with AsyncSessionV9() as session:
+            result = await session.execute(
+                select(ProjectORM_V9).where(ProjectORM_V9.id == uuid.UUID(pid))
+            )
+            p = result.scalar_one_or_none()
+            if p:
+                return {
+                    "id": str(p.id),
+                    "target_pdb_id": p.target_pdb_id,
+                    "target_preview": p.target_preview,
+                    "structure_source": p.structure_source,
+                    "receptor_prep_config": p.receptor_prep_config,
+                }
+        return None
+
+    async def _save_prep_result(pid, report):
+        from database_v9 import AsyncSessionV9
+        from models_v9 import ProjectORM_V9
+        from sqlalchemy import select
+
+        async with AsyncSessionV9() as session:
+            result = await session.execute(
+                select(ProjectORM_V9).where(ProjectORM_V9.id == uuid.UUID(pid))
+            )
+            p = result.scalar_one_or_none()
+            if p:
+                p.receptor_prep_report = report
+                await session.commit()
+
+    try:
+        project = _db_sync(_get_project_for_prep(project_id))
+        if not project:
+            logger.error("Project %s not found", project_id)
+            return {"error": "Project not found"}
+
+        # Get PDB URL
+        tp = project.get("target_preview") or {}
+        structure = tp.get("structure") or {}
+        pdb_url = structure.get("download_url")
+        if not pdb_url and project.get("target_pdb_id"):
+            pdb_url = f"https://files.rcsb.org/download/{project['target_pdb_id']}.pdb"
+        if not pdb_url:
+            return {"error": "No PDB URL configured"}
+
+        # Create persistent project directory
+        project_dir = Path(f"/data/projects/{project_id}")
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        pdb_filename = project.get("target_pdb_id") or "receptor"
+        pdb_path = project_dir / f"{pdb_filename}.pdb"
+
+        # Clear cached files when force re-preparing (before download)
+        if force:
+            for old_file in project_dir.glob(f"{pdb_filename}*"):
+                logger.info("Force: removing cached file %s", old_file)
+                old_file.unlink(missing_ok=True)
+
+        # Download PDB
+        logger.info("Downloading receptor PDB from %s", pdb_url)
+        resp = http_requests.get(pdb_url, timeout=(10, 60))
+        resp.raise_for_status()
+        pdb_path.write_text(resp.text)
+
+        # Get prep config (defaults = all checked)
+        prep_config = project.get("receptor_prep_config") or {}
+        structure_source = project.get("structure_source") or "pdb"
+
+        # Run 7-step preparation pipeline
+        from pipeline.prepare import prepare_receptor
+
+        pdbqt_path, prep_report = prepare_receptor(
+            pdb_path=pdb_path,
+            work_dir=project_dir,
+            structure_source=structure_source,
+            keep_metals=prep_config.get("keep_metals", True),
+            keep_cofactors=prep_config.get("keep_cofactors", True),
+            minimize=prep_config.get("minimize"),
+            ph=prep_config.get("ph", 7.4),
+        )
+
+        # Add file paths to report
+        prep_report["pdbqt_path"] = str(pdbqt_path)
+        prep_report["prepared_pdb_path"] = str(project_dir / f"{pdb_path.stem}_prepared.pdb")
+        prep_report["project_dir"] = str(project_dir)
+
+        # Save report to DB
+        _db_sync(_save_prep_result(project_id, prep_report))
+
+        logger.info("Receptor preparation complete for project %s: %s",
+                     project_id, prep_report.get("conversion_method"))
+        return {"status": "completed", "prep_report": prep_report}
+
+    except Exception as exc:
+        logger.error("Receptor preparation failed for project %s: %s", project_id, exc)
+        error_report = {"error": str(exc), "steps_completed": [], "steps_skipped": []}
+        _db_sync(_save_prep_result(project_id, error_report))
+        return {"error": str(exc)}
 
 
 # ---------------------------------------------------------------------------
@@ -557,7 +843,11 @@ def _canonicalize_stream(raw_iter):
         if not smi:
             continue
 
-        if has_rdkit:
+        # Shortcut: if source already provides canonical SMILES, skip RDKit re-parse
+        pre_canonical = item.get("canonical_smiles") if isinstance(item, dict) else None
+        if pre_canonical:
+            canonical = pre_canonical
+        elif has_rdkit:
             mol = Chem.MolFromSmiles(smi)
             if mol is None:
                 continue
@@ -569,7 +859,13 @@ def _canonicalize_stream(raw_iter):
         if not name:
             name = f"Mol_{counter}"
 
-        yield {"smiles": smi, "canonical_smiles": canonical, "name": name}
+        result = {"smiles": smi, "canonical_smiles": canonical, "name": name}
+        # Preserve source metadata (mwt, logp, hbd, hba, tpsa, pchembl, etc.)
+        if isinstance(item, dict):
+            for meta_key in ("mwt", "logp", "import_hbd", "import_hba", "import_tpsa", "pchembl_value", "activity_value_nM", "activity_type", "assay_name", "source", "mw"):
+                if item.get(meta_key) is not None:
+                    result[meta_key] = item[meta_key]
+        yield result
 
 
 def _stream_smiles_file(file_path: Path, file_format: str):
@@ -606,10 +902,41 @@ def _count_lines_fast(file_path: Path) -> int:
     return count
 
 
+_IMPORT_META_KEYS = ("mwt", "logp", "import_hbd", "import_hba", "import_tpsa", "pchembl_value", "activity_value_nM", "activity_type", "assay_name", "mw", "source")
+
+
+def _store_batch_metadata(batch: list[dict], created_rows: list, source_run_id):
+    """Store source metadata as molecule properties for newly created molecules."""
+    if not created_rows:
+        return
+    # Build lookup: canonical_smiles → metadata dict
+    meta_by_smiles: dict[str, dict] = {}
+    for mol in batch:
+        can = mol.get("canonical_smiles", "")
+        meta = {k: mol[k] for k in _IMPORT_META_KEYS if mol.get(k) is not None}
+        if meta and can:
+            meta_by_smiles[can] = meta
+
+    if not meta_by_smiles:
+        return
+
+    entries = []
+    for row in created_rows:
+        mol_id, can_smi = row[0], row[1]
+        meta = meta_by_smiles.get(can_smi)
+        if meta:
+            for prop_name, prop_value in meta.items():
+                entries.append((mol_id, source_run_id, prop_name, str(prop_value)))
+
+    if entries:
+        _db_sync(_store_properties_batch(entries))
+
+
 def _import_molecules_chunked(run_id: str, phase_id, source_run_id, mol_iter, total_estimate: int = 0) -> dict:
     """Consume a molecule iterator in batches, insert via _create_molecules_batch.
 
     Updates progress once per batch (not per molecule).
+    Stores source metadata (mwt, logp, etc.) as molecule properties.
     Returns {"created": N, "skipped": N}.
     """
     created_total = 0
@@ -620,9 +947,10 @@ def _import_molecules_chunked(run_id: str, phase_id, source_run_id, mol_iter, to
     for mol in mol_iter:
         batch.append(mol)
         if len(batch) >= IMPORT_BATCH_SIZE:
-            c, s = _db_sync(_create_molecules_batch(phase_id, batch, source_run_id))
+            c, s, rows = _db_sync(_create_molecules_batch(phase_id, batch, source_run_id))
             created_total += c
             skipped_total += s
+            _store_batch_metadata(batch, rows, source_run_id)
             processed += len(batch)
             batch = []
 
@@ -639,9 +967,10 @@ def _import_molecules_chunked(run_id: str, phase_id, source_run_id, mol_iter, to
 
     # Flush remaining
     if batch:
-        c, s = _db_sync(_create_molecules_batch(phase_id, batch, source_run_id))
+        c, s, rows = _db_sync(_create_molecules_batch(phase_id, batch, source_run_id))
         created_total += c
         skipped_total += s
+        _store_batch_metadata(batch, rows, source_run_id)
 
     return {"created": created_total, "skipped": skipped_total}
 
@@ -704,30 +1033,54 @@ async def _copy_phase_properties(source_phase_id: str, target_phase_id: str, imp
 
 
 def _fetch_database_ligands(config: dict):
-    """Fetch ligands from public databases (ChEMBL, PubChem, ZINC, Enamine, Fragments).
+    """Fetch ligands from a public database.
 
-    Runs in Celery worker context. Returns iterator of dicts.
+    Supports single source (new) and multi-source (legacy).
+    Runs in Celery worker context. Returns list of dicts.
     """
     databases = config.get("databases", [])
     uniprot_id = config.get("uniprot_id", "")
-    max_per_source = config.get("max_per_source", 50)
+    max_per_source = config.get("max_compounds", config.get("max_per_source", 50))
+    filters = config.get("filters", {})
     all_ligands = []
 
     for db_name in databases:
         try:
-            if db_name == "chembl" and uniprot_id:
+            if db_name == "chembl":
+                if not uniprot_id:
+                    raise ValueError(
+                        "ChEMBL import requires a UniProt ID. "
+                        "Please configure a target with a UniProt accession in Target Setup."
+                    )
                 from pipeline.ligands import fetch_chembl_ligands
-                all_ligands.extend(fetch_chembl_ligands(uniprot_id, max_count=max_per_source))
+                all_ligands.extend(fetch_chembl_ligands(
+                    uniprot_id, max_count=max_per_source, filters=filters if filters else None,
+                ))
 
-            elif db_name == "pubchem" and uniprot_id:
+            elif db_name == "pubchem":
+                if not uniprot_id:
+                    raise ValueError(
+                        "PubChem import requires a UniProt ID. "
+                        "Please configure a target with a UniProt accession in Target Setup."
+                    )
                 from pipeline.ligands import fetch_pubchem_ligands, resolve_gene_name
                 gene = resolve_gene_name(uniprot_id)
                 if gene:
                     all_ligands.extend(fetch_pubchem_ligands(gene, max_count=max_per_source))
+                else:
+                    raise ValueError(
+                        f"Could not resolve gene name for UniProt ID '{uniprot_id}'. "
+                        "PubChem requires a valid gene name to search."
+                    )
 
             elif db_name == "zinc":
                 from pipeline.ligands import fetch_zinc_ligands
-                all_ligands.extend(fetch_zinc_ligands(max_count=max_per_source))
+                subset = config.get("zinc_subset")
+                all_ligands.extend(fetch_zinc_ligands(
+                    max_count=max_per_source,
+                    subset=subset,
+                    filters=filters if filters else None,
+                ))
 
             elif db_name == "enamine":
                 from pipeline.ligands import sample_enamine_real
@@ -743,6 +1096,7 @@ def _fetch_database_ligands(config: dict):
 
         except Exception as exc:
             logger.warning("Failed to fetch from %s: %s", db_name, exc)
+            raise  # Propagate to mark run as failed with clear error
 
     return all_ligands
 
@@ -759,8 +1113,10 @@ def _run_import(run_id: str, run_data: dict) -> dict:
 
     # ── Branch 1: Database import (fetch in worker) ──────────────────────
     if config.get("source") == "database":
-        _db_sync(_update_run(run_id, current_step="Fetching from databases...", progress=5))
-        _write_log(run_id, "info", f"Fetching from: {config.get('databases', [])}")
+        db_name = config.get("database", config.get("databases", ["unknown"])[0])
+        max_compounds = config.get("max_compounds", config.get("max_per_source", 50))
+        _db_sync(_update_run(run_id, current_step=f"Fetching from {db_name}...", progress=5))
+        _write_log(run_id, "info", f"Fetching up to {max_compounds} compounds from {db_name}")
 
         ligands = _fetch_database_ligands(config)
         if not ligands:
@@ -931,39 +1287,66 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
         try:
             _write_log(run_id, "info", f"Starting {calc_type} on {len(molecules)} molecules")
 
-            if calc_type == "admet":
+            if calc_type in ("adme", "toxicity", "admet"):
                 from pipeline.admet import predict_admet
                 from pipeline.scoring import (
                     compute_properties, compute_cns_mpo,
                     compute_druglikeness_rules, compute_brenk_alert,
                 )
+                # predict_admet() returns full ADME+tox in one call
                 admet_results = predict_admet(smiles_list)
-                admet_entries = []
+
+                # Keys that belong to each subset
+                _ADME_SECTIONS = {"absorption", "distribution", "metabolism", "excretion"}
+                _TOX_KEYS = {"toxicity", "composite_score", "flags", "color_code"}
+
+                adme_entries = []
+                tox_entries = []
                 druglike_entries = []
+
                 for mol, admet in zip(molecules, admet_results):
-                    admet_entries.append((mol["id"], run_uuid, "admet", _filter_cols(admet, _inc)))
-                    # CNS MPO + Pfizer/GSK + Brenk (piggyback on ADMET run)
-                    _piggyback_keys = {"cns_mpo", "pfizer_alert", "gsk_alert", "brenk_alert"}
-                    if _inc is None or _piggyback_keys & _inc:
-                        try:
-                            props = compute_properties(mol["smiles"])
-                            cns_mpo = compute_cns_mpo(props)
-                            dl_rules = compute_druglikeness_rules(props)
-                            brenk = compute_brenk_alert(mol["smiles"])
-                            extra = {
-                                "cns_mpo": cns_mpo,
-                                "pfizer_alert": dl_rules["pfizer_alert"],
-                                "gsk_alert": dl_rules["gsk_alert"],
-                                "brenk_alert": brenk,
-                            }
-                            druglike_entries.append((mol["id"], run_uuid, "druglikeness_rules", _filter_cols(extra, _inc)))
-                        except Exception as e:
-                            logger.debug("CNS MPO/Brenk failed for %s: %s", mol["smiles"][:40], e)
-                _db_sync(_store_properties_batch(admet_entries))
+                    # ── ADME subset ──
+                    if calc_type in ("adme", "admet"):
+                        adme_props = {k: v for k, v in admet.items() if k in _ADME_SECTIONS}
+                        adme_filtered = _filter_cols(adme_props, _inc)
+                        # Always preserve metabolism (CYP inhibitions) — detail-level data
+                        # not in column checklist but shown in ADME detail panel
+                        if "metabolism" in adme_props and "metabolism" not in adme_filtered:
+                            adme_filtered["metabolism"] = adme_props["metabolism"]
+                        adme_entries.append((mol["id"], run_uuid, "adme", adme_filtered))
+                        # CNS MPO + Pfizer/GSK + Brenk (pharmacokinetics rules)
+                        _piggyback_keys = {"cns_mpo", "pfizer_alert", "gsk_alert", "brenk_alert"}
+                        if _inc is None or _piggyback_keys & _inc:
+                            try:
+                                props = compute_properties(mol["smiles"])
+                                cns_mpo = compute_cns_mpo(props)
+                                dl_rules = compute_druglikeness_rules(props)
+                                brenk = compute_brenk_alert(mol["smiles"])
+                                extra = {
+                                    "cns_mpo": cns_mpo,
+                                    "pfizer_alert": dl_rules["pfizer_alert"],
+                                    "gsk_alert": dl_rules["gsk_alert"],
+                                    "brenk_alert": brenk,
+                                }
+                                druglike_entries.append((mol["id"], run_uuid, "druglikeness_rules", _filter_cols(extra, _inc)))
+                            except Exception as e:
+                                logger.debug("CNS MPO/Brenk failed for %s: %s", mol["smiles"][:40], e)
+
+                    # ── Toxicity subset ──
+                    if calc_type in ("toxicity", "admet"):
+                        tox_props = {k: v for k, v in admet.items() if k in _TOX_KEYS}
+                        tox_entries.append((mol["id"], run_uuid, "toxicity", _filter_cols(tox_props, _inc)))
+
+                if adme_entries:
+                    _db_sync(_store_properties_batch(adme_entries))
+                if tox_entries:
+                    _db_sync(_store_properties_batch(tox_entries))
                 if druglike_entries:
                     _db_sync(_store_properties_batch(druglike_entries))
-                _write_log(run_id, "info", f"ADMET complete: {len(admet_results)} molecules profiled (+ CNS MPO, Pfizer/GSK, Brenk)")
-                results["admet"] = f"{len(admet_results)} molecules processed"
+
+                label = {"adme": "ADME", "toxicity": "Toxicity", "admet": "ADMET (ADME + Toxicity)"}[calc_type]
+                _write_log(run_id, "info", f"{label} complete: {len(admet_results)} molecules profiled")
+                results[calc_type] = f"{len(admet_results)} molecules processed"
 
             elif calc_type == "scoring":
                 from pipeline.scoring import (
@@ -1021,45 +1404,76 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 pocket_center = docking_ctx["pocket_center"]
                 pocket_size = tuple(docking_ctx["pocket_config"].get("size", [22, 22, 22]))
 
-                _write_log(run_id, "info", f"Downloading receptor from {pdb_url}")
-                _db_sync(_update_run(run_id, current_step="Downloading receptor PDB"))
+                # Check for project-level prepared receptor (avoids re-preparing)
+                prepared_pdbqt = docking_ctx.get("prepared_pdbqt")
+                prepared_pdb = docking_ctx.get("prepared_pdb")
 
-                with tempfile.TemporaryDirectory(prefix="docking_v9_") as tmp_dir:
-                    tmp_path = Path(tmp_dir)
-                    pdb_path = tmp_path / f"{docking_ctx.get('pdb_id', 'receptor')}.pdb"
+                if prepared_pdbqt:
+                    _write_log(run_id, "info", "Using project-level prepared receptor (skipping re-preparation)")
+                    _db_sync(_update_run(run_id, current_step="Using prepared receptor"))
+                    receptor_pdbqt = prepared_pdbqt
+                    # Use the prepared PDB's parent dir as work_dir for docking temp files
+                    tmp_context = tempfile.TemporaryDirectory(prefix="docking_v9_")
+                    tmp_path = Path(tmp_context.__enter__())
+                else:
+                    raise ValueError(
+                        "Receptor not prepared at project level. "
+                        "Please prepare the receptor in Target Setup before running docking."
+                    )
 
-                    # Download PDB
-                    resp = http_requests.get(pdb_url, timeout=(10, 60))
-                    resp.raise_for_status()
-                    pdb_path.write_text(resp.text)
-
+                try:
                     _write_log(run_id, "info",
                         f"Docking {len(molecules)} molecules — center={pocket_center}, size={pocket_size}")
 
                     # Prepare ligand list — use molecule UUID as name for collision-free mapping
                     ligands = [{"name": str(m["id"]), "smiles": m["smiles"]}
                                for m in molecules]
+                    # Build id→molecule mapping BEFORE dock_all_ligands so
+                    # on_batch_done callback can resolve names
+                    name_to_mol = {str(m["id"]): m for m in molecules}
 
                     # Read advanced docking config from run config
                     run_config = run_data.get("config") or {}
                     dock_cfg = run_config.get("docking", {}) if isinstance(run_config.get("docking"), dict) else run_config
                     dock_exhaustiveness = int(dock_cfg.get("exhaustiveness", 8))
                     dock_num_modes = int(dock_cfg.get("num_modes", 9))
-                    dock_engine = dock_cfg.get("engine", "gnina_gpu")
-                    # Frontend engine names pass through directly to dock_all_ligands
-                    # gnina_gpu → GPU only (error if unavailable)
-                    # gnina_cpu → local GNINA only
-                    # vina      → local Vina only
-                    # auto      → GPU → GNINA → Vina → mock
-
-                    # Prepare receptor: convert PDB → PDBQT (required for Vina, accepted by GNINA)
-                    from pipeline.prepare import prepare_receptor
-                    receptor_pdbqt = prepare_receptor(pdb_path, tmp_path)
-                    _write_log(run_id, "info", f"Receptor prepared: {receptor_pdbqt.name}")
+                    dock_engine = dock_cfg.get("engine") or "gnina_gpu"
+                    dock_num_cpu = int(dock_cfg.get("num_cpu") or 0)
+                    dock_cnn_scoring = dock_cfg.get("cnn_scoring") or "rescore"
 
                     # Progress callback
                     def progress_cb(pct, msg):
                         _db_sync(_update_run(run_id, current_step=msg, progress=base_pct + int(pct / total_steps)))
+
+                    # Partial results callback — save each batch immediately
+                    def on_batch_done(batch_results):
+                        partial_entries = []
+                        for dr in batch_results:
+                            mol = name_to_mol.get(dr.get("name"))
+                            if not mol:
+                                continue
+                            docking_props = {
+                                "affinity": dr.get("affinity"),
+                                "vina_score": dr.get("vina_score"),
+                                "docking_engine": dr.get("docking_engine"),
+                            }
+                            if "cnn_score" in dr:
+                                docking_props["cnn_score"] = dr["cnn_score"]
+                                docking_props["cnn_affinity"] = dr.get("cnn_affinity")
+                                docking_props["cnn_vs"] = dr.get("cnn_vs")
+                            if dr.get("pocket_distance") is not None:
+                                docking_props["pocket_distance"] = dr["pocket_distance"]
+                            if dr.get("pose_molblock"):
+                                docking_props["pose_molblock"] = dr["pose_molblock"][:50000]
+                            filtered = _filter_cols(docking_props, _inc)
+                            for always_keep in ("pose_molblock", "docking_engine", "pocket_distance"):
+                                if always_keep in docking_props:
+                                    filtered[always_keep] = docking_props[always_keep]
+                            partial_entries.append((mol["id"], run_uuid, "docking", filtered))
+                        if partial_entries:
+                            _db_sync(_store_properties_batch(partial_entries))
+                            _write_log(run_id, "info",
+                                f"Partial results saved: {len(partial_entries)} molecules from batch")
 
                     from pipeline.docking import dock_all_ligands
                     dock_results = dock_all_ligands(
@@ -1071,12 +1485,12 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         size=pocket_size,
                         exhaustiveness=dock_exhaustiveness,
                         docking_engine=dock_engine,
+                        num_cpu=dock_num_cpu,
+                        cnn_scoring=dock_cnn_scoring,
+                        batch_callback=on_batch_done,
                     )
 
                     # Store results as molecule properties (batch insert)
-                    # Build id→molecule mapping (str keys to match docking result names)
-                    name_to_mol = {str(m["id"]): m for m in molecules}
-
                     dock_entries = []  # (mol_id, run_id, prop_name, prop_value)
                     for dr in dock_results:
                         mol = name_to_mol.get(dr.get("name"))
@@ -1107,15 +1521,42 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 logger.debug("Could not read pose file for %s: %s", dr.get("name"), pe)
                         elif dr.get("pose_molblock"):
                             docking_props["pose_molblock"] = dr["pose_molblock"][:50000]
+                        # Pocket distance (computed in docking_gpu from pose centroid)
+                        if dr.get("pocket_distance") is not None:
+                            docking_props["pocket_distance"] = dr["pocket_distance"]
                         # Filter but always keep pose_molblock + docking_engine
                         filtered_dock = _filter_cols(docking_props, _inc)
-                        for always_keep in ("pose_molblock", "docking_engine"):
+                        for always_keep in ("pose_molblock", "docking_engine", "pocket_distance"):
                             if always_keep in docking_props:
                                 filtered_dock[always_keep] = docking_props[always_keep]
                         dock_entries.append((mol["id"], run_uuid, "docking", filtered_dock))
 
                     _db_sync(_store_properties_batch(dock_entries))
                     stored = len(dock_entries)
+
+                    # --- Preparation report: aggregate stats + structured log ---
+                    prep_stats = _aggregate_prep_stats(dock_results)
+                    prep_summary = _format_prep_summary(prep_stats)
+                    _write_log(run_id, "info", prep_summary)
+
+                    # Store preparation metadata per molecule
+                    prep_entries = []
+                    for dr in dock_results:
+                        meta = dr.get("_prep_meta")
+                        if not meta:
+                            continue
+                        mol = name_to_mol.get(dr.get("name"))
+                        if not mol:
+                            continue
+                        # Store clean prep metadata (no internal keys)
+                        prep_data = {
+                            k: v for k, v in meta.items()
+                            if k not in ("failure",) and v is not None
+                        }
+                        if prep_data:
+                            prep_entries.append((mol["id"], run_uuid, "preparation", prep_data))
+                    if prep_entries:
+                        _db_sync(_store_properties_batch(prep_entries))
 
                     # Ligand Efficiency (computed after docking scores are available)
                     if _inc is None or "ligand_efficiency" in _inc:
@@ -1143,6 +1584,12 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     _write_log(run_id, "info",
                         f"Docking complete: {stored}/{len(molecules)} molecules docked")
                     results["docking"] = f"{stored}/{len(molecules)} molecules docked"
+                finally:
+                    # Clean up temp directory
+                    try:
+                        tmp_context.__exit__(None, None, None)
+                    except Exception:
+                        pass
 
             elif calc_type == "enrichment":
                 # Enrichment needs docking results — preserve existing properties
@@ -1199,14 +1646,17 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         ot = screen_off_targets(mol["smiles"], tmp_dir)
                         off_target_hits = ot["n_total"] - ot["n_safe"]
                         selectivity_ratio = ot["n_safe"] / ot["n_total"] if ot["n_total"] > 0 else 0.0
-                        ot_props = {"selectivity_score": ot["selectivity_score"],
-                                    "off_target_hits": off_target_hits,
-                                    "selectivity_ratio": round(selectivity_ratio, 3),
-                                    "n_safe": ot["n_safe"],
-                                    "n_total": ot["n_total"],
-                                    "results": ot["results"],
-                                    "warnings": ot["warnings"]}
-                        ot_entries.append((mol["id"], run_uuid, "off_target", _filter_cols(ot_props, _inc)))
+                        ot_cols = {"selectivity_score": ot["selectivity_score"],
+                                   "off_target_hits": off_target_hits,
+                                   "selectivity_ratio": round(selectivity_ratio, 3)}
+                        # Metadata needed by detail panel — never filtered
+                        ot_meta = {"n_safe": ot["n_safe"],
+                                   "n_total": ot["n_total"],
+                                   "results": ot["results"],
+                                   "warnings": ot["warnings"]}
+                        ot_filtered = _filter_cols(ot_cols, _inc)
+                        ot_filtered.update(ot_meta)
+                        ot_entries.append((mol["id"], run_uuid, "off_target", ot_filtered))
                     except Exception as e:
                         logger.warning("Off-target failed for %s: %s", mol["smiles"], e)
                 _db_sync(_store_properties_batch(ot_entries))
@@ -1244,11 +1694,14 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 for mol in molecules:
                     try:
                         route = plan_synthesis(mol["smiles"])
-                        stored_val = {
+                        retro_cols = {
                             "n_synth_steps": route.get("n_steps", 0),
                             "synth_confidence": route.get("confidence", 0),
                             "synth_cost_estimate": route.get("estimated_cost"),
                             "reagents_available": route.get("all_reagents_available", True),
+                        }
+                        # Metadata needed by detail panel — never filtered
+                        retro_meta = {
                             "n_steps": route.get("n_steps", 0),
                             "confidence": route.get("confidence", 0),
                             "estimated_cost": route.get("estimated_cost"),
@@ -1258,7 +1711,9 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                             "cost_estimate": route.get("cost_estimate"),
                             "reagent_availability": route.get("reagent_availability", []),
                         }
-                        retro_entries.append((mol["id"], run_uuid, "retrosynthesis", _filter_cols(stored_val, _inc)))
+                        retro_filtered = _filter_cols(retro_cols, _inc)
+                        retro_filtered.update(retro_meta)
+                        retro_entries.append((mol["id"], run_uuid, "retrosynthesis", retro_filtered))
                     except Exception as e:
                         logger.warning("Retrosynthesis failed for %s: %s", mol["smiles"], e)
                 _db_sync(_store_properties_batch(retro_entries))
@@ -1319,6 +1774,55 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 _write_log(run_id, "info",
                     f"Activity cliff detection complete: {n_cliffs}/{len(molecules)} molecules are cliffs")
                 results["activity_cliffs"] = f"{n_cliffs} cliffs detected in {len(molecules)} molecules"
+
+            elif calc_type == "composite":
+                from pipeline.scoring import compute_weighted_composite, DEFAULT_COMPOSITE_WEIGHTS
+
+                weights = _run_config.get("weights", DEFAULT_COMPOSITE_WEIGHTS)
+
+                # Fetch existing properties for all input molecules
+                mol_ids = [m["id"] for m in molecules]
+                existing_props = _db_sync(_get_existing_properties(mol_ids))
+
+                composite_entries = []
+                scored_count = 0
+                for mol in molecules:
+                    props = existing_props.get(mol["id"], {})
+                    # Map property keys to weight keys
+                    mapped = {}
+                    if "affinity" in props:
+                        mapped["docking_score"] = props["affinity"]
+                    elif "docking_score" in props:
+                        mapped["docking_score"] = props["docking_score"]
+                    if "cnn_score" in props:
+                        mapped["cnn_score"] = props["cnn_score"]
+                    if "logP" in props or "logp" in props:
+                        mapped["logP"] = props.get("logP") or props.get("logp")
+                    if "solubility" in props:
+                        mapped["solubility"] = props["solubility"]
+                    if "selectivity_score" in props:
+                        mapped["selectivity"] = props["selectivity_score"]
+                    if "qed" in props:
+                        mapped["qed"] = props["qed"]
+                    if "composite_score" in props:
+                        mapped["safety"] = props["composite_score"]
+                    if "novelty_score" in props or "novelty" in props:
+                        mapped["novelty"] = props.get("novelty_score") or props.get("novelty")
+
+                    final, breakdown = compute_weighted_composite(mapped, weights)
+
+                    composite_entries.append((mol["id"], run_uuid, "composite", {
+                        "weighted_score": final,
+                        "breakdown": breakdown,
+                        "weights_used": weights,
+                    }))
+                    if final is not None:
+                        scored_count += 1
+
+                _db_sync(_store_properties_batch(composite_entries))
+                _write_log(run_id, "info",
+                    f"Composite score complete: {scored_count}/{len(molecules)} molecules scored")
+                results["composite"] = f"{scored_count} molecules scored"
 
             else:
                 logger.warning("Unknown calculation type: %s", calc_type)

@@ -498,7 +498,7 @@ def run_pipeline(self, job_id: str, params: dict) -> dict:
         # ------------------------------------------------------------------
         _update_progress(job_id, 17, "Preparing receptor (PDB -> PDBQT)")
         from pipeline.prepare import prepare_receptor
-        receptor_pdbqt = prepare_receptor(pdb_path, work_dir)
+        receptor_pdbqt, _prep_report = prepare_receptor(pdb_path, work_dir)
         _update_progress(job_id, 20, "Receptor prepared")
         pipeline_summary["steps_completed"].append("prepare")
         audit.log("prepare", "Receptor prepared (PDB -> PDBQT)", {
@@ -1301,7 +1301,7 @@ def run_deep_screening(self, job_id: str, params: dict) -> dict:
         # ------------------------------------------------------------------
         _update_progress(job_id, 9, "Deep screening: Preparing receptor")
         from pipeline.prepare import prepare_receptor
-        receptor_pdbqt = prepare_receptor(pdb_path, work_dir)
+        receptor_pdbqt, _prep_report = prepare_receptor(pdb_path, work_dir)
         pipeline_summary["steps_completed"].append("prepare")
         _update_progress(job_id, 10, "Receptor prepared")
 

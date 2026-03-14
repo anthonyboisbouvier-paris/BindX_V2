@@ -11,7 +11,8 @@ export const GROUP_META = {
   molecule:          { label: 'Molecule',             bg: 'bg-slate-50',    text: 'text-slate-500',    border: 'border-slate-300' },
   annotation:        { label: 'Annotations',          bg: 'bg-amber-50',   text: 'text-amber-600',    border: 'border-amber-300' },
   docking:           { label: 'Molecular Docking',    bg: 'bg-blue-50',    text: 'text-blue-600',     border: 'border-blue-400' },
-  admet:             { label: 'ADMET Properties',     bg: 'bg-emerald-50', text: 'text-emerald-600',  border: 'border-emerald-400' },
+  adme:              { label: 'ADME',                  bg: 'bg-emerald-50', text: 'text-emerald-600',  border: 'border-emerald-400' },
+  toxicity:          { label: 'Toxicity',              bg: 'bg-red-50',    text: 'text-red-600',      border: 'border-red-400' },
   scoring:           { label: 'Molecular Properties',  bg: 'bg-violet-50',  text: 'text-violet-600',   border: 'border-violet-400' },
   enrichment:        { label: 'Enrichment Analysis',  bg: 'bg-cyan-50',    text: 'text-cyan-600',     border: 'border-cyan-400' },
   clustering:        { label: 'Diversity Clustering', bg: 'bg-teal-50',    text: 'text-teal-600',     border: 'border-teal-400' },
@@ -20,7 +21,9 @@ export const GROUP_META = {
   retrosynthesis:    { label: 'Retrosynthesis',       bg: 'bg-pink-50',    text: 'text-pink-600',     border: 'border-pink-400' },
   activity_cliffs:   { label: 'Activity Cliffs',      bg: 'bg-yellow-50',  text: 'text-yellow-600',   border: 'border-yellow-400' },
   pharmacophore:     { label: 'Pharmacophore Mapping', bg: 'bg-fuchsia-50', text: 'text-fuchsia-600', border: 'border-fuchsia-400' },
+  composite:         { label: 'Composite Score',      bg: 'bg-amber-50',   text: 'text-amber-600',    border: 'border-amber-400' },
   generation:        { label: 'De Novo Generation',   bg: 'bg-sky-50',     text: 'text-sky-600',      border: 'border-sky-400' },
+  import_data:       { label: 'Import Data',          bg: 'bg-rose-50',   text: 'text-rose-600',     border: 'border-rose-400' },
 }
 
 export const PHASE_TYPES = {
@@ -35,7 +38,7 @@ export const ALL_COLUMNS = [
   // Molecule identity (always available from import)
   { key: 'name', label: 'Name', type: 'text', group: 'molecule', width: 140, sortable: true },
   { key: 'smiles', label: 'SMILES', type: 'smiles', group: 'molecule', width: 200, sortable: false },
-  { key: 'source_run_id', label: 'Source', type: 'source', group: 'molecule', width: 110, sortable: true },
+  { key: 'source_run_id', label: 'Source', type: 'source', group: 'molecule', width: 110, sortable: true, sortKey: 'source' },
   // User annotations
   { key: 'tags', label: 'Tags', type: 'tags', group: 'annotation', width: 160, sortable: false, hiddenByDefault: true },
   { key: 'user_comment', label: 'Notes', type: 'editable_text', group: 'annotation', width: 180, sortable: false, hiddenByDefault: true },
@@ -47,6 +50,7 @@ export const ALL_COLUMNS = [
   { key: 'cnn_affinity', label: 'CNN Aff.', type: 'number', group: 'docking', width: 80, sortable: true, colorScale: 'higher-better' },
   { key: 'cnn_vs', label: 'CNN VS', type: 'number', group: 'docking', width: 80, sortable: true, colorScale: 'higher-better' },
   { key: 'consensus_ecr', label: 'ECR', type: 'number', group: 'docking', width: 65, sortable: true, colorScale: 'higher-better' },
+  { key: 'pocket_distance', label: 'Pocket Dist.', type: 'number', group: 'docking', unit: 'Å', width: 85, sortable: true, colorScale: 'lower-better' },
   // Molecular Properties (from scoring run: physicochemical descriptors, drug-likeness, SA score)
   { key: 'logP', label: 'LogP', type: 'number', group: 'scoring', width: 70, sortable: true },
   { key: 'MW', label: 'MW', type: 'number', group: 'scoring', unit: 'Da', width: 70, sortable: true },
@@ -60,23 +64,25 @@ export const ALL_COLUMNS = [
   { key: 'ro3_pass', label: 'Ro3', type: 'boolean', group: 'scoring', width: 50, sortable: true },
   { key: 'inchikey', label: 'InChIKey', type: 'text', group: 'scoring', width: 180, sortable: true },
   { key: 'ligand_efficiency', label: 'LE', type: 'number', group: 'docking', width: 55, sortable: true, colorScale: 'higher-better' },
-  // ADMET Properties (from admet run: ADME + toxicity + druglikeness rules + ADMET score)
-  { key: 'solubility', label: 'Solubility', type: 'number', group: 'admet', width: 80, sortable: true, colorScale: 'higher-better' },
-  { key: 'BBB', label: 'BBB', type: 'number', group: 'admet', width: 60, sortable: true },
-  { key: 'hERG', label: 'hERG', type: 'number', group: 'admet', width: 60, sortable: true, colorScale: 'lower-better' },
-  { key: 'metabolic_stability', label: 'Met. Stab.', type: 'number', group: 'admet', width: 80, sortable: true, colorScale: 'higher-better' },
-  { key: 'oral_bioavailability', label: 'Oral Bioavail.', type: 'number', group: 'admet', width: 95, sortable: true, colorScale: 'higher-better' },
-  { key: 'plasma_protein_binding', label: 'PPB', type: 'number', group: 'admet', width: 60, sortable: true },
-  { key: 'cns_mpo', label: 'CNS MPO', type: 'number', group: 'admet', width: 70, sortable: true, colorScale: 'higher-better' },
-  { key: 'pfizer_alert', label: 'Pfizer 3/75', type: 'boolean', group: 'admet', width: 80, sortable: true },
-  { key: 'gsk_alert', label: 'GSK 4/400', type: 'boolean', group: 'admet', width: 75, sortable: true },
-  { key: 'brenk_alert', label: 'Brenk', type: 'boolean', group: 'admet', width: 60, sortable: true },
-  { key: 'ames_mutagenicity', label: 'AMES', type: 'boolean', group: 'admet', width: 60, sortable: true },
-  { key: 'hepatotoxicity', label: 'Hepatotox', type: 'number', group: 'admet', width: 80, sortable: true, colorScale: 'lower-better' },
-  { key: 'skin_sensitization', label: 'Skin Sens.', type: 'boolean', group: 'admet', width: 80, sortable: true },
-  { key: 'carcinogenicity', label: 'Carcino.', type: 'number', group: 'admet', width: 70, sortable: true, colorScale: 'lower-better' },
-  { key: 'safety_color_code', label: 'Safety', type: 'text', group: 'admet', width: 65, sortable: true, popup: 'safety' },
-  { key: 'composite_score', label: 'ADMET Score', type: 'number', group: 'admet', width: 95, sortable: true, colorScale: 'higher-better' },
+  // ADME Properties (from adme run: absorption, distribution, metabolism, excretion + druglikeness rules)
+  { key: 'solubility', label: 'logS', type: 'number', group: 'adme', width: 65, sortable: true, colorScale: 'higher-better' },
+  { key: 'BBB', label: 'BBB', type: 'number', group: 'adme', width: 60, sortable: true },
+  { key: 'oral_bioavailability', label: 'Oral Bioavail.', type: 'number', group: 'adme', width: 95, sortable: true, colorScale: 'higher-better' },
+  { key: 'plasma_protein_binding', label: 'PPB', type: 'number', group: 'adme', width: 60, sortable: true },
+  { key: 'half_life', label: 'Half-life', type: 'number', group: 'adme', unit: 'h', width: 75, sortable: true },
+  { key: 'cyp_inhibitions', label: 'CYP Inh.', type: 'number', group: 'adme', width: 65, sortable: true, colorScale: 'lower-better', computed: true },
+  { key: 'cns_mpo', label: 'CNS MPO', type: 'number', group: 'adme', width: 70, sortable: true, colorScale: 'higher-better' },
+  { key: 'pfizer_alert', label: 'Pfizer 3/75', type: 'boolean', group: 'adme', width: 80, sortable: true, invertBoolean: true },
+  { key: 'gsk_alert', label: 'GSK 4/400', type: 'boolean', group: 'adme', width: 75, sortable: true, invertBoolean: true },
+  { key: 'brenk_alert', label: 'Brenk', type: 'boolean', group: 'adme', width: 60, sortable: true, invertBoolean: true },
+  // Toxicity Properties (from toxicity run: safety endpoints + composite score)
+  { key: 'hERG', label: 'hERG', type: 'number', group: 'toxicity', width: 60, sortable: true, colorScale: 'lower-better' },
+  { key: 'ames_mutagenicity', label: 'AMES', type: 'number', group: 'toxicity', width: 60, sortable: true, colorScale: 'lower-better' },
+  { key: 'hepatotoxicity', label: 'Hepatotox', type: 'number', group: 'toxicity', width: 80, sortable: true, colorScale: 'lower-better' },
+  { key: 'skin_sensitization', label: 'Skin Sens.', type: 'number', group: 'toxicity', width: 80, sortable: true, colorScale: 'lower-better' },
+  { key: 'carcinogenicity', label: 'Carcino.', type: 'number', group: 'toxicity', width: 70, sortable: true, colorScale: 'lower-better' },
+  { key: 'safety_color_code', label: 'Safety', type: 'text', group: 'toxicity', width: 65, sortable: true, popup: 'safety' },
+  { key: 'composite_score', label: 'Safety Score', type: 'number', group: 'toxicity', width: 95, sortable: true, colorScale: 'higher-better' },
   // Enrichment Analysis
   { key: 'interactions_count', label: 'Contacts', type: 'number', group: 'enrichment', width: 75, sortable: true, colorScale: 'higher-better' },
   { key: 'scaffold', label: 'Scaffold', type: 'text', group: 'enrichment', width: 110, sortable: true },
@@ -98,6 +104,8 @@ export const ALL_COLUMNS = [
   { key: 'synth_confidence', label: 'Synth Conf.', type: 'number', group: 'retrosynthesis', width: 85, sortable: true, colorScale: 'higher-better', popup: 'retrosynthesis' },
   { key: 'synth_cost_estimate', label: 'Synth Cost', type: 'text', group: 'retrosynthesis', width: 80, sortable: true },
   { key: 'reagents_available', label: 'Reagents', type: 'boolean', group: 'retrosynthesis', width: 70, sortable: true },
+  // Composite Score (weighted multi-criteria)
+  { key: 'weighted_score', label: 'Score', type: 'number', group: 'composite', width: 80, sortable: true, colorScale: 'higher-better' },
   // Activity Cliffs
   { key: 'is_cliff', label: 'Cliff', type: 'boolean', group: 'activity_cliffs', width: 55, sortable: true },
   { key: 'sali_max', label: 'SALI', type: 'number', group: 'activity_cliffs', width: 65, sortable: true, colorScale: 'higher-better' },
@@ -108,6 +116,16 @@ export const ALL_COLUMNS = [
   // Generation
   { key: 'generation_level', label: 'Gen. Level', type: 'number', group: 'generation', width: 80, sortable: true },
   { key: 'parent_molecule_id', label: 'Parent', type: 'text', group: 'generation', width: 80, sortable: false },
+  // Import Data (metadata from source databases)
+  { key: 'pchembl_value', label: 'pChEMBL', type: 'number', group: 'import_data', width: 75, sortable: true, colorScale: 'higher-better' },
+  { key: 'activity_value_nM', label: 'Activity (nM)', type: 'number', group: 'import_data', width: 95, sortable: true, colorScale: 'lower-better' },
+  { key: 'activity_type', label: 'Act. Type', type: 'text', group: 'import_data', width: 85, sortable: true },
+  { key: 'assay_name', label: 'Assay', type: 'text', group: 'import_data', width: 160, sortable: true },
+  { key: 'import_mwt', label: 'MW (src)', type: 'number', group: 'import_data', width: 80, sortable: true },
+  { key: 'import_logp', label: 'LogP (src)', type: 'number', group: 'import_data', width: 80, sortable: true },
+  { key: 'import_hbd', label: 'HBD (src)', type: 'number', group: 'import_data', width: 70, sortable: true },
+  { key: 'import_hba', label: 'HBA (src)', type: 'number', group: 'import_data', width: 70, sortable: true },
+  { key: 'import_tpsa', label: 'TPSA (src)', type: 'number', group: 'import_data', width: 80, sortable: true },
 ]
 
 // Column key lookup for fast access
@@ -117,7 +135,7 @@ const COLUMN_MAP = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c]))
 export const COLUMN_PRESETS = {
   hit_discovery: ['name', 'docking_score', 'cnn_score', 'logP', 'MW', 'HBD', 'HBA', 'TPSA', 'lipinski_pass', 'composite_score', 'confidence_score', 'safety_color_code'],
   hit_to_lead: ['name', 'docking_score', 'cnn_score', 'composite_score', 'generation_level', 'cluster_id', 'scaffold', 'synth_confidence', 'safety_color_code'],
-  lead_optimization: ['name', 'composite_score', 'logP', 'solubility', 'BBB', 'hERG', 'metabolic_stability', 'interactions_count', 'selectivity_score', 'synth_confidence', 'safety_color_code'],
+  lead_optimization: ['name', 'composite_score', 'logP', 'solubility', 'BBB', 'hERG', 'oral_bioavailability', 'interactions_count', 'selectivity_score', 'synth_confidence', 'safety_color_code'],
 }
 
 // Backend → frontend key mapping (backend names that differ from column keys)
@@ -126,6 +144,8 @@ const PROP_ALIASES = {
   bbb_permeability: 'BBB', herg_inhibition: 'hERG',
   color_code: 'safety_color_code',
   affinity: 'docking_score', vina_score: 'docking_score',
+  mwt: 'import_mwt', mw: 'import_mwt',
+  logp: 'import_logp',
 }
 
 /**
@@ -133,14 +153,19 @@ const PROP_ALIASES = {
  * Skips arrays and special keys (flags, note, status, smiles, confidence_modifier).
  */
 function deepFlatten(obj, out = {}) {
-  const SKIP_KEYS = new Set(['flags', 'note', 'status', 'smiles', 'confidence_modifier', 'nearest_tanimoto', 'docking_status', 'tree', 'children', 'reaction', 'reactants', 'reactant_names', 'conditions', 'results', 'warnings', 'pose_molblock'])
+  const SKIP_KEYS = new Set(['flags', 'note', 'status', 'smiles', 'confidence_modifier', 'nearest_tanimoto', 'docking_status', 'tree', 'children', 'reaction', 'reactants', 'reactant_names', 'conditions', 'results', 'warnings', 'pose_molblock', 'preparation', 'breakdown', 'weights_used'])
   for (const [k, v] of Object.entries(obj)) {
     if (SKIP_KEYS.has(k)) continue
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       deepFlatten(v, out)
     } else {
       const alias = PROP_ALIASES[k] || k
-      out[alias] = v
+      // Parse string numbers from EAV storage (e.g. "6.5" → 6.5)
+      if (typeof v === 'string' && v !== '' && !isNaN(v)) {
+        out[alias] = parseFloat(v)
+      } else {
+        out[alias] = v
+      }
     }
   }
   return out
@@ -157,6 +182,22 @@ export function flattenMoleculeProperties(mol) {
   const flat = { ...mol }
   if (mol.properties && typeof mol.properties === 'object') {
     Object.assign(flat, deepFlatten(mol.properties))
+    // Preserve preparation metadata as object (skipped by deepFlatten to avoid column pollution)
+    if (mol.properties.preparation && typeof mol.properties.preparation === 'object') {
+      flat.preparation = mol.properties.preparation
+    }
+    // Preserve composite breakdown/weights for detail panel
+    const compositeData = mol.properties.composite
+    if (compositeData && typeof compositeData === 'object') {
+      if (compositeData.breakdown) flat.breakdown = compositeData.breakdown
+      if (compositeData.weights_used) flat.weights_used = compositeData.weights_used
+    }
+  }
+  // Computed: CYP inhibitions count (number of CYPs with probability > 0.5)
+  const _CYP_KEYS = ['cyp1a2_inhibitor', 'cyp2c9_inhibitor', 'cyp2c19_inhibitor', 'cyp2d6_inhibitor', 'cyp3a4_inhibitor']
+  const cypVals = _CYP_KEYS.map(k => flat[k]).filter(v => v != null && typeof v === 'number')
+  if (cypVals.length > 0) {
+    flat.cyp_inhibitions = cypVals.filter(v => v > 0.5).length
   }
   return flat
 }
@@ -219,8 +260,9 @@ export const RUN_TYPES = [
 
 // Labels come from GROUP_META — single source of truth for naming
 export const CALCULATION_SUBTYPES = [
-  { key: 'docking', icon: 'target', description: 'Dock molecules against the target protein', columns: ['docking_score', 'cnn_score', 'cnn_affinity', 'ligand_efficiency', 'cnn_vs', 'consensus_ecr'] },
-  { key: 'admet', icon: 'shield', description: 'Predict absorption, distribution, metabolism, excretion, toxicity', columns: ['solubility', 'BBB', 'hERG', 'metabolic_stability', 'oral_bioavailability', 'plasma_protein_binding', 'cns_mpo', 'pfizer_alert', 'gsk_alert', 'brenk_alert', 'ames_mutagenicity', 'hepatotoxicity', 'skin_sensitization', 'carcinogenicity', 'safety_color_code', 'composite_score'] },
+  { key: 'docking', icon: 'target', description: 'Dock molecules against the target protein', columns: ['docking_score', 'cnn_score', 'cnn_affinity', 'ligand_efficiency', 'cnn_vs', 'consensus_ecr', 'pocket_distance'] },
+  { key: 'adme', icon: 'activity', description: 'Pharmacokinetics: how the drug circulates in the body (absorption, distribution, metabolism, excretion)', columns: ['solubility', 'BBB', 'oral_bioavailability', 'plasma_protein_binding', 'half_life', 'cyp_inhibitions', 'cns_mpo', 'pfizer_alert', 'gsk_alert', 'brenk_alert'] },
+  { key: 'toxicity', icon: 'shield-alert', description: 'Toxicological risk: is the drug dangerous for the patient? (hERG, Ames, hepatotoxicity)', columns: ['hERG', 'ames_mutagenicity', 'hepatotoxicity', 'skin_sensitization', 'carcinogenicity', 'safety_color_code', 'composite_score'] },
   { key: 'scoring', icon: 'star', description: 'Physicochemical descriptors (MW, LogP, TPSA), drug-likeness rules (Lipinski, QED, Ro3), SA score', columns: ['logP', 'MW', 'HBD', 'HBA', 'TPSA', 'QED', 'lipinski_pass', 'heavy_atom_count', 'sa_score', 'ro3_pass', 'inchikey'] },
   { key: 'enrichment', icon: 'layers', description: 'ProLIF interactions, scaffold analysis', columns: ['interactions_count', 'scaffold'] },
   { key: 'clustering', icon: 'grid', description: 'Cluster by scaffold, compute Tanimoto similarity', columns: ['cluster_id', 'scaffold_smiles', 'tanimoto_to_centroid'] },
@@ -229,15 +271,17 @@ export const CALCULATION_SUBTYPES = [
   { key: 'retrosynthesis', icon: 'git-branch', description: 'Synthesis feasibility, cost estimation, reagent availability', columns: ['n_synth_steps', 'synth_confidence', 'synth_cost_estimate', 'reagents_available'] },
   { key: 'pharmacophore', icon: 'hexagon', description: 'Map 3D pharmacophoric features and compute pairwise similarity', columns: [] },
   { key: 'activity_cliffs', icon: 'trending-up', description: 'Detect structure-activity cliffs — similar molecules with large activity differences', columns: ['is_cliff', 'sali_max', 'n_cliffs'] },
+  { key: 'composite', icon: 'trophy', description: 'Weighted multi-criteria score combining docking, ADME, selectivity, and drug-likeness results from previous runs', columns: ['weighted_score'] },
 ].map(st => ({ ...st, label: GROUP_META[st.key].label }))
 
 // Estimated run times (displayed in RunCreator confirmation)
 export const ESTIMATED_TIMES = {
   import: '~5 seconds', calculation: '~1-5 minutes', generation: '~5-10 minutes',
-  docking: '~3-5 min', admet: '~30 sec', scoring: '~15 sec',
+  docking: '~3-5 min', adme: '~30 sec', toxicity: '~15 sec', scoring: '~15 sec',
   enrichment: '~1-2 min', clustering: '~30 sec', off_target: '~1 min',
   confidence: '~15 sec', retrosynthesis: '~1 min',
   pharmacophore: '~30 sec', activity_cliffs: '~15 sec',
+  composite: '~10 sec',
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +294,7 @@ export const COLUMN_DEFAULTS = {
   ro3_pass:          { checked: false },
   inchikey:          { checked: false },
   ligand_efficiency: { checked: true },
-  // ADMET — piggyback optionals
+  // ADME — piggyback optionals
   cns_mpo:      { checked: false },
   pfizer_alert: { checked: false },
   gsk_alert:    { checked: false },

@@ -85,8 +85,8 @@ export default function InfoTip({ text, variant = 'dark', size = 'sm', className
       {open && (
         <div
           ref={popupRef}
-          className={`fixed z-[9999] max-w-[280px] w-max px-3 py-2.5 rounded-lg border
-                     text-xs leading-relaxed max-h-[200px] overflow-y-auto
+          className={`fixed z-[9999] max-w-[220px] px-3 py-2.5 rounded-lg border
+                     text-xs leading-relaxed break-words whitespace-normal
                      ${popupClasses}`}
           style={{ pointerEvents: 'none', ...popupStyle }}
           role="tooltip"
@@ -121,7 +121,8 @@ export const TIPS = {
   solubility: 'Predicted aqueous solubility. Estimated from molecular descriptors (logP, MW, aromatic ring count). Essential for drug dissolution and absorption. Higher values are better.',
   BBB: 'Blood-Brain Barrier penetration prediction. Computed from logP, TPSA, MW, and HBD. High score = molecule can reach the brain. Desirable for neurological targets, undesirable otherwise.',
   hERG: 'Predicted hERG potassium channel inhibition risk. Computed from molecular descriptors. High values signal cardiac toxicity risk (QT prolongation). One of the most critical safety endpoints in drug development.',
-  metabolic_stability: 'Predicted resistance to liver metabolism (CYP enzyme degradation). Higher values mean the molecule persists longer in the body, allowing for less frequent dosing.',
+  half_life: 'Predicted elimination half-life in hours. Estimated from molecular descriptors and ADMET-AI models. Indicates how long the drug stays active in the body. Longer half-life allows for less frequent dosing.',
+  cyp_inhibitions: 'Number of CYP450 enzymes inhibited (probability > 50%). Counts CYP1A2, CYP2C9, CYP2C19, CYP2D6, CYP3A4. 0 = clean metabolic profile, ≥2 = high drug-drug interaction risk. Detail per CYP available in the ADME panel.',
   oral_bioavailability: 'Fraction of the drug reaching systemic circulation after oral administration (0-100%). Predicted from absorption and first-pass metabolism models. Above 30% is generally acceptable.',
   lipinski_pass: 'Lipinski\'s Rule of 5: checks if MW <= 500, logP <= 5, HBD <= 5, HBA <= 10. All four properties are read from the corresponding dashboard columns. Pass = the molecule is likely orally bioavailable.',
   plasma_protein_binding: 'Fraction bound to blood plasma proteins. Predicted from molecular descriptors. Highly bound molecules (>95%) have less free drug available to reach the target, potentially reducing efficacy.',
@@ -133,7 +134,8 @@ export const TIPS = {
   ro3_pass: 'Rule of 3 for fragments: checks MW <= 300, logP <= 3, HBD <= 3, HBA <= 3. Used to evaluate whether a molecule is a good starting fragment for optimization campaigns.',
 
   // --- Columns: Scoring ---
-  composite_score: 'Weighted composite score combining docking_score, QED, and ADMET properties into a single ranking (0-100). Weights are configurable per campaign. Higher = better overall candidate. Computed from dashboard columns.',
+  composite_score: 'ADMET safety score combining toxicity endpoints into a single metric (0-100). Aggregates hERG, Ames, hepatotoxicity, skin sensitization, and carcinogenicity. Higher = safer compound. Not to be confused with the Weighted Score.',
+  weighted_score: 'Weighted multi-criteria score combining your selected metrics from previous runs (docking, ADME, selectivity, drug-likeness). Configure weights when creating the Composite Score run. Higher = better overall candidate.',
   ligand_efficiency: 'Ligand Efficiency = -docking_score / heavy_atom_count. Normalizes binding affinity by molecular size. Allows fair comparison between molecules of different sizes. Higher is better.',
 
   // --- Columns: Enrichment ---
@@ -199,6 +201,7 @@ export const TIPS = {
   run_off_target: 'Off-target selectivity: docks molecules against anti-target proteins (hERG, CYP450, etc.) to verify they don\'t bind unintended targets. Produces selectivity_score, off_target_hits, selectivity_ratio.',
   run_confidence: 'Confidence analysis: evaluates prediction reliability via PAINS alerts, Brenk filters, applicability domain checks, and cross-method convergence. Produces confidence_score and alert columns.',
   run_retrosynthesis: 'AI retrosynthesis: plans the chemical synthesis route, estimates step count (n_synth_steps), cost (synth_cost_estimate), confidence, and checks reagent availability.',
+  run_composite: 'Weighted composite score: aggregates results from your previous runs (docking, ADME, scoring, off-target) into a single multi-criteria ranking. You configure the weight of each metric. Produces weighted_score column.',
   run_safety: 'Full safety profile: hERG risk (cardiac), Ames mutagenicity, hepatotoxicity, skin sensitization, and carcinogenicity. Aggregated into a color-coded safety summary (safety_color_code).',
 
   // --- Concepts ---

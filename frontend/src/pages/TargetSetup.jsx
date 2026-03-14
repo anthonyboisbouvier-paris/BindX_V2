@@ -423,6 +423,7 @@ export default function TargetSetup() {
         target_preview: {
           uniprot: uniprotInfo,
           chembl: previewData.chembl_info,
+          pubchem: previewData.pubchem_info,
           structure: selectedStructure,
           structures: previewData.structures || [],
           pockets: currentPockets,
@@ -431,9 +432,19 @@ export default function TargetSetup() {
         pockets_detected: currentPockets,
         chembl_actives_count: previewData.chembl_info?.n_actives || null,
         chembl_median_ic50: null,
+        pubchem_compounds_count: previewData.pubchem_info?.n_compounds || null,
       })
 
       await refreshProjects()
+
+      // Auto-trigger receptor preparation (7-step pipeline, project-level)
+      try {
+        const { v9PrepareReceptor } = await import('../api')
+        await v9PrepareReceptor(projectId)
+      } catch (prepErr) {
+        console.warn('Receptor preparation trigger failed (will retry at docking):', prepErr)
+      }
+
       addToast('Target validated and saved', 'success')
       navigate(`/project/${projectId}`)
     } catch (err) {
@@ -902,29 +913,47 @@ export default function TargetSetup() {
                 )}
               </div>
 
-              {/* ChEMBL info */}
-              {previewData.chembl_info?.has_data && (
-                <div className="bg-green-50 border border-green-100 rounded-lg p-4">
-                  <h3 className="text-sm font-semibold text-green-800 mb-2">ChEMBL Data Available</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="text-center">
-                      <p className="text-xl font-bold text-green-700">
-                        {previewData.chembl_info.n_actives?.toLocaleString()}
-                      </p>
-                      <p className="text-sm text-green-600">Active compounds</p>
+              {/* ChEMBL + PubChem info */}
+              <div className="grid grid-cols-1 gap-3">
+                {previewData.chembl_info?.has_data && (
+                  <div className="bg-green-50 border border-green-100 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-green-800 mb-2">ChEMBL Data Available</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-green-700">
+                          {previewData.chembl_info.n_actives?.toLocaleString()}
+                        </p>
+                        <p className="text-sm text-green-600">Active compounds</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-green-700">
+                          {previewData.chembl_info.n_with_ic50?.toLocaleString()}
+                        </p>
+                        <p className="text-sm text-green-600">With IC50 data</p>
+                      </div>
                     </div>
-                    <div className="text-center">
-                      <p className="text-xl font-bold text-green-700">
-                        {previewData.chembl_info.n_with_ic50?.toLocaleString()}
-                      </p>
-                      <p className="text-sm text-green-600">With IC50 data</p>
-                    </div>
+                    <p className="text-sm text-green-600 mt-2">
+                      Target: {previewData.chembl_info.target_chembl_id}
+                    </p>
                   </div>
-                  <p className="text-sm text-green-600 mt-2">
-                    Target: {previewData.chembl_info.target_chembl_id}
-                  </p>
-                </div>
-              )}
+                )}
+                {previewData.pubchem_info?.has_data && (
+                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-blue-800 mb-2">PubChem Bioassay Data</h3>
+                    <div className="text-center">
+                      <p className="text-xl font-bold text-blue-700">
+                        {previewData.pubchem_info.n_compounds?.toLocaleString()}
+                      </p>
+                      <p className="text-sm text-blue-600">Active compounds</p>
+                    </div>
+                    {previewData.pubchem_info.gene_name && (
+                      <p className="text-sm text-blue-600 mt-2">
+                        Gene: {previewData.pubchem_info.gene_name}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
 
             </div>
           </div>

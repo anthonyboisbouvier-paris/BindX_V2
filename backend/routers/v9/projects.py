@@ -191,3 +191,69 @@ async def preview_target_v9(
     # Reuse the V8 preview-target logic
     from routers.v8_legacy import preview_target
     return await preview_target({"uniprot_id": uniprot_id})
+
+
+@router.post("/projects/{project_id}/prepare-receptor")
+async def prepare_receptor_endpoint(
+    project_id: UUID,
+    body: dict = Body(default={}),
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """Trigger receptor preparation at project level.
+
+    All options are checked by default. The prepared receptor is stored
+    persistently so docking runs can reuse it without re-preparing.
+
+    Body (all optional):
+        keep_metals: bool = true
+        keep_cofactors: bool = true
+        minimize: bool | null = null (auto)
+        ph: float = 7.4
+        force: bool = false (re-prepare even if already done)
+    """
+    project = await get_project_owned(project_id, user_id, db)
+
+    # Validate that target is configured
+    tp = project.target_preview or {}
+    structure = tp.get("structure") or {}
+    pdb_url = structure.get("download_url")
+    if not pdb_url and project.target_pdb_id:
+        pdb_url = f"https://files.rcsb.org/download/{project.target_pdb_id}.pdb"
+    if not pdb_url:
+        raise HTTPException(
+            status_code=400,
+            detail="No PDB structure configured. Complete Target Setup first.",
+        )
+
+    # Build prep config (defaults = all checked)
+    prep_config = {
+        "keep_metals": body.get("keep_metals", True),
+        "keep_cofactors": body.get("keep_cofactors", True),
+        "minimize": body.get("minimize"),  # None = auto
+        "ph": body.get("ph", 7.4),
+    }
+    force = body.get("force", False)
+
+    # Check if already prepared with same config
+    if (not force
+            and project.receptor_prep_report
+            and project.receptor_prep_config == prep_config):
+        return {
+            "status": "already_prepared",
+            "prep_report": project.receptor_prep_report,
+        }
+
+    # Save config
+    project.receptor_prep_config = prep_config
+    await db.flush()
+
+    # Launch Celery task
+    from tasks_v9 import prepare_receptor_task
+    task = prepare_receptor_task.delay(str(project_id), force=force)
+
+    return {
+        "status": "preparing",
+        "task_id": task.id,
+        "prep_config": prep_config,
+    }

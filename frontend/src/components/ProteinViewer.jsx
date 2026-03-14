@@ -353,7 +353,7 @@ function ZoneCard({ zone, isDarkBg, isEditing, onUpdate, onToggleVisibility, onT
 }
 
 // Props: pdbUrl, pdbData, selectedPocket, uniprotFeatures, height, onDiagnostic, ligandSmiles
-export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480, onDiagnostic, ligandSmiles, dockedMolblock }) {
+export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480, onDiagnostic, ligandSmiles, dockedMolblock, dockedMolblocks }) {
   const wrapperRef = useRef(null)
   const containerRef = useRef(null)
   const viewerRef = useRef(null)
@@ -363,16 +363,16 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
   const [error, setError] = useState(null)
   const [ready, setReady] = useState(false)
   const [style, setStyle] = useState('cartoon')
-  const [colorMode, setColorMode] = useState('custom')
+  const [colorMode, setColorMode] = useState('default')
   const [customColor, setCustomColor] = useState('#00e6a0')
   const [bgColor] = useState('#0f1923')
   const [showPocket, setShowPocket] = useState(true)
   const [pocketColor, setPocketColor] = useState('#f59e0b')
-  const [ligandStyle, setLigandStyle] = useState('off') // 'ball+stick' | 'stick' | 'sphere' | 'line' | 'off'
+  const [ligandStyle, setLigandStyle] = useState('ball+stick') // 'ball+stick' | 'stick' | 'sphere' | 'line' | 'cross' | 'surface'
   const [showDockedLigand, setShowDockedLigand] = useState(true) // show docked pose when available
   const [showRefLigand, setShowRefLigand] = useState(true) // show co-crystallized reference ligand
   const [showProtein, setShowProtein] = useState(true)
-  const [pocketRadius, setPocketRadius] = useState(5)
+  const [pocketRadius, setPocketRadius] = useState(8)
   const [pocketOpacity, setPocketOpacity] = useState(0.70)
   const [pocketStyle, setPocketStyle] = useState('sphere+stick')
   const [spinning, setSpinning] = useState(false)
@@ -730,6 +730,13 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     const protein = models?.[0]
     if (!protein) return
 
+    // Remove previously added docked models (keep only the protein = model 0)
+    if (models.length > 1) {
+      for (let i = models.length - 1; i >= 1; i--) {
+        try { viewer.removeModel(models[i]) } catch (_) {}
+      }
+    }
+
     // Diagnostic data — collected during rendering
     const diag = {
       structureAtoms: 0,
@@ -817,11 +824,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       }
     }
 
-    // Handle 'ligand-only' mode — hide protein entirely
-    const effectiveLigandStyle = ligandStyle === 'ligand-only' ? 'ball+stick' : ligandStyle
-    if (ligandStyle === 'ligand-only') {
-      viewer.setStyle({ model: protein, hetflag: false }, {})
-    }
+    const effectiveLigandStyle = ligandStyle
 
     // Ligand display — show co-crystallized small molecules
     // Step 1: Always clear ALL HETATM atoms first
@@ -834,43 +837,65 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       if (ligAtoms.length === 0) diag.warnings.push('No ligand (HETATM) atoms found in this structure.')
     } catch (_) {}
 
-    // Step 2: Co-crystallized (reference) ligand — shown as default colorscheme
-    // When docked ligand is present, make reference ligand gray/transparent for comparison
-    const hasDockedLigand = dockedMolblock && showDockedLigand
-    if (effectiveLigandStyle !== 'off' && showRefLigand) {
+    // Step 2: Co-crystallized (reference) ligand — always visible with element colors
+    // Slightly transparent when docked ligand is also shown, for comparison
+    const hasDockedLigand = (dockedMolblock || (dockedMolblocks && dockedMolblocks.length > 0)) && showDockedLigand
+    if (showRefLigand) {
       const ligSel = { hetflag: true, not: { resn: [...SOLVENT_RESNAMES] }, model: protein }
-      const refOpacity = hasDockedLigand ? 0.4 : 1.0
-      const refColor = hasDockedLigand ? '#9ca3af' : undefined // gray when comparing
+      const refOpacity = hasDockedLigand ? 0.75 : 1.0
       const ligSpec = (() => {
         switch (effectiveLigandStyle) {
-          case 'stick':   return { stick: { color: refColor, colorscheme: refColor ? undefined : 'default', radius: 0.15, opacity: refOpacity } }
-          case 'sphere':  return { sphere: { color: refColor, colorscheme: refColor ? undefined : 'default', scale: 1.0, opacity: refOpacity * 0.9 } }
-          case 'line':    return { line: { color: refColor, colorscheme: refColor ? undefined : 'default', linewidth: 2 } }
-          case 'cross':   return { cross: { color: refColor, colorscheme: refColor ? undefined : 'default', linewidth: 2, opacity: refOpacity } }
-          case 'surface': return { stick: { color: refColor, colorscheme: refColor ? undefined : 'default', radius: 0.12, opacity: refOpacity * 0.5 } }
-          default:        return { stick: { color: refColor, colorscheme: refColor ? undefined : 'default', radius: 0.2, opacity: refOpacity }, sphere: { color: refColor, colorscheme: refColor ? undefined : 'default', radius: 0.4, opacity: refOpacity * 0.8 } }
+          case 'stick':   return { stick: { colorscheme: 'default', radius: 0.15, opacity: refOpacity } }
+          case 'sphere':  return { sphere: { colorscheme: 'default', scale: 1.0, opacity: refOpacity * 0.9 } }
+          case 'line':    return { line: { colorscheme: 'default', linewidth: 2 } }
+          case 'cross':   return { cross: { colorscheme: 'default', linewidth: 2, opacity: refOpacity } }
+          case 'surface': return {}
+          default:        return { stick: { colorscheme: 'default', radius: 0.2, opacity: refOpacity }, sphere: { colorscheme: 'default', radius: 0.4, opacity: refOpacity * 0.8 } }
         }
       })()
       viewer.setStyle(ligSel, ligSpec)
       // Add translucent surface for ligand in surface mode
       if (effectiveLigandStyle === 'surface') {
-        doAddSurface({ opacity: refOpacity * 0.7, color: refColor || '#06d6a0' }, ligSel)
+        doAddSurface({ opacity: refOpacity * 0.7, color: '#06d6a0' }, ligSel)
       }
     }
 
-    // Step 3: Docked ligand — render from molblock as a separate model
-    if (dockedMolblock && showDockedLigand) {
-      try {
-        const format = dockedMolblock.includes('$$$$') || dockedMolblock.includes('V2000') || dockedMolblock.includes('V3000') ? 'sdf' : 'pdb'
-        const dockedModel = viewer.addModel(dockedMolblock, format)
-        viewer.setStyle({ model: dockedModel }, {
-          stick: { color: '#06d6a0', radius: 0.2, opacity: 1.0 },
-          sphere: { color: '#06d6a0', radius: 0.4, opacity: 0.9 },
-        })
-        diag.dockedLigandRendered = true
-      } catch (err) {
-        diag.warnings.push('Failed to render docked ligand: ' + err.message)
-      }
+    // Step 3: Docked ligand(s) — render from molblock(s) as separate model(s)
+    // Supports both single dockedMolblock (string) and dockedMolblocks (array of {molblock, color?, label?})
+    const DOCKED_COLORS = ['#06d6a0', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#ec4899', '#14b8a6', '#f97316']
+    const allDocked = dockedMolblocks && dockedMolblocks.length > 0
+      ? dockedMolblocks
+      : dockedMolblock
+        ? [{ molblock: dockedMolblock }]
+        : []
+
+    if (allDocked.length > 0 && showDockedLigand) {
+      allDocked.forEach((entry, idx) => {
+        try {
+          const mb = entry.molblock || entry
+          const format = mb.includes('$$$$') || mb.includes('V2000') || mb.includes('V3000') ? 'sdf' : 'pdb'
+          const color = entry.color || DOCKED_COLORS[idx % DOCKED_COLORS.length]
+          const dockedModel = viewer.addModel(mb, format)
+          const dockedSpec = (() => {
+            switch (effectiveLigandStyle) {
+              case 'stick':   return { stick: { color, radius: 0.15 } }
+              case 'sphere':  return { sphere: { color, scale: 1.0 } }
+              case 'line':    return { line: { color, linewidth: 2 } }
+              case 'cross':   return { cross: { color, linewidth: 2 } }
+              case 'surface': return {}
+              default:        return { stick: { color, radius: 0.2 }, sphere: { color, radius: 0.4, opacity: 0.9 } }
+            }
+          })()
+          viewer.setStyle({ model: dockedModel }, dockedSpec)
+          if (effectiveLigandStyle === 'surface') {
+            const ST = mol3dRef.current?.SurfaceType?.VDW ?? 1
+            viewer.addSurface(ST, { opacity: 0.8, color }, { model: dockedModel }, undefined, undefined, () => viewer.render())
+          }
+          diag.dockedLigandRendered = true
+        } catch (err) {
+          diag.warnings.push(`Failed to render docked ligand ${idx}: ${err.message}`)
+        }
+      })
     }
 
     // Pocket overlay
@@ -1131,7 +1156,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     // Report diagnostic to parent
     if (onDiagnosticRef.current) onDiagnosticRef.current(diag)
 
-  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, showPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, ligandStyle, showProtein, customZones, dockedMolblock, showDockedLigand, showRefLigand])
+  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, showPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, ligandStyle, showProtein, customZones, dockedMolblock, dockedMolblocks, showDockedLigand, showRefLigand])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -1295,26 +1320,48 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
 
   return (
     <div ref={wrapperRef} className={`rounded-xl border border-gray-200 ${isFullscreen ? 'flex flex-col overflow-hidden' : 'overflow-visible'}`} style={{ backgroundColor: bgColor }}>
-      {/* Toolbar — Row 1: Style pills */}
-      <div className={`flex items-center gap-2 px-3 py-1.5 border-b ${isDarkBg ? 'bg-[#1a2d42] border-gray-700/50' : 'bg-gray-100 border-gray-200'}`}>
-        <div className="flex items-center gap-0.5 bg-black/20 rounded-lg p-0.5">
-          {STYLES.map(s => (
-            <button
-              key={s}
-              onClick={() => setStyle(s)}
-              className={`px-2 py-1 text-[11px] rounded-md transition-all font-medium whitespace-nowrap ${
-                style === s
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : isDarkBg
-                    ? 'text-gray-400 hover:text-white hover:bg-white/10'
-                    : 'text-gray-500 hover:text-gray-800 hover:bg-white/60'
-              }`}
-            >
-              {STYLE_LABELS[s]}
-            </button>
-          ))}
-        </div>
-
+      {/* Toolbar — Row 1: Style dropdown + fullscreen */}
+      <div className={`flex items-center gap-1.5 px-2 py-1.5 border-b ${isDarkBg ? 'bg-[#1a2d42] border-gray-700/50' : 'bg-gray-100 border-gray-200'}`}>
+        <span className="flex items-center gap-1 min-w-0">
+          <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
+          <select
+            value={style}
+            onChange={(e) => setStyle(e.target.value)}
+            className="bg-transparent border rounded px-0.5 py-0 text-[11px] cursor-pointer outline-none border-blue-500/50 text-blue-300 min-w-0"
+          >
+            {STYLES.map(s => (
+              <option key={s} value={s} className="bg-gray-800 text-gray-300">{STYLE_LABELS[s]}</option>
+            ))}
+          </select>
+        </span>
+        <span className="flex items-center gap-1 min-w-0">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
+          <select
+            value={ligandStyle}
+            onChange={(e) => setLigandStyle(e.target.value)}
+            className="bg-transparent border rounded px-0.5 py-0 text-[11px] cursor-pointer outline-none border-emerald-500/50 text-emerald-300 min-w-0"
+          >
+            <option value="ball+stick" className="bg-gray-800 text-gray-300">Ball+Stick</option>
+            <option value="stick" className="bg-gray-800 text-gray-300">Stick</option>
+            <option value="sphere" className="bg-gray-800 text-gray-300">Sphere</option>
+            <option value="surface" className="bg-gray-800 text-gray-300">Surface</option>
+            <option value="cross" className="bg-gray-800 text-gray-300">Cross</option>
+            <option value="line" className="bg-gray-800 text-gray-300">Line</option>
+          </select>
+        </span>
+        <div className="flex-1" />
+        <button onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          className={`p-1.5 rounded-md transition-colors ${isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
+          {isFullscreen ? (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+            </svg>
+          )}
+        </button>
       </div>
 
       {/* Toolbar — Row 2: Tool icons */}
@@ -1530,18 +1577,6 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             )}
           </div>
 
-          <button onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-            className={`p-1.5 rounded-md transition-colors ${isDarkBg ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-200'}`}>
-            {isFullscreen ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-            )}
-          </button>
       </div>
 
       {/* Active tool indicator */}
@@ -1695,45 +1730,28 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: pocketColor, opacity: showPocket ? 1 : 0.3 }} /> Pocket
           </button>
         )}
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" style={{ opacity: ligandStyle !== 'off' ? 1 : 0.3 }} />
-          <select
-            value={ligandStyle}
-            onChange={(e) => setLigandStyle(e.target.value)}
-            className={`bg-transparent border rounded px-1 py-0 text-xs cursor-pointer outline-none ${
-              ligandStyle !== 'off'
-                ? 'border-emerald-500/50 text-emerald-300'
-                : `border-gray-600 ${isDarkBg ? 'text-gray-500' : 'text-gray-400'}`
-            }`}
-          >
-            <option value="off" className="bg-gray-800 text-gray-300">Ligand: Off</option>
-            <option value="ball+stick" className="bg-gray-800 text-gray-300">Ligand: Ball+Stick</option>
-            <option value="stick" className="bg-gray-800 text-gray-300">Ligand: Stick</option>
-            <option value="sphere" className="bg-gray-800 text-gray-300">Ligand: Sphere</option>
-            <option value="surface" className="bg-gray-800 text-gray-300">Ligand: Surface</option>
-            <option value="cross" className="bg-gray-800 text-gray-300">Ligand: Cross</option>
-            <option value="line" className="bg-gray-800 text-gray-300">Ligand: Line</option>
-            <option value="ligand-only" className="bg-gray-800 text-gray-300">Ligand Only (no protein)</option>
-          </select>
-        </span>
-        {dockedMolblock && (
+        {(dockedMolblock || (dockedMolblocks && dockedMolblocks.length > 0)) && (
           <button
             onClick={() => setShowDockedLigand(v => !v)}
-            className={`flex items-center gap-1.5 text-xs transition-colors ${showDockedLigand ? 'text-emerald-300' : (isDarkBg ? 'text-gray-500' : 'text-gray-400')}`}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
+              showDockedLigand ? 'bg-emerald-900/30 border-emerald-500/50 text-emerald-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
+            }`}
             title="Toggle docked ligand pose"
           >
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#06d6a0', opacity: showDockedLigand ? 1 : 0.3 }} />
-            Docked
+            Docked{dockedMolblocks && dockedMolblocks.length > 1 ? ` (${dockedMolblocks.length})` : ''}
           </button>
         )}
-        {dockedMolblock && (
+        {(dockedMolblock || (dockedMolblocks && dockedMolblocks.length > 0)) && (
           <button
             onClick={() => setShowRefLigand(v => !v)}
-            className={`flex items-center gap-1.5 text-xs transition-colors ${showRefLigand ? (isDarkBg ? 'text-gray-300' : 'text-gray-600') : (isDarkBg ? 'text-gray-600' : 'text-gray-400')}`}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
+              showRefLigand ? 'bg-gray-700/40 border-gray-400/50 text-gray-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
+            }`}
             title="Toggle reference (co-crystallized) ligand"
           >
             <span className="w-2.5 h-2.5 rounded-full bg-gray-400" style={{ opacity: showRefLigand ? 1 : 0.3 }} />
-            Reference
+            Ref
           </button>
         )}
         {selectedResidues.length > 0 && (

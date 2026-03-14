@@ -21,7 +21,7 @@ import useWorkspaceStore from '../stores/workspaceStore'
 export function WorkspaceBridge() {
   const { isAuthenticated, loading: authLoading } = useAuth()
   const { addToast } = useToast()
-  const prevPhaseId = useRef(null)
+  const prevPhaseId = useRef(useWorkspaceStore.getState().currentPhaseId)
 
   // Sync auth state into Zustand store
   useEffect(() => {
@@ -52,33 +52,6 @@ export function WorkspaceBridge() {
     )
   }, [])
 
-  // Watch server sort/filter changes → re-fetch page 1
-  const prevSortRef = useRef(null)
-  const prevFiltersRef = useRef(null)
-  useEffect(() => {
-    return useWorkspaceStore.subscribe(
-      (state) => {
-        const { serverSort, serverFilters, currentPhaseId, _isAuthenticated } = state
-        const sortKey = `${serverSort.sort_by}:${serverSort.sort_dir}`
-        const filterKey = `${serverFilters.search}:${serverFilters.bookmarked_only}`
-
-        if (prevSortRef.current === null) {
-          prevSortRef.current = sortKey
-          prevFiltersRef.current = filterKey
-          return
-        }
-
-        if (sortKey !== prevSortRef.current || filterKey !== prevFiltersRef.current) {
-          prevSortRef.current = sortKey
-          prevFiltersRef.current = filterKey
-          if (currentPhaseId && _isAuthenticated) {
-            state.refreshMolecules(currentPhaseId)
-          }
-        }
-      }
-    )
-  }, [])
-
   // Run polling: auto-refresh while runs are active
   useEffect(() => {
     let interval = null
@@ -91,12 +64,16 @@ export function WorkspaceBridge() {
     const startPolling = () => {
       if (interval) return
       interval = setInterval(() => {
+        const s = useWorkspaceStore.getState()
         if (!check()) {
           clearInterval(interval)
           interval = null
+          // Final refresh to pick up completed run data
+          s.refreshRuns()
+          s.refreshStats()
+          s.refreshMolecules(s.currentPhaseId)
           return
         }
-        const s = useWorkspaceStore.getState()
         s.refreshRuns()
         s.refreshStats()
         s.refreshMolecules(s.currentPhaseId)
@@ -152,7 +129,8 @@ export function useWorkspace() {
 
     // Paginated molecule metadata
     moleculeTotal: store.moleculeTotal,
-    moleculeHasMore: store.moleculeHasMore,
+    moleculePage: store.moleculePage,
+    moleculePageSize: store.moleculePageSize,
     moleculeStats: store.moleculeStats,
     serverSort: store.serverSort,
     serverFilters: store.serverFilters,
@@ -196,7 +174,8 @@ export function useWorkspace() {
     importDatabase: store.importDatabase,
     refreshRuns: store.refreshRuns,
     refreshMolecules: store.refreshMolecules,
-    loadMoreMolecules: store.loadMoreMolecules,
+    goToPage: store.goToPage,
+    setPageSize: store.setPageSize,
     updateServerSort: store.updateServerSort,
     updateServerFilters: store.updateServerFilters,
     refreshStats: store.refreshStats,

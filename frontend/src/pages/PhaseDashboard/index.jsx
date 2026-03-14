@@ -52,9 +52,12 @@ export default function PhaseDashboard() {
     importFile,
     importDatabase,
     moleculeTotal,
-    moleculeHasMore,
+    moleculePage,
+    moleculePageSize,
     moleculeStats,
-    loadMoreMolecules,
+    goToPage,
+    setPageSize,
+    serverSort,
     updateServerSort,
     updateServerFilters,
     createPhase,
@@ -63,9 +66,11 @@ export default function PhaseDashboard() {
   const { addToast } = useToast()
   const navigate = useNavigate()
 
-  // Sync URL params to workspace state
-  useEffect(() => { if (projectId) selectProject(projectId) }, [projectId, selectProject])
-  useEffect(() => { if (phaseId) selectPhase(phaseId) }, [phaseId, selectPhase])
+  // Sync URL params to workspace state (only when URL params change, not on function identity change)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (projectId) selectProject(projectId) }, [projectId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (phaseId) selectPhase(phaseId) }, [phaseId])
 
   // --- Flatten molecule properties from API (EAV → flat columns) ---
   const flatMolecules = useMemo(
@@ -109,10 +114,11 @@ export default function PhaseDashboard() {
 
   // --- Local UI state ---
   const [selectedMolecule, setSelectedMolecule] = useState(null)
+  const [highlightedIds, setHighlightedIds] = useState(new Set())
   const [showRunCreator, setShowRunCreator] = useState(false)
   const [showPareto, setShowPareto] = useState(true)
   const [showFreezeDialog, setShowFreezeDialog] = useState(false)
-  const [filterBarResult, setFilterBarResult] = useState(annotatedMolecules)
+  const [filterBarResult, setFilterBarResult] = useState(null)
   const [filteredMolecules, setFilteredMolecules] = useState(annotatedMolecules)
   const [popupState, setPopupState] = useState(null) // { type: 'safety'|'retrosynthesis'|'confidence', molecule }
   const [showExportModal, setShowExportModal] = useState(false)
@@ -121,6 +127,14 @@ export default function PhaseDashboard() {
   const [showAnalytics, setShowAnalytics] = useState(true)
   const [advancedFilterFn, setAdvancedFilterFn] = useState(null)
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false)
+
+  // Reset stale filterBarResult when new molecules arrive from API
+  const flatMolsRef = useRef(flatMolecules)
+  if (flatMolsRef.current !== flatMolecules) {
+    flatMolsRef.current = flatMolecules
+    // filterBarResult holds old page data — null it so we use fresh flatMolecules
+    if (filterBarResult) setFilterBarResult(null)
+  }
 
   // Combine FilterBar result + advanced filter + annotations overlay
   useEffect(() => {
@@ -204,38 +218,49 @@ export default function PhaseDashboard() {
     [visibleKeys]
   )
 
-  // Server mode threshold: use server-side filtering when total > 5000
-  const useServerFilters = moleculeTotal > 5000
+  // Bookmarked count — always from server stats (pagination = only 1 page loaded)
+  const bookmarkedCount = moleculeStats.bookmarked || 0
 
-  // Bookmarked count — use server stats if in server mode, else compute locally
-  const bookmarkedCount = useMemo(
-    () => useServerFilters ? (moleculeStats.bookmarked || 0) : flatMolecules.filter(m => m.bookmarked).length,
-    [useServerFilters, moleculeStats.bookmarked, flatMolecules]
-  )
-
-  // Live stats — use server stats for totals when in server mode
+  // Live stats — always use server totals (client only has current page)
   const liveStats = useMemo(() => {
     if (!currentPhase) return { total_molecules: 0, bookmarked: 0, runs_completed: 0, runs_running: 0 }
     const completedRuns = currentPhaseRuns.filter(r => r.status === 'completed').length
     const runningRuns = currentPhaseRuns.filter(r => r.status === 'running' || r.status === 'created').length
     return {
-      total_molecules: useServerFilters ? moleculeTotal : flatMolecules.length,
+      total_molecules: moleculeTotal,
       bookmarked: bookmarkedCount,
       runs_completed: completedRuns,
       runs_running: runningRuns,
     }
-  }, [currentPhase, currentPhaseRuns, flatMolecules, bookmarkedCount, useServerFilters, moleculeTotal])
+  }, [currentPhase, currentPhaseRuns, bookmarkedCount, moleculeTotal])
 
   const handleFilteredChange = useCallback((result) => {
     setFilterBarResult(result)
   }, [])
 
-  // Row click — opens detail panel
-  const handleRowClick = useCallback((mol) => {
-    setSelectedMolecule(prev => prev?.id === mol.id ? null : mol)
+  // Row click — opens detail panel. Ctrl/Cmd+click accumulates highlights for 3D overlay.
+  const handleRowClick = useCallback((mol, e) => {
+    if (e && (e.ctrlKey || e.metaKey)) {
+      // Ctrl+click: toggle this molecule in highlighted set
+      setHighlightedIds(prev => {
+        const next = new Set(prev)
+        if (next.has(mol.id)) next.delete(mol.id)
+        else next.add(mol.id)
+        return next
+      })
+      // Keep detail panel open on the clicked molecule
+      setSelectedMolecule(mol)
+    } else {
+      // Normal click: single select, clear highlights
+      setSelectedMolecule(prev => prev?.id === mol.id ? null : mol)
+      setHighlightedIds(new Set())
+    }
   }, [])
 
-  const handleCloseDetail = useCallback(() => setSelectedMolecule(null), [])
+  const handleCloseDetail = useCallback(() => {
+    setSelectedMolecule(null)
+    setHighlightedIds(new Set())
+  }, [])
 
   const handleCellPopup = useCallback((type, mol) => {
     // Find the original molecule with full properties (not flattened)
@@ -297,15 +322,22 @@ export default function PhaseDashboard() {
         })
         addToast('Importing bookmarked molecules...', 'success')
       } else if (runConfig.type === 'import' && runConfig.config?.sourceMode === 'database') {
-        // Database import — get uniprot_id from project target
+        // Database import — single source with specific config
         const uniprotId = currentProject?.target_input_value || currentProject?.target_preview?.uniprot?.id || ''
-        await importDatabase(phaseId, {
-          databases: runConfig.config.databases,
+        const db = runConfig.config.database
+        const payload = {
+          database: db,
           uniprot_id: uniprotId,
-          max_per_source: runConfig.config.maxPerSource || 50,
+          max_compounds: runConfig.config.maxPerSource || 100,
           filters: runConfig.config.filters || {},
-        })
-        addToast(`Fetching compounds from ${runConfig.config.databases.join(', ')}...`, 'success')
+        }
+        // Source-specific config
+        if (db === 'zinc') payload.zinc_subset = runConfig.config.zinc_subset || 'in-stock'
+        if (db === 'enamine') payload.scaffold_complexity = runConfig.config.filters?.scaffold_complexity || 'mixed'
+
+        await importDatabase(phaseId, payload)
+        const sourceLabels = { zinc: 'ZINC20', chembl: 'ChEMBL', pubchem: 'PubChem', enamine: 'Enamine REAL', fragments: 'Fragment Library' }
+        addToast(`Fetching compounds from ${sourceLabels[db] || db}...`, 'success')
       } else {
         // Standard run (calculation, generation, SMILES import)
         await createRun(phaseId, runConfig)
@@ -530,6 +562,7 @@ export default function PhaseDashboard() {
           onSubmit={handleRunSubmit}
           selectedMoleculeIds={selectedMoleculeIds}
           submitting={runSubmitting}
+          project={currentProject}
         />
         <FreezeDialog
           isOpen={showFreezeDialog}
@@ -574,9 +607,7 @@ export default function PhaseDashboard() {
         molecules={annotatedMolecules}
         columns={availableColumns}
         onFilteredChange={handleFilteredChange}
-        serverMode={useServerFilters}
         onServerFilterChange={updateServerFilters}
-        totalFromServer={useServerFilters ? moleculeTotal : undefined}
         showAdvancedFilter={showAdvancedFilter}
         onToggleAdvancedFilter={() => setShowAdvancedFilter(v => !v)}
         advancedFilterActive={!!advancedFilterFn}
@@ -585,7 +616,6 @@ export default function PhaseDashboard() {
         onVisibleKeysChange={setVisibleKeys}
         filteredMoleculeCount={filteredMolecules.length}
         moleculeTotal={moleculeTotal}
-        moleculeHasMore={moleculeHasMore}
         moleculesLoading={moleculesLoading}
         selectedCount={selectedMoleculeIds.size}
         totalCount={flatMolecules.length}
@@ -624,10 +654,18 @@ export default function PhaseDashboard() {
             onCellPopup={handleCellPopup}
             onAnnotation={isFrozen ? undefined : handleAnnotation}
             activeRowId={selectedMolecule?.id || null}
-            onLoadMore={moleculeHasMore ? loadMoreMolecules : undefined}
-            hasMore={moleculeHasMore}
+            highlightedIds={highlightedIds.size > 0 ? highlightedIds : null}
             totalCount={moleculeTotal}
             runs={currentPhaseRuns}
+            currentPage={moleculePage}
+            totalPages={Math.max(1, Math.ceil(moleculeTotal / moleculePageSize))}
+            pageSize={moleculePageSize}
+            onPageChange={goToPage}
+            onPageSizeChange={setPageSize}
+            onServerSort={updateServerSort}
+            serverSortKey={serverSort.sort_by}
+            serverSortDir={serverSort.sort_dir}
+            globalColumnRanges={moleculeStats.column_ranges}
           />
         </div>
 
@@ -646,6 +684,8 @@ export default function PhaseDashboard() {
               onRowClick={handleRowClick}
               isFrozen={isFrozen}
               project={currentProject}
+              selectedMolecules={highlightedIds.size > 0 ? phaseMolecules.filter(m => highlightedIds.has(m.id)) : null}
+              onCellPopup={handleCellPopup}
             />
           </div>
         )}
@@ -799,6 +839,7 @@ export default function PhaseDashboard() {
         onSubmit={handleRunSubmit}
         selectedMoleculeIds={selectedMoleculeIds}
         submitting={runSubmitting}
+        project={currentProject}
       />
 
       <FreezeDialog

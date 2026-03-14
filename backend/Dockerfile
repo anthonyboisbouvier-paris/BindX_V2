@@ -78,6 +78,11 @@ RUN pip install --no-cache-dir aizynthfinder 2>/dev/null || \
 RUN pip install --no-cache-dir prolif MDAnalysis 2>/dev/null || \
     echo "WARNING: ProLIF/MDAnalysis not available, using mock fallback"
 
+# V9: Install PDBFixer + PropKa for state-of-the-art receptor preparation
+# PDBFixer pulls OpenMM as dependency (needed for minimisation)
+RUN pip install --no-cache-dir pdbfixer propka 2>/dev/null || \
+    echo "WARNING: pdbfixer/propka not available, using basic receptor preparation"
+
 # Copy application code
 COPY . .
 

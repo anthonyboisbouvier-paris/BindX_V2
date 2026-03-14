@@ -12,6 +12,8 @@ function formatNumber(key, value) {
   if (value == null || typeof value !== 'number') return null
   // Composite score: backend stores 0-1, display as 0-100
   if (key === 'composite_score') return Math.round(value * 100).toString()
+  // Half-life: clamp negative predictions to 0
+  if (key === 'half_life' && value < 0) value = 0
   // Key-specific precision
   const decimals = {
     docking_score: 1,
@@ -27,7 +29,8 @@ function formatNumber(key, value) {
     solubility: 2,
     BBB: 2,
     hERG: 2,
-    metabolic_stability: 2,
+    half_life: 1,
+    cyp_inhibitions: 0,
     cluster_id: 0,
     generation_level: 0,
     interactions_count: 0,
@@ -49,7 +52,7 @@ const CUSTOM_COLOR_MAP = {
   gray:         { cell: 'bg-gray-50',   text: 'text-gray-500' },
 }
 
-function getValueColorClasses(value, allValues, colorConfig) {
+function getValueColorClasses(value, allValues, colorConfig, globalRange) {
   if (value == null) return { cell: '', text: '' }
 
   // Accept string for backward compat (scale name) or object { mode, intervals }
@@ -68,14 +71,19 @@ function getValueColorClasses(value, allValues, colorConfig) {
     return { cell: '', text: '' }
   }
 
-  // Percentile-based modes (higher-better / lower-better)
-  if (!allValues || !allValues.length) return { cell: '', text: '' }
-  const valid = allValues.filter(v => v != null)
-  if (valid.length < 4) return { cell: '', text: '' }
-  const sorted = [...valid].sort((a, b) => a - b)
-  const n = sorted.length
-  const lteCount = sorted.filter(v => v <= value).length
-  const rank = lteCount / n
+  // Compute rank: use global min/max if available, else fall back to page-local percentile
+  let rank
+  if (globalRange && globalRange.min != null && globalRange.max != null && globalRange.max !== globalRange.min) {
+    rank = (value - globalRange.min) / (globalRange.max - globalRange.min)
+  } else {
+    if (!allValues || !allValues.length) return { cell: '', text: '' }
+    const valid = allValues.filter(v => v != null)
+    if (valid.length < 4) return { cell: '', text: '' }
+    const sorted = [...valid].sort((a, b) => a - b)
+    const n = sorted.length
+    const lteCount = sorted.filter(v => v <= value).length
+    rank = lteCount / n
+  }
 
   if (config.mode === 'higher-better') {
     if (rank >= 0.75) return { cell: 'bg-green-50', text: 'text-green-700 font-semibold' }
@@ -456,12 +464,14 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation, allKnownTags, 
     )
   }
 
-  // Source column — resolve run ID to label
+  // Source column — resolve run ID to label + detail tooltip
   if (col.type === 'source') {
     if (value == null) return <span className="text-gray-300 select-none">—</span>
-    const label = runNameMap?.[value] || String(value).slice(0, 8)
+    const entry = runNameMap?.[value]
+    const label = entry?.label || String(value).slice(0, 8)
+    const detail = entry?.detail || label
     return (
-      <span className="text-gray-600 text-xs block truncate" title={label} style={{ maxWidth: col.width ? `${col.width - 16}px` : 90 }}>
+      <span className="text-gray-600 text-xs block truncate" title={detail} style={{ maxWidth: col.width ? `${col.width - 16}px` : 90 }}>
         {label}
       </span>
     )
@@ -472,7 +482,9 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation, allKnownTags, 
   }
 
   if (col.type === 'boolean') {
-    return value ? (
+    // For alert columns (invertBoolean), true = bad (red), false = good (green)
+    const isGood = col.invertBoolean ? !value : !!value
+    return isGood ? (
       <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100">
         <svg className="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
@@ -545,13 +557,23 @@ export default function MoleculeTable({
   onCellPopup,
   onAnnotation,
   activeRowId = null,
-  onLoadMore,
-  hasMore = false,
+  highlightedIds = null,
   totalCount,
   runs = [],
+  // Pagination
+  currentPage = 1,
+  totalPages = 1,
+  pageSize = 100,
+  onPageChange,
+  onPageSizeChange,
+  // Server sort
+  onServerSort,
+  serverSortKey = null,
+  serverSortDir = null,
+  globalColumnRanges = {},
 }) {
   const columnColorOverrides = useSettingsStore(s => s.columnColorOverrides)
-  const [sorts, setSorts] = useState([]) // [{key, dir}] max 2
+  const [sorts, setSorts] = useState([]) // local secondary sort (shift-click)
   const [columnFilters, setColumnFilters] = useState({}) // {key: {type:'text',value} | {type:'number',min,max} | {type:'boolean',value}}
   const [showFilterCol, setShowFilterCol] = useState(null) // key of column with open filter
   const tableRef = useRef(null)
@@ -566,14 +588,40 @@ export default function MoleculeTable({
     return [...tagSet].sort()
   }, [molecules])
 
-  // Run ID → human-readable label (e.g. "Import", "Docking + ADMET")
+  // Run ID → { label, detail } (e.g. label="ChEMBL", detail="Import from ChEMBL (max 50)")
   const runNameMap = useMemo(() => {
     const map = {}
     for (const run of runs) {
-      let label = run.type === 'calculation' && run.calculation_types?.length
-        ? run.calculation_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' + ')
-        : run.type ? run.type.charAt(0).toUpperCase() + run.type.slice(1) : run.id
-      map[run.id] = label
+      let label, detail
+      if (run.type === 'import') {
+        const cfg = run.config || {}
+        const src = cfg.source || cfg.database || ''
+        const dbNames = cfg.databases || (src ? [src] : [])
+        if (dbNames.length > 0) {
+          label = dbNames.map(d => d.charAt(0).toUpperCase() + d.slice(1)).join('+')
+          const parts = [label]
+          if (cfg.max_compounds || cfg.max_per_source) parts.push(`max ${cfg.max_compounds || cfg.max_per_source}`)
+          if (cfg.filters) {
+            const f = cfg.filters
+            if (f.mwt_min || f.mwt_max) parts.push(`MW ${f.mwt_min || ''}–${f.mwt_max || ''}`)
+            if (f.logp_min || f.logp_max) parts.push(`LogP ${f.logp_min || ''}–${f.logp_max || ''}`)
+          }
+          detail = parts.join(' · ')
+        } else if (cfg.source === 'phase_selection') {
+          label = 'Phase import'
+          detail = 'Bookmarked from previous phase'
+        } else {
+          label = 'Import'
+          detail = cfg.original_filename || 'Import'
+        }
+      } else if (run.type === 'calculation' && run.calculation_types?.length) {
+        label = run.calculation_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' + ')
+        detail = label
+      } else {
+        label = run.type ? run.type.charAt(0).toUpperCase() + run.type.slice(1) : run.id
+        detail = label
+      }
+      map[run.id] = { label, detail }
     }
     return map
   }, [runs])
@@ -744,17 +792,6 @@ export default function MoleculeTable({
     if (idx >= 0) rowVirtualizer.scrollToIndex(idx, { align: 'auto' })
   }, [activeRowId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Infinite scroll: trigger onLoadMore when approaching bottom
-  useEffect(() => {
-    if (!onLoadMore || !hasMore) return
-    const virtualItems = rowVirtualizer.getVirtualItems()
-    if (!virtualItems.length) return
-    const lastItem = virtualItems[virtualItems.length - 1]
-    if (lastItem && lastItem.index >= sorted.length - 20) {
-      onLoadMore()
-    }
-  }, [rowVirtualizer.getVirtualItems(), onLoadMore, hasMore, sorted.length]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // Compute effective column width: override > max(declared width, label-based minimum)
   const effectiveWidths = useMemo(() => columns.map(col => {
     if (colWidthOverrides[col.key]) return Math.max(40, colWidthOverrides[col.key])
@@ -794,39 +831,48 @@ export default function MoleculeTable({
     return result
   }, [columns])
 
-  // Header click: shift for multi-sort (max 2 levels)
+  // Header click: primary sort goes to server, shift-click adds local secondary sort
   const handleHeaderClick = useCallback((col, e) => {
     if (!col.sortable) return
-    setSorts(prev => {
-      const existing = prev.find(s => s.key === col.key)
-      if (e.shiftKey) {
+    if (e.shiftKey) {
+      // Shift-click: local secondary sort on top of server sort
+      setSorts(prev => {
+        const existing = prev.find(s => s.key === col.key)
         if (existing) {
-          if (existing.dir === 'asc') {
-            return prev.map(s => s.key === col.key ? { ...s, dir: 'desc' } : s)
-          }
+          if (existing.dir === 'asc') return prev.map(s => s.key === col.key ? { ...s, dir: 'desc' } : s)
           return prev.filter(s => s.key !== col.key)
         }
-        const next = [...prev, { key: col.key, dir: 'asc' }]
-        return next.slice(-2)
-      } else {
-        if (existing) {
-          if (existing.dir === 'asc') return [{ key: col.key, dir: 'desc' }]
-          return []
-        }
-        return [{ key: col.key, dir: 'asc' }]
+        return [...prev, { key: col.key, dir: 'asc' }].slice(-2)
+      })
+    } else {
+      // Normal click: server-side sort
+      setSorts([]) // clear local secondary sorts
+      if (onServerSort) {
+        const effectiveKey = col.sortKey || col.key
+        const currentDir = serverSortKey === effectiveKey ? serverSortDir : null
+        if (!currentDir) onServerSort(effectiveKey, 'asc')
+        else if (currentDir === 'asc') onServerSort(effectiveKey, 'desc')
+        else onServerSort('created_at', 'desc') // third click resets to default
       }
-    })
-  }, [])
+    }
+  }, [onServerSort, serverSortKey, serverSortDir])
 
-  function getSortDir(key) {
+  function getSortDir(key, sortKey) {
+    // Check server sort first (use sortKey if available), then local secondary sorts
+    const effectiveKey = sortKey || key
+    if (serverSortKey === effectiveKey) return serverSortDir
     const s = sorts.find(s => s.key === key)
     return s ? s.dir : null
   }
 
-  function getSortRank(key) {
-    if (sorts.length < 2) return null
+  function getSortRank(key, sortKey) {
+    // Only show rank when there are multiple sort levels (server + local)
+    const effectiveKey = sortKey || key
+    const totalSorts = (serverSortKey ? 1 : 0) + sorts.length
+    if (totalSorts < 2) return null
+    if (serverSortKey === effectiveKey) return '1'
     const idx = sorts.findIndex(s => s.key === key)
-    return idx >= 0 ? (idx + 1).toString() : null
+    return idx >= 0 ? (idx + (serverSortKey ? 2 : 1)).toString() : null
   }
 
   const allVisible = molecules.length > 0 && molecules.every(m => selectedIds.has(m.id))
@@ -931,8 +977,8 @@ export default function MoleculeTable({
 
             {/* Data column headers */}
             {columns.map(col => {
-              const dir = getSortDir(col.key)
-              const rank = getSortRank(col.key)
+              const dir = getSortDir(col.key, col.sortKey)
+              const rank = getSortRank(col.key, col.sortKey)
               const isActive = dir !== null
               const hasFilter = (() => {
                 const f = columnFilters[col.key]
@@ -1197,10 +1243,12 @@ export default function MoleculeTable({
               const idx = virtualRow.index
               const isSelected = selectedIds.has(mol.id)
               const isActive = activeRowId === mol.id
+              const isHighlighted = highlightedIds ? highlightedIds.has(mol.id) : false
               const isBookmarked = mol.bookmarked
 
               let rowBg = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'
               if (isSelected) rowBg = 'bg-blue-50'
+              if (isHighlighted) rowBg = 'bg-emerald-50/70'
               if (isActive) rowBg = 'bg-blue-100/80'
 
               const isInvalidated = !!mol.invalidated
@@ -1224,7 +1272,7 @@ export default function MoleculeTable({
                     height: `${virtualRow.size}px`,
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
-                  onClick={() => onRowClick && onRowClick(mol)}
+                  onClick={(e) => onRowClick && onRowClick(mol, e)}
                 >
                   {/* Checkbox */}
                   <div
@@ -1270,7 +1318,7 @@ export default function MoleculeTable({
                   {columns.map(col => {
                     const value = mol[col.key]
                     const colorClasses = col.type === 'number' && colorConfigs[col.key]
-                      ? getValueColorClasses(value, colValues[col.key] || [], colorConfigs[col.key])
+                      ? getValueColorClasses(value, colValues[col.key] || [], colorConfigs[col.key], globalColumnRanges[col.key])
                       : { cell: '', text: '' }
                     const hasPopup = col.popup && onCellPopup && value != null
 
@@ -1292,28 +1340,15 @@ export default function MoleculeTable({
             })}
           </div>
 
-          {/* Loading spinner for infinite scroll */}
-          {hasMore && (
-            <div className="flex items-center justify-center py-3 gap-2">
-              <svg className="animate-spin h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <span className="text-xs text-gray-400">Loading more...</span>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-        <span className="text-sm text-gray-400">
-          Showing{' '}
-          <strong className="text-gray-600 tabular-nums">{sorted.length}</strong>
-          {sorted.length !== displayTotal && (
-            <>{' '}of{' '}<strong className="text-gray-600 tabular-nums">{displayTotal.toLocaleString()}</strong></>
-          )}
-          {' '}molecules
+      {/* Footer — pagination controls */}
+      <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-4">
+        {/* Left: status text */}
+        <span className="text-xs text-gray-400 tabular-nums whitespace-nowrap">
+          Page <strong className="text-gray-600">{currentPage}</strong> of <strong className="text-gray-600">{totalPages}</strong>
+          {' '}&mdash; {(displayTotal || 0).toLocaleString()} molecules
           {Object.keys(columnFilters).filter(k => {
             const f = columnFilters[k]
             if (f == null) return false
@@ -1328,30 +1363,109 @@ export default function MoleculeTable({
               className="ml-2 text-xs text-blue-500 hover:text-blue-700 underline"
             >Clear column filters</button>
           )}
-        </span>
-        <div className="flex items-center gap-3">
-          {sorts.length > 0 && (
-            <div className="flex items-center gap-1.5 text-sm text-gray-500">
-              <span>Sorted by</span>
+          {(serverSortKey || sorts.length > 0) && (
+            <span className="ml-2 text-gray-400">
+              Sorted by{' '}
+              {serverSortKey && serverSortKey !== 'created_at' && (
+                <span>
+                  <span className="font-medium text-bx-light-text">{columns.find(c => c.key === serverSortKey)?.label || serverSortKey}</span>
+                  <span className="text-[10px]">{serverSortDir === 'asc' ? ' ↑' : ' ↓'}</span>
+                </span>
+              )}
               {sorts.map((s, i) => (
-                <span key={s.key} className="flex items-center gap-0.5">
-                  {i > 0 && <span className="text-gray-300">·</span>}
-                  <span className="font-medium text-bx-light-text">
-                    {columns.find(c => c.key === s.key)?.label || s.key}
-                  </span>
-                  <span className="text-[10px] text-gray-400">{s.dir === 'asc' ? '↑' : '↓'}</span>
+                <span key={s.key}>
+                  {(i > 0 || (serverSortKey && serverSortKey !== 'created_at')) && ' · '}
+                  <span className="font-medium text-bx-light-text">{columns.find(c => c.key === s.key)?.label || s.key}</span>
+                  <span className="text-[10px]">{s.dir === 'asc' ? ' ↑' : ' ↓'}</span>
                 </span>
               ))}
-              <button
-                onClick={() => setSorts([])}
-                className="ml-1 text-gray-400 hover:text-red-500 transition-colors text-xs underline underline-offset-2"
-              >
-                Clear
-              </button>
+              <button onClick={() => { setSorts([]); onServerSort?.('created_at', 'desc') }} className="ml-1 text-gray-400 hover:text-red-500 text-xs underline underline-offset-2">Clear</button>
+            </span>
+          )}
+        </span>
+
+        {/* Center: page navigation */}
+        {totalPages > 1 && onPageChange && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => onPageChange(currentPage - 1)}
+              disabled={currentPage <= 1}
+              className="px-2 py-1 text-xs font-medium rounded-md border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              Prev
+            </button>
+            {(() => {
+              const pages = []
+              const addPage = (p) => pages.push({ type: 'page', value: p })
+              const addEllipsis = (key) => pages.push({ type: 'ellipsis', key })
+
+              addPage(1)
+              if (currentPage > 3) addEllipsis('start')
+              for (let p = Math.max(2, currentPage - 1); p <= Math.min(totalPages - 1, currentPage + 1); p++) {
+                addPage(p)
+              }
+              if (currentPage < totalPages - 2) addEllipsis('end')
+              if (totalPages > 1) addPage(totalPages)
+
+              // Deduplicate
+              const seen = new Set()
+              return pages.filter(item => {
+                const key = item.type === 'page' ? `p${item.value}` : item.key
+                if (seen.has(key)) return false
+                seen.add(key)
+                return true
+              }).map(item => {
+                if (item.type === 'ellipsis') {
+                  return <span key={item.key} className="px-1 text-xs text-gray-400 select-none">&hellip;</span>
+                }
+                const isActive = item.value === currentPage
+                return (
+                  <button
+                    key={item.value}
+                    onClick={() => onPageChange(item.value)}
+                    className={`min-w-[28px] px-1.5 py-1 text-xs font-medium rounded-md border transition-colors ${
+                      isActive
+                        ? 'bg-bx-surface text-white border-bx-surface shadow-sm'
+                        : 'border-gray-200 text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    {item.value}
+                  </button>
+                )
+              })
+            })()}
+            <button
+              onClick={() => onPageChange(currentPage + 1)}
+              disabled={currentPage >= totalPages}
+              className="px-2 py-1 text-xs font-medium rounded-md border border-gray-200 text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        )}
+
+        {/* Right: page size selector + selected count */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {onPageSizeChange && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-400">Show</span>
+              {[50, 100, 200].map(size => (
+                <button
+                  key={size}
+                  onClick={() => onPageSizeChange(size)}
+                  className={`px-2 py-0.5 text-xs font-medium rounded-md border transition-colors ${
+                    pageSize === size
+                      ? 'bg-bx-surface text-white border-bx-surface'
+                      : 'border-gray-200 text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  {size}
+                </button>
+              ))}
             </div>
           )}
           {selectedIds.size > 0 && (
-            <span className="text-sm text-bx-light-text font-medium tabular-nums">
+            <span className="text-xs text-bx-light-text font-medium tabular-nums">
               {selectedIds.size} selected
             </span>
           )}

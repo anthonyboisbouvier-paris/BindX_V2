@@ -22,9 +22,7 @@ export default function TableToolbar({
   molecules = [],
   columns = [],
   onFilteredChange,
-  serverMode = false,
   onServerFilterChange,
-  totalFromServer,
   // Advanced filter (controlled by parent)
   showAdvancedFilter,
   onToggleAdvancedFilter,
@@ -36,7 +34,6 @@ export default function TableToolbar({
   // Count display (final, after all filters including advanced)
   filteredMoleculeCount,
   moleculeTotal,
-  moleculeHasMore,
   moleculesLoading,
   // Selection
   selectedCount = 0,
@@ -70,16 +67,10 @@ export default function TableToolbar({
   )
 
   // Compute filtered molecules (basic filters only — parent applies advanced on top)
+  // Local filtering: quick filters + custom column filters only.
+  // Search text is handled server-side (sent via onServerFilterChange debounce).
   const filteredMolecules = useMemo(() => {
     let result = molecules
-    if (searchText.trim()) {
-      const q = searchText.trim().toLowerCase()
-      result = result.filter(m =>
-        (m.name && m.name.toLowerCase().includes(q)) ||
-        (m.smiles && m.smiles.toLowerCase().includes(q)) ||
-        (m.id && String(m.id).toLowerCase().includes(q))
-      )
-    }
     for (const qfId of activeQuickFilters) {
       const qf = QUICK_FILTERS.find(f => f.id === qfId)
       if (qf) result = result.filter(qf.test)
@@ -88,16 +79,16 @@ export default function TableToolbar({
       result = result.filter(cf.test)
     }
     return result
-  }, [molecules, activeQuickFilters, customFilters, searchText])
+  }, [molecules, activeQuickFilters, customFilters])
 
   // Notify parent of basic filter result
   useEffect(() => {
     onFilteredChange && onFilteredChange(filteredMolecules)
   }, [filteredMolecules, onFilteredChange])
 
-  // Server-mode: debounce search changes to the server
+  // Debounce search/bookmarked changes to the server (always — pagination is server-side)
   useEffect(() => {
-    if (!serverMode || !onServerFilterChange) return
+    if (!onServerFilterChange) return
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       onServerFilterChange({
@@ -106,7 +97,7 @@ export default function TableToolbar({
       })
     }, 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [searchText, activeQuickFilters, serverMode, onServerFilterChange])
+  }, [searchText, activeQuickFilters, onServerFilterChange])
 
   const hasAnyFilter = activeQuickFilters.size > 0 || customFilters.length > 0 || searchText.trim() !== ''
   const hasAnyFilterOrAdvanced = hasAnyFilter || advancedFilterActive
@@ -277,7 +268,6 @@ export default function TableToolbar({
                 ? <><span className="text-bx-light-text font-medium">{filteredMoleculeCount}</span> / {moleculeTotal.toLocaleString()} mol.</>
                 : <>{moleculeTotal.toLocaleString()} mol.</>
               }
-              {moleculeHasMore && <span className="text-[10px] text-gray-300">(+)</span>}
             </span>
             {hasAnyFilterOrAdvanced && (
               <button onClick={clearAll} className="text-gray-400 hover:text-red-500 transition-colors" title="Clear all filters">
