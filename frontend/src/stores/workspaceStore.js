@@ -106,36 +106,60 @@ const useWorkspaceStore = create((set, get) => ({
 
   createCampaign: async (projectId, data) => {
     if (!get()._isAuthenticated) return null
-    const created = await v9CreateCampaign(projectId, data)
-    await get().refreshProjects()
-    return created
+    try {
+      const created = await v9CreateCampaign(projectId, data)
+      await get().refreshProjects()
+      return created
+    } catch (err) {
+      get()._addToast?.(err.userMessage || err.message || 'Failed to create campaign', 'error')
+      return null
+    }
   },
 
   updateCampaign: async (campaignId, data) => {
     if (!get()._isAuthenticated) return null
-    const updated = await v9UpdateCampaign(campaignId, data)
-    await get().refreshProjects()
-    return updated
+    try {
+      const updated = await v9UpdateCampaign(campaignId, data)
+      await get().refreshProjects()
+      return updated
+    } catch (err) {
+      get()._addToast?.(err.userMessage || err.message || 'Failed to update campaign', 'error')
+      return null
+    }
   },
 
   createPhase: async (campaignId, data) => {
     if (!get()._isAuthenticated) return null
-    const created = await v9CreatePhase(campaignId, data)
-    await get().refreshProjects()
-    return created
+    try {
+      const created = await v9CreatePhase(campaignId, data)
+      await get().refreshProjects()
+      return created
+    } catch (err) {
+      get()._addToast?.(err.userMessage || err.message || 'Failed to create phase', 'error')
+      return null
+    }
   },
 
   freezePhase: async (phaseId) => {
     if (!get()._isAuthenticated) return
-    await v9FreezePhase(phaseId)
-    await get().refreshProjects()
+    try {
+      await v9FreezePhase(phaseId)
+      await get().refreshProjects()
+    } catch (err) {
+      get()._addToast?.(err.userMessage || err.message || 'Failed to freeze phase', 'error')
+    }
   },
 
   unfreezePhase: async (phaseId) => {
     if (!get()._isAuthenticated) return
-    const result = await v9UnfreezePhase(phaseId)
-    await get().refreshProjects()
-    return result
+    try {
+      const result = await v9UnfreezePhase(phaseId)
+      await get().refreshProjects()
+      return result
+    } catch (err) {
+      get()._addToast?.(err.userMessage || err.message || 'Failed to unfreeze phase', 'error')
+      return null
+    }
   },
 
   deletePhase: async (phaseId) => {
@@ -274,15 +298,20 @@ const useWorkspaceStore = create((set, get) => ({
   // ===== Runs =====
   phaseRuns: [],
   runsLoading: false,
+  _runsRequestId: 0,
 
   refreshRuns: async (pId) => {
     const id = pId || get().currentPhaseId
     if (!id || !get()._isAuthenticated) return
+    const requestId = (get()._runsRequestId || 0) + 1
+    set({ _runsRequestId: requestId, runsLoading: true })
     try {
-      set({ runsLoading: true })
       const data = await v9ListRuns(id)
+      // Discard stale response if a newer request was initiated
+      if (get()._runsRequestId !== requestId) return
       set({ phaseRuns: data, runsLoading: false })
     } catch (err) {
+      if (get()._runsRequestId !== requestId) return
       console.warn('[Workspace] Failed to fetch runs:', err.message)
       set({ runsLoading: false })
     }
@@ -362,6 +391,7 @@ const useWorkspaceStore = create((set, get) => ({
         moleculeTotal: data.total || mols.length,
         moleculePage: effectivePage,
         moleculesLoading: false,
+        bookmarkOverrides: {},  // Clear overrides — server data is source of truth
       })
     } catch (err) {
       if (get()._molRequestId !== requestId) return

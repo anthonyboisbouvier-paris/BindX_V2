@@ -408,39 +408,66 @@ async def molecule_stats(
 
 
 async def _compute_column_ranges(phase_id: UUID, db: AsyncSession) -> dict:
-    """Compute global min/max for each numeric property column in a phase."""
-    # Load all property rows for this phase
-    prop_stmt = (
-        select(MoleculePropertyORM_V9)
-        .where(
-            MoleculePropertyORM_V9.molecule_id.in_(
-                select(MoleculeORM_V9.id).where(MoleculeORM_V9.phase_id == phase_id)
-            )
-        )
-    )
-    prop_result = await db.execute(prop_stmt)
-    all_props = prop_result.scalars().all()
+    """Compute global min/max for each numeric property column using SQL aggregation.
 
+    Uses JSONB path extraction + SQL MIN/MAX to avoid loading all properties into Python.
+    Groups queries by property_name to minimize round-trips.
+    """
+    # Group SORT_FIELD_MAP entries by property_name for batch queries
+    by_prop: dict[str, list[tuple[str, list[str]]]] = {}
+    for col_key, (prop_name, json_path) in SORT_FIELD_MAP.items():
+        by_prop.setdefault(prop_name, []).append((col_key, json_path))
+
+    mol_subq = select(MoleculeORM_V9.id).where(MoleculeORM_V9.phase_id == phase_id)
     ranges: dict = {}
-    for p in all_props:
-        for col_key, (prop_name, json_path) in SORT_FIELD_MAP.items():
-            # Match current name or legacy alias
-            legacy = _PROP_NAME_ALIASES.get(prop_name)
-            if p.property_name != prop_name and p.property_name != legacy:
-                continue
-            val = p.property_value
-            for k in json_path:
-                if isinstance(val, dict):
-                    val = val.get(k)
-                else:
-                    val = None
-                    break
-            if val is not None and isinstance(val, (int, float)):
-                if col_key not in ranges:
-                    ranges[col_key] = {"min": val, "max": val}
-                else:
-                    ranges[col_key]["min"] = min(ranges[col_key]["min"], val)
-                    ranges[col_key]["max"] = max(ranges[col_key]["max"], val)
+
+    for prop_name, columns in by_prop.items():
+        # Build list of property names to match (including legacy aliases)
+        prop_names = [prop_name]
+        legacy = _PROP_NAME_ALIASES.get(prop_name)
+        if legacy:
+            prop_names.append(legacy)
+
+        for col_key, json_path in columns:
+            # Build JSONB path extraction expression
+            if not json_path:
+                # Flat EAV — property_value is a scalar, cast to float
+                val_expr = MoleculePropertyORM_V9.property_value.cast(Float)
+            elif len(json_path) == 1:
+                val_expr = (
+                    MoleculePropertyORM_V9.property_value[json_path[0]].as_float()
+                )
+            elif len(json_path) == 2:
+                val_expr = (
+                    MoleculePropertyORM_V9.property_value[json_path[0]][json_path[1]].as_float()
+                )
+            elif len(json_path) == 3:
+                val_expr = (
+                    MoleculePropertyORM_V9.property_value[json_path[0]][json_path[1]][json_path[2]].as_float()
+                )
+            else:
+                continue  # Skip deeper paths
+
+            stmt = (
+                select(
+                    func.min(val_expr).label("min_val"),
+                    func.max(val_expr).label("max_val"),
+                )
+                .where(
+                    MoleculePropertyORM_V9.molecule_id.in_(mol_subq),
+                    MoleculePropertyORM_V9.property_name.in_(prop_names),
+                )
+            )
+
+            try:
+                result = await db.execute(stmt)
+                row = result.one()
+                if row.min_val is not None and row.max_val is not None:
+                    ranges[col_key] = {"min": float(row.min_val), "max": float(row.max_val)}
+            except Exception:
+                # Skip columns where JSONB extraction fails (non-numeric values)
+                pass
+
     return ranges
 
 

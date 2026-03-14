@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +240,13 @@ class RunCreate(BaseModel):
     calculation_types: Optional[List[str]] = None  # ["docking", "admet", "scoring", ...]
 
 
+def _clean_config(v):
+    """Strip internal keys (prefixed with _) from run config."""
+    if isinstance(v, dict):
+        return {k: val for k, val in v.items() if not k.startswith("_")}
+    return v
+
+
 class RunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -251,7 +258,6 @@ class RunResponse(BaseModel):
     config: dict
     input_molecule_ids: Optional[List[uuid.UUID]] = None
     input_source: Optional[str] = None
-    input_file_path: Optional[str] = None
     progress: int = 0
     current_step: Optional[str] = None
     estimated_duration_seconds: Optional[int] = None
@@ -261,6 +267,11 @@ class RunResponse(BaseModel):
     archived: bool = False
     created_at: datetime
     logs: List[RunLogEntryOut] = []
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def _clean(cls, v):
+        return _clean_config(v)
 
 
 class RunListItem(BaseModel):
@@ -280,6 +291,11 @@ class RunListItem(BaseModel):
     archived: bool = False
     created_at: datetime
     logs: List[RunLogEntryOut] = []
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def _clean(cls, v):
+        return _clean_config(v)
 
 
 # ---------------------------------------------------------------------------

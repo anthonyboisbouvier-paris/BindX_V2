@@ -789,6 +789,13 @@ def execute_run(self, run_id: str):
         else:
             raise ValueError(f"Unknown run type: {run_type}")
 
+        # Re-check status before marking completed (user may have cancelled)
+        fresh = _db_sync(_get_run(run_id))
+        if fresh and fresh["status"] == "cancelled":
+            logger.info("Run %s was cancelled during execution, not overwriting", run_id)
+            _write_log(run_id, "info", "Run was cancelled during execution")
+            return {"status": "cancelled"}
+
         _db_sync(_update_run(
             run_id,
             status="completed",
@@ -1266,6 +1273,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
         raise ValueError("No valid molecules found")
 
     smiles_list = [m["smiles"] for m in molecules]
+    mol_ids = [m["id"] for m in molecules]
     total_steps = len(calc_types)
     results = {}
 
@@ -1280,6 +1288,12 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
         return result
 
     for step_idx, calc_type in enumerate(calc_types):
+        # Check if user cancelled between steps
+        _check = _db_sync(_get_run(run_id))
+        if _check and _check["status"] == "cancelled":
+            _write_log(run_id, "info", f"Run cancelled before {calc_type}")
+            return {"calculations": results, "cancelled": True}
+
         step_label = f"Running {calc_type} ({step_idx+1}/{total_steps})"
         base_pct = int(100 * step_idx / total_steps) if total_steps > 0 else 0
         _db_sync(_update_run(run_id, current_step=step_label, progress=base_pct))
@@ -1597,7 +1611,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 mol_dicts = []
                 for m in molecules:
                     d = {"smiles": m["smiles"], "name": m["name"], "_id": m["id"]}
-                    props = existing_props.get(str(m["id"]), {})
+                    props = existing_props.get(m["id"], {})
                     for prop_key in ("affinity", "vina_score", "cnn_score", "cnn_affinity",
                                      "composite_score", "qed", "logP", "source"):
                         if props.get(prop_key) is not None:
@@ -1678,7 +1692,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 for mol in molecules:
                     try:
                         mol_dict = {"smiles": mol["smiles"], "name": mol["name"]}
-                        props = existing_props.get(str(mol["id"]), {})
+                        props = existing_props.get(mol["id"], {})
                         for prop_key in ("affinity", "vina_score", "cnn_score", "admet",
                                          "synthesis_route", "docking_method", "source"):
                             if props.get(prop_key) is not None:
@@ -1764,7 +1778,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 mol_dicts = []
                 for m in molecules:
                     d = {"smiles": m["smiles"], "name": m["name"]}
-                    props = existing_props.get(str(m["id"]), {})
+                    props = existing_props.get(m["id"], {})
                     for prop_key in ("docking_score", "affinity", "vina_score",
                                      "composite_score", "cnn_score"):
                         if props.get(prop_key) is not None:
@@ -1840,6 +1854,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
 
         except Exception as e:
             logger.exception("Calculation %s failed: %s", calc_type, e)
+            _write_log(run_id, "error", f"{calc_type} failed: {str(e)[:500]}")
             results[calc_type] = f"error: {e}"
 
     return {"calculations": results, "molecules_processed": len(molecules)}

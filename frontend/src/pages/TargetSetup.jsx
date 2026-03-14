@@ -635,13 +635,12 @@ export default function TargetSetup() {
                         source: 'esmfold',
                         method: result.method,
                         resolution: null,
-                        pdb_url: pdbBlobUrl,
+                        download_url: pdbBlobUrl,
                       }],
                       uniprot_id: null,
                     })
                     setSelectedStructureIdx(0)
-                    setPdbUrl(pdbBlobUrl)
-                    toast.success(`Structure predicted: ${result.sequence_length} residues`)
+                    addToast(`Structure predicted: ${result.sequence_length} residues`, 'success')
                   } catch (e) {
                     setError(e.response?.data?.detail || e.message || 'Prediction failed')
                   } finally {

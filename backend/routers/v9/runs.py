@@ -127,13 +127,17 @@ async def create_run(
     # Dispatch Celery task (after commit so the worker can find the run)
     try:
         from celery_app import celery_app
-        celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
-        logger.info("Dispatched Celery task for run %s", run.id)
+        task = celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
+        # Store the Celery task ID so we can revoke it later
+        run.config = {**(run.config or {}), "_celery_task_id": task.id}
+        await db.commit()
+        logger.info("Dispatched Celery task %s for run %s", task.id, run.id)
     except Exception as e:
         logger.warning("Failed to dispatch Celery task for run %s: %s", run.id, e)
         run.status = "failed"
         run.error_message = f"Failed to dispatch task: {e}"
         await db.commit()
+        raise HTTPException(status_code=503, detail="Task dispatch failed. Please try again.")
 
     # Reload with logs eagerly loaded (avoid lazy-load crash in async)
     stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))
@@ -208,12 +212,14 @@ async def cancel_run(
     run.status = "cancelled"
     await db.flush()
 
-    # Try to revoke Celery task
-    try:
-        from celery_app import celery_app
-        celery_app.control.revoke(str(run.id), terminate=True)
-    except Exception as e:
-        logger.warning("Failed to revoke Celery task for run %s: %s", run.id, e)
+    # Try to revoke Celery task using stored task ID
+    celery_task_id = (run.config or {}).get("_celery_task_id")
+    if celery_task_id:
+        try:
+            from celery_app import celery_app
+            celery_app.control.revoke(celery_task_id, terminate=True, signal="SIGTERM")
+        except Exception as e:
+            logger.warning("Failed to revoke Celery task %s for run %s: %s", celery_task_id, run.id, e)
 
     return run  # logs already eager-loaded by get_run_owned
 
@@ -252,6 +258,15 @@ async def import_file(
     if phase.status == "frozen":
         raise HTTPException(status_code=400, detail="Cannot import to a frozen phase")
 
+    # Check file size (50MB limit)
+    MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({len(content) // (1024*1024)}MB). Maximum is 50MB.",
+        )
+
     # Determine format from extension
     filename = file.filename or "unknown"
     suffix = Path(filename).suffix.lower()
@@ -264,7 +279,6 @@ async def import_file(
         )
 
     # Save uploaded file to shared volume (accessible by both backend & celery worker)
-    content = await file.read()
     upload_dir = Path(os.environ.get("DATA_DIR", "/data")) / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = upload_dir / f"{phase_id}_{filename}"
@@ -284,13 +298,16 @@ async def import_file(
     # Dispatch Celery task (after commit so the worker can find the run)
     try:
         from celery_app import celery_app
-        celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
-        logger.info("Dispatched Celery task for file import run %s", run.id)
+        task = celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
+        run.config = {**(run.config or {}), "_celery_task_id": task.id}
+        await db.commit()
+        logger.info("Dispatched Celery task %s for file import run %s", task.id, run.id)
     except Exception as e:
         logger.warning("Failed to dispatch Celery task for file run %s: %s", run.id, e)
         run.status = "failed"
         run.error_message = f"Failed to dispatch task: {e}"
         await db.commit()
+        raise HTTPException(status_code=503, detail="Task dispatch failed. Please try again.")
 
     # Reload with logs eagerly loaded
     stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))
@@ -374,13 +391,16 @@ async def import_from_database(
     # Dispatch Celery task (after commit so the worker can find the run)
     try:
         from celery_app import celery_app
-        celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
-        logger.info("Dispatched database import run %s: %s", run.id, databases)
+        task = celery_app.send_task("tasks_v9.execute_run", args=[str(run.id)])
+        run.config = {**(run.config or {}), "_celery_task_id": task.id}
+        await db.commit()
+        logger.info("Dispatched database import run %s (task %s): %s", run.id, task.id, databases)
     except Exception as e:
         logger.warning("Failed to dispatch Celery task for db run %s: %s", run.id, e)
         run.status = "failed"
         run.error_message = f"Failed to dispatch task: {e}"
         await db.commit()
+        raise HTTPException(status_code=503, detail="Task dispatch failed. Please try again.")
 
     # Reload with logs eagerly loaded
     stmt = select(RunORM_V9).where(RunORM_V9.id == run.id).options(selectinload(RunORM_V9.logs))
