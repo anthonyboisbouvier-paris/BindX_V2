@@ -95,8 +95,13 @@ const useWorkspaceStore = create((set, get) => ({
 
   deleteProject: async (projectId) => {
     if (!get()._isAuthenticated) return
-    await v9DeleteProject(projectId)
-    set(s => ({ projects: s.projects.filter(p => p.id !== projectId) }))
+    try {
+      await v9DeleteProject(projectId)
+      set(s => ({ projects: s.projects.filter(p => p.id !== projectId) }))
+    } catch (err) {
+      get()._addToast?.(err.userMessage || err.message || 'Failed to delete project', 'error')
+      throw err
+    }
   },
 
   createCampaign: async (projectId, data) => {
@@ -238,7 +243,7 @@ const useWorkspaceStore = create((set, get) => ({
   },
 
   bookmarkSelected: async () => {
-    const { selectedMoleculeIds, _isAuthenticated, currentPhaseId } = get()
+    const { selectedMoleculeIds, _isAuthenticated, currentPhaseId, bookmarkOverrides: prev } = get()
     const ids = [...selectedMoleculeIds]
 
     // Optimistic update
@@ -252,7 +257,9 @@ const useWorkspaceStore = create((set, get) => ({
       try {
         await v9BookmarkBatch(currentPhaseId, ids, true)
       } catch (err) {
-        console.warn('[Workspace] Batch bookmark failed:', err.message)
+        console.warn('[Workspace] Batch bookmark failed, reverting:', err.message)
+        set({ bookmarkOverrides: prev })
+        get()._addToast?.('Batch bookmark failed', 'error')
       }
     }
   },

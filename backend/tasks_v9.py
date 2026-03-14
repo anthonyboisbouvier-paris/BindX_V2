@@ -885,7 +885,7 @@ def _stream_smiles_file(file_path: Path, file_format: str):
     elif file_format == "sdf":
         try:
             from rdkit import Chem
-            suppl = Chem.ForwardSDMolSupplier(str(file_path))
+            suppl = Chem.ForwardSDMolSupplier(open(str(file_path), 'rb'))
             for mol in suppl:
                 if mol is not None:
                     yield Chem.MolToSmiles(mol)
@@ -926,7 +926,7 @@ def _store_batch_metadata(batch: list[dict], created_rows: list, source_run_id):
         meta = meta_by_smiles.get(can_smi)
         if meta:
             for prop_name, prop_value in meta.items():
-                entries.append((mol_id, source_run_id, prop_name, str(prop_value)))
+                entries.append((mol_id, source_run_id, prop_name, prop_value))
 
     if entries:
         _db_sync(_store_properties_batch(entries))
@@ -1271,7 +1271,7 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
 
     def _cached_compute(calc_type, smiles, compute_fn):
         """Try cache first, then compute and cache the result."""
-        cache_key = f"{calc_type}:{smiles}"
+        cache_key = f"{calc_type}:v2:{smiles}"
         cached = _db_sync(_cache_get(cache_key))
         if cached is not None:
             return cached
@@ -1592,23 +1592,27 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         pass
 
             elif calc_type == "enrichment":
-                # Enrichment needs docking results — preserve existing properties
+                # Enrichment needs docking results — load existing properties from DB
+                existing_props = _db_sync(_get_existing_properties(mol_ids))
                 mol_dicts = []
                 for m in molecules:
-                    d = {"smiles": m["smiles"], "name": m["name"]}
-                    # Carry forward scored properties for composite scoring/Pareto
+                    d = {"smiles": m["smiles"], "name": m["name"], "_id": m["id"]}
+                    props = existing_props.get(str(m["id"]), {})
                     for prop_key in ("affinity", "vina_score", "cnn_score", "cnn_affinity",
                                      "composite_score", "qed", "logP", "source"):
-                        if m.get(prop_key) is not None:
-                            d[prop_key] = m[prop_key]
+                        if props.get(prop_key) is not None:
+                            d[prop_key] = props[prop_key]
                     mol_dicts.append(d)
                 try:
                     from pipeline.enrich import enrich_results
                     scored, eliminated, summary = enrich_results(mol_dicts)
-                    enrich_entries = [
-                        (mol["id"], run_uuid, "enrichment", _filter_cols(enrichment, _inc))
-                        for mol, enrichment in zip(molecules, scored)
-                    ]
+                    # Match results by SMILES to avoid misalignment from eliminated molecules
+                    scored_by_smi = {s.get("smiles") or s.get("name"): s for s in scored}
+                    enrich_entries = []
+                    for mol in molecules:
+                        enrichment = scored_by_smi.get(mol["smiles"]) or scored_by_smi.get(mol["name"])
+                        if enrichment:
+                            enrich_entries.append((mol["id"], run_uuid, "enrichment", _filter_cols(enrichment, _inc)))
                     _db_sync(_store_properties_batch(enrich_entries))
                     _write_log(run_id, "info", f"Enrichment complete: {len(scored)} enriched, {len(eliminated)} eliminated")
                     results["enrichment"] = f"{len(scored)} molecules enriched ({len(eliminated)} eliminated)"
@@ -1625,7 +1629,9 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     cluster_entries = [
                         (mol["id"], run_uuid, "clustering", _filter_cols(
                             {"cluster_id": cl_data.get("cluster_id"),
-                             "is_representative": cl_data.get("is_representative")}, _inc))
+                             "is_representative": cl_data.get("is_representative"),
+                             "scaffold_smiles": cl_data.get("scaffold_smiles", cl_data.get("scaffold")),
+                             "tanimoto_to_centroid": cl_data.get("tanimoto_to_centroid")}, _inc))
                         for mol, cl_data in zip(molecules, clustered)
                     ]
                     _db_sync(_store_properties_batch(cluster_entries))
@@ -1667,14 +1673,16 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 # Multi-component confidence scoring
                 from pipeline.confidence import calculate_confidence
                 from pipeline.scoring import compute_pains_alert
+                existing_props = _db_sync(_get_existing_properties(mol_ids))
                 conf_entries = []
                 for mol in molecules:
                     try:
                         mol_dict = {"smiles": mol["smiles"], "name": mol["name"]}
+                        props = existing_props.get(str(mol["id"]), {})
                         for prop_key in ("affinity", "vina_score", "cnn_score", "admet",
                                          "synthesis_route", "docking_method", "source"):
-                            if mol.get(prop_key) is not None:
-                                mol_dict[prop_key] = mol[prop_key]
+                            if props.get(prop_key) is not None:
+                                mol_dict[prop_key] = props[prop_key]
                         conf = calculate_confidence(mol_dict)
                         pains = compute_pains_alert(mol["smiles"])
                         conf["pains_alert"] = pains
@@ -1751,14 +1759,16 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
 
             elif calc_type == "activity_cliffs":
                 from pipeline.activity_cliffs import detect_activity_cliffs
-                # Use docking_score as primary activity metric
+                # Use docking_score as primary activity metric — load from DB
+                existing_props = _db_sync(_get_existing_properties(mol_ids))
                 mol_dicts = []
                 for m in molecules:
                     d = {"smiles": m["smiles"], "name": m["name"]}
+                    props = existing_props.get(str(m["id"]), {})
                     for prop_key in ("docking_score", "affinity", "vina_score",
                                      "composite_score", "cnn_score"):
-                        if m.get(prop_key) is not None:
-                            d[prop_key] = m[prop_key]
+                        if props.get(prop_key) is not None:
+                            d[prop_key] = props[prop_key]
                     # Use best available activity metric
                     if "docking_score" not in d and "affinity" in d:
                         d["docking_score"] = d["affinity"]

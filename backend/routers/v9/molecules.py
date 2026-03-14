@@ -227,7 +227,8 @@ async def list_molecules(
     if ai_generated_only:
         base_where.append(MoleculeORM_V9.ai_generated == True)  # noqa: E712
     if search:
-        pattern = f"%{search}%"
+        escaped = search.replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         base_where.append(
             or_(
                 MoleculeORM_V9.name.ilike(pattern),
@@ -282,6 +283,7 @@ async def list_molecules(
                 MoleculePropertyORM_V9.molecule_id == MoleculeORM_V9.id,
                 MoleculePropertyORM_V9.property_name.in_(prop_names),
             )
+            .order_by(MoleculePropertyORM_V9.created_at.desc())
             .limit(1)
             .correlate(MoleculeORM_V9)
             .scalar_subquery()

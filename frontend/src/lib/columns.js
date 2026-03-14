@@ -111,8 +111,8 @@ export const ALL_COLUMNS = [
   { key: 'sali_max', label: 'SALI', type: 'number', group: 'activity_cliffs', width: 65, sortable: true, colorScale: 'higher-better' },
   { key: 'n_cliffs', label: '# Cliffs', type: 'number', group: 'activity_cliffs', width: 65, sortable: true },
   // Pharmacophore
-  { key: 'pharmacophore_features', label: 'Pharma. Features', type: 'number', group: 'pharmacophore', width: 95, sortable: true, colorScale: 'higher-better' },
-  { key: 'pharmacophore_similarity', label: 'Pharma. Sim.', type: 'number', group: 'pharmacophore', width: 85, sortable: true, colorScale: 'higher-better' },
+  { key: 'n_features', label: 'Pharma. Features', type: 'number', group: 'pharmacophore', width: 95, sortable: true, colorScale: 'higher-better' },
+  { key: 'fingerprint_bits', label: 'FP Bits', type: 'number', group: 'pharmacophore', width: 75, sortable: true },
   // Generation
   { key: 'generation_level', label: 'Gen. Level', type: 'number', group: 'generation', width: 80, sortable: true },
   { key: 'parent_molecule_id', label: 'Parent', type: 'text', group: 'generation', width: 80, sortable: false },
@@ -269,7 +269,7 @@ export const CALCULATION_SUBTYPES = [
   { key: 'off_target', icon: 'crosshair', description: 'Assess selectivity against off-target proteins', columns: ['selectivity_score', 'off_target_hits', 'selectivity_ratio'] },
   { key: 'confidence', icon: 'check-circle', description: 'PAINS filters, applicability domain, convergence', columns: ['confidence_score', 'pains_alert', 'applicability_domain', 'confidence_flags'] },
   { key: 'retrosynthesis', icon: 'git-branch', description: 'Synthesis feasibility, cost estimation, reagent availability', columns: ['n_synth_steps', 'synth_confidence', 'synth_cost_estimate', 'reagents_available'] },
-  { key: 'pharmacophore', icon: 'hexagon', description: 'Map 3D pharmacophoric features and compute pairwise similarity', columns: [] },
+  { key: 'pharmacophore', icon: 'hexagon', description: 'Map 3D pharmacophoric features and compute pairwise similarity', columns: ['n_features', 'fingerprint_bits'] },
   { key: 'activity_cliffs', icon: 'trending-up', description: 'Detect structure-activity cliffs — similar molecules with large activity differences', columns: ['is_cliff', 'sali_max', 'n_cliffs'] },
   { key: 'composite', icon: 'trophy', description: 'Weighted multi-criteria score combining docking, ADME, selectivity, and drug-likeness results from previous runs', columns: ['weighted_score'] },
 ].map(st => ({ ...st, label: GROUP_META[st.key].label }))

@@ -14,6 +14,7 @@ Steps:
 """
 
 import json
+import os
 import random
 import statistics
 import string
@@ -37,16 +38,13 @@ import psycopg2.extras
 BACKEND_URL = "http://localhost:8000"
 
 # Supabase Auth
-SUPABASE_URL = "https://webkntghfzscrnuixfba.supabase.co"
-SUPABASE_ANON_KEY = "sb_publishable_Zy18OaVJ4k_DgaafyiYaZA_9jB0ATmY"
-AUTH_EMAIL = "anthony.boisbouvier@gmail.com"
-AUTH_PASSWORD = "test1234"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://webkntghfzscrnuixfba.supabase.co")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+AUTH_EMAIL = os.environ.get("AUTH_EMAIL", "")
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 
 # Direct PostgreSQL connection (bypass asyncpg driver prefix)
-PG_DSN = (
-    "postgresql://postgres.webkntghfzscrnuixfba:n1qsKxvAWJV954vR"
-    "@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
-)
+PG_DSN = os.environ.get("PG_DSN", "")
 
 TOTAL_MOLECULES = 100_000
 BATCH_SIZE = 1000

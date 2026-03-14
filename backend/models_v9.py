@@ -8,7 +8,7 @@ user_id stored as UUID without ORM FK (auth.users is managed by Supabase).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import (
@@ -60,8 +60,8 @@ class ProjectORM_V9(BaseV9):
     #
     status: Mapped[str] = mapped_column(Text, default="active")
     notification_email: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     campaigns: Mapped[List[CampaignORM_V9]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -79,7 +79,7 @@ class CampaignORM_V9(BaseV9):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     pocket_config: Mapped[Optional[dict]] = mapped_column(JSONB)
     strategy_notes: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     project: Mapped[ProjectORM_V9] = relationship(back_populates="campaigns")
@@ -98,7 +98,7 @@ class PhaseORM_V9(BaseV9):
     type: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, default="active")
     frozen_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     campaign: Mapped[CampaignORM_V9] = relationship(back_populates="phases")
@@ -129,7 +129,7 @@ class RunORM_V9(BaseV9):
     completed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     phase: Mapped[PhaseORM_V9] = relationship(back_populates="runs")
@@ -162,7 +162,7 @@ class MoleculeORM_V9(BaseV9):
     ai_comment: Mapped[Optional[str]] = mapped_column(Text)
     tags: Mapped[Optional[list]] = mapped_column(ARRAY(Text), default=list)
     invalidated: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     phase: Mapped[PhaseORM_V9] = relationship(back_populates="molecules")
@@ -184,7 +184,7 @@ class MoleculePropertyORM_V9(BaseV9):
     run_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("runs.id"))
     property_name: Mapped[str] = mapped_column(Text, nullable=False)
     property_value: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     molecule: Mapped[MoleculeORM_V9] = relationship(back_populates="properties")
@@ -200,7 +200,7 @@ class CalculationCacheORM_V9(BaseV9):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cache_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     result: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +214,7 @@ class RunLogORM_V9(BaseV9):
     run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     level: Mapped[str] = mapped_column(Text, default="info")
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     run: Mapped[RunORM_V9] = relationship(back_populates="logs")
@@ -231,7 +231,7 @@ class ArtifactORM_V9(BaseV9):
     run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
     type: Mapped[str] = mapped_column(Text, nullable=False)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     run: Mapped[RunORM_V9] = relationship(back_populates="artifacts")
@@ -250,4 +250,4 @@ class AuditLogORM_V9(BaseV9):
     entity_type: Mapped[Optional[str]] = mapped_column(Text)
     entity_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
     details: Mapped[Optional[dict]] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))

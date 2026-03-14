@@ -12,9 +12,9 @@ import InfoTip, { TIPS } from '../../components/InfoTip.jsx'
 // ---------------------------------------------------------------------------
 function ScoresTab({ mol }) {
   const scores = [
-    { label: 'Docking', value: mol.docking_score, unit: 'kcal/mol', color: 'bg-bx-surface', textColor: 'text-bx-light-text', format: v => v.toFixed(1) },
-    { label: 'CNN Score', value: mol.cnn_score, unit: '', color: 'bg-green-500', textColor: 'text-green-600', format: v => v.toFixed(2) },
-    { label: 'CNN Aff.', value: mol.cnn_affinity, unit: 'pKi', color: 'bg-teal-500', textColor: 'text-teal-600', format: v => v.toFixed(1) },
+    { label: 'Docking', value: mol.docking_score, unit: 'kcal/mol', color: 'bg-bx-surface', textColor: 'text-bx-light-text', format: v => Number(v).toFixed(1) },
+    { label: 'CNN Score', value: mol.cnn_score, unit: '', color: 'bg-green-500', textColor: 'text-green-600', format: v => Number(v).toFixed(2) },
+    { label: 'CNN Aff.', value: mol.cnn_affinity, unit: 'pKi', color: 'bg-teal-500', textColor: 'text-teal-600', format: v => Number(v).toFixed(1) },
   ]
   return (
     <div className="space-y-3">
@@ -29,7 +29,7 @@ function ScoresTab({ mol }) {
             <div className="mt-2 h-1 bg-gray-200 rounded-full overflow-hidden">
               <div
                 className={`h-1 ${s.color} rounded-full`}
-                style={{ width: s.label === 'CNN Score' ? `${s.value * 100}%` : '60%' }}
+                style={{ width: s.label === 'CNN Score' ? `${Number(s.value) * 100}%` : '60%' }}
               />
             </div>
           </div>
