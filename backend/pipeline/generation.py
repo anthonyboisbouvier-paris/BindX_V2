@@ -144,15 +144,10 @@ def generate_molecules(
         except Exception as exc:
             logger.error("REINVENT4 generation failed: %s", exc, exc_info=True)
 
-    # --- Mock fallback ------------------------------------------------------
-    return _mock_generate(
-        pocket_center=pocket_center,
-        pocket_size=pocket_size,
-        receptor_pdbqt=receptor_pdbqt,
-        work_dir=work_dir,
-        n_molecules=n_molecules,
-        n_top=n_top,
-        seed_smiles=seed_smiles,
+    # --- No fallback — real generation required ---
+    raise RuntimeError(
+        "Molecule generation failed: REINVENT4 is not available or returned no results. "
+        "Install REINVENT4 or configure a generation service."
     )
 
 
@@ -593,7 +588,7 @@ def _mock_generate(
     n_top: int,
     seed_smiles: list[str] | None = None,
 ) -> list[dict]:
-    """Generate molecules via RDKit scaffold modification (mock).
+    """Mock generation — removed. Requires REINVENT4 or equivalent.
 
     Strategy:
     1. Pick random scaffolds from _SEED_SCAFFOLDS.
@@ -603,6 +598,10 @@ def _mock_generate(
     5. Compute Tanimoto novelty against the seed library.
     6. Rank and return top-N.
     """
+    raise RuntimeError(
+        "Mock molecule generation is not available. "
+        "Install REINVENT4 or configure a real generative model."
+    )
     if not _check_rdkit():
         raise RuntimeError(
             "RDKit is required for molecule generation. "

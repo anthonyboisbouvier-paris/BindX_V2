@@ -14,7 +14,8 @@ export const GROUP_META = {
   adme:              { label: 'ADME',                  bg: 'bg-emerald-50', text: 'text-emerald-600',  border: 'border-emerald-400' },
   toxicity:          { label: 'Toxicity',              bg: 'bg-red-50',    text: 'text-red-600',      border: 'border-red-400' },
   scoring:           { label: 'Molecular Properties',  bg: 'bg-violet-50',  text: 'text-violet-600',   border: 'border-violet-400' },
-  enrichment:        { label: 'Enrichment Analysis',  bg: 'bg-cyan-50',    text: 'text-cyan-600',     border: 'border-cyan-400' },
+  interactions:      { label: 'Interactions',          bg: 'bg-lime-50',    text: 'text-lime-600',     border: 'border-lime-400' },
+  scaffold:          { label: 'Scaffold',             bg: 'bg-emerald-50', text: 'text-emerald-600',  border: 'border-emerald-400' },
   clustering:        { label: 'Diversity Clustering', bg: 'bg-teal-50',    text: 'text-teal-600',     border: 'border-teal-400' },
   off_target:        { label: 'Off-target Selectivity', bg: 'bg-orange-50', text: 'text-orange-600',  border: 'border-orange-400' },
   confidence:        { label: 'Confidence Analysis',  bg: 'bg-indigo-50',  text: 'text-indigo-600',   border: 'border-indigo-400' },
@@ -83,12 +84,19 @@ export const ALL_COLUMNS = [
   { key: 'carcinogenicity', label: 'Carcino.', type: 'number', group: 'toxicity', width: 70, sortable: true, colorScale: 'lower-better' },
   { key: 'safety_color_code', label: 'Safety', type: 'text', group: 'toxicity', width: 65, sortable: true, popup: 'safety' },
   { key: 'composite_score', label: 'Safety Score', type: 'number', group: 'toxicity', width: 95, sortable: true, colorScale: 'higher-better' },
-  // Enrichment Analysis
-  { key: 'interactions_count', label: 'Contacts', type: 'number', group: 'enrichment', width: 75, sortable: true, colorScale: 'higher-better' },
-  { key: 'scaffold', label: 'Scaffold', type: 'text', group: 'enrichment', width: 110, sortable: true },
+  // Interactions (protein-ligand contacts)
+  { key: 'n_interactions', label: 'Contacts', type: 'number', group: 'interactions', width: 80, sortable: true, colorScale: 'higher-better' },
+  { key: 'functional_contacts', label: 'Functional', type: 'number', group: 'interactions', width: 80, sortable: true, colorScale: 'higher-better' },
+  { key: 'interaction_quality', label: 'Int. Quality', type: 'number', group: 'interactions', width: 85, sortable: true, colorScale: 'higher-better' },
+  { key: 'total_functional', label: 'Total Func.', type: 'number', group: 'interactions', width: 75, sortable: true },
+  { key: 'key_hbonds', label: 'Key HBonds', type: 'number', group: 'interactions', width: 75, sortable: true, colorScale: 'higher-better' },
+  // Scaffold (Murcko decomposition + BRICS)
+  { key: 'scaffold_smiles', label: 'Scaffold', type: 'text', group: 'scaffold', width: 130, sortable: true },
+  { key: 'n_modifiable_positions', label: 'R-Positions', type: 'number', group: 'scaffold', width: 85, sortable: true },
+  { key: 'brics_bond_count', label: 'BRICS Bonds', type: 'number', group: 'scaffold', width: 80, sortable: true },
+  { key: 'scaffold_n_rings', label: 'Rings', type: 'number', group: 'scaffold', width: 55, sortable: true },
   // Diversity Clustering
   { key: 'cluster_id', label: 'Cluster', type: 'number', group: 'clustering', width: 65, sortable: true },
-  { key: 'scaffold_smiles', label: 'Scaffold SMILES', type: 'smiles', group: 'clustering', width: 150, sortable: false },
   { key: 'tanimoto_to_centroid', label: 'Tanimoto', type: 'number', group: 'clustering', width: 80, sortable: true, colorScale: 'higher-better' },
   { key: 'is_representative', label: 'Representative', type: 'boolean', group: 'clustering', width: 90, sortable: true },
   // Off-target Selectivity
@@ -134,8 +142,8 @@ const COLUMN_MAP = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c]))
 // Column presets per phase type
 export const COLUMN_PRESETS = {
   hit_discovery: ['name', 'docking_score', 'cnn_score', 'logP', 'MW', 'HBD', 'HBA', 'TPSA', 'lipinski_pass', 'composite_score', 'confidence_score', 'safety_color_code'],
-  hit_to_lead: ['name', 'docking_score', 'cnn_score', 'composite_score', 'generation_level', 'cluster_id', 'scaffold', 'synth_confidence', 'safety_color_code'],
-  lead_optimization: ['name', 'composite_score', 'logP', 'solubility', 'BBB', 'hERG', 'oral_bioavailability', 'interactions_count', 'selectivity_score', 'synth_confidence', 'safety_color_code'],
+  hit_to_lead: ['name', 'docking_score', 'cnn_score', 'composite_score', 'generation_level', 'cluster_id', 'scaffold_smiles', 'synth_confidence', 'safety_color_code'],
+  lead_optimization: ['name', 'composite_score', 'logP', 'solubility', 'BBB', 'hERG', 'oral_bioavailability', 'n_interactions', 'selectivity_score', 'synth_confidence', 'safety_color_code'],
 }
 
 // Backend → frontend key mapping (backend names that differ from column keys)
@@ -153,7 +161,7 @@ const PROP_ALIASES = {
  * Skips arrays and special keys (flags, note, status, smiles, confidence_modifier).
  */
 function deepFlatten(obj, out = {}) {
-  const SKIP_KEYS = new Set(['flags', 'note', 'status', 'smiles', 'confidence_modifier', 'nearest_tanimoto', 'docking_status', 'tree', 'children', 'reaction', 'reactants', 'reactant_names', 'conditions', 'results', 'warnings', 'pose_molblock', 'preparation', 'breakdown', 'weights_used'])
+  const SKIP_KEYS = new Set(['flags', 'note', 'status', 'smiles', 'confidence_modifier', 'nearest_tanimoto', 'docking_status', 'tree', 'children', 'reaction', 'reactants', 'reactant_names', 'conditions', 'results', 'warnings', 'pose_molblock', 'preparation', 'breakdown', 'weights_used', 'scaffold_positions', 'scaffold_svg', 'interactions_detail', 'interactions_method', 'mapped_functional'])
   for (const [k, v] of Object.entries(obj)) {
     if (SKIP_KEYS.has(k)) continue
     if (v && typeof v === 'object' && !Array.isArray(v)) {
@@ -191,6 +199,19 @@ export function flattenMoleculeProperties(mol) {
     if (compositeData && typeof compositeData === 'object') {
       if (compositeData.breakdown) flat.breakdown = compositeData.breakdown
       if (compositeData.weights_used) flat.weights_used = compositeData.weights_used
+    }
+    // Preserve interactions detail for detail panel
+    const interData = mol.properties.interactions
+    if (interData && typeof interData === 'object') {
+      if (interData.interactions_detail) flat.interactions_detail = interData.interactions_detail
+      if (interData.interactions_method) flat.interactions_method = interData.interactions_method
+      if (interData.mapped_functional) flat.mapped_functional = interData.mapped_functional
+    }
+    // Preserve scaffold metadata for detail panel
+    const scaffoldData = mol.properties.scaffold
+    if (scaffoldData && typeof scaffoldData === 'object') {
+      if (scaffoldData.scaffold_positions) flat.scaffold_positions = scaffoldData.scaffold_positions
+      if (scaffoldData.scaffold_svg) flat.scaffold_svg = scaffoldData.scaffold_svg
     }
   }
   // Computed: CYP inhibitions count (number of CYPs with probability > 0.5)
@@ -264,8 +285,9 @@ export const CALCULATION_SUBTYPES = [
   { key: 'adme', icon: 'activity', description: 'Pharmacokinetics: how the drug circulates in the body (absorption, distribution, metabolism, excretion)', columns: ['solubility', 'BBB', 'oral_bioavailability', 'plasma_protein_binding', 'half_life', 'cyp_inhibitions', 'cns_mpo', 'pfizer_alert', 'gsk_alert', 'brenk_alert'] },
   { key: 'toxicity', icon: 'shield-alert', description: 'Toxicological risk: is the drug dangerous for the patient? (hERG, Ames, hepatotoxicity)', columns: ['hERG', 'ames_mutagenicity', 'hepatotoxicity', 'skin_sensitization', 'carcinogenicity', 'safety_color_code', 'composite_score'] },
   { key: 'scoring', icon: 'star', description: 'Physicochemical descriptors (MW, LogP, TPSA), drug-likeness rules (Lipinski, QED, Ro3), SA score', columns: ['logP', 'MW', 'HBD', 'HBA', 'TPSA', 'QED', 'lipinski_pass', 'heavy_atom_count', 'sa_score', 'ro3_pass', 'inchikey'] },
-  { key: 'enrichment', icon: 'layers', description: 'ProLIF interactions, scaffold analysis', columns: ['interactions_count', 'scaffold'] },
-  { key: 'clustering', icon: 'grid', description: 'Cluster by scaffold, compute Tanimoto similarity', columns: ['cluster_id', 'scaffold_smiles', 'tanimoto_to_centroid'] },
+  { key: 'interactions', icon: 'share-2', description: 'Protein-ligand interaction analysis (H-bonds, hydrophobic, pi-stacking)', columns: ['n_interactions', 'functional_contacts', 'total_functional', 'interaction_quality', 'key_hbonds'] },
+  { key: 'scaffold', icon: 'hexagon', description: 'Murcko scaffold decomposition, BRICS bonds, and R-group positions', columns: ['scaffold_smiles', 'n_modifiable_positions', 'brics_bond_count', 'scaffold_n_rings'] },
+  { key: 'clustering', icon: 'grid', description: 'Cluster by scaffold, compute Tanimoto similarity', columns: ['cluster_id', 'tanimoto_to_centroid'] },
   { key: 'off_target', icon: 'crosshair', description: 'Assess selectivity against off-target proteins', columns: ['selectivity_score', 'off_target_hits', 'selectivity_ratio'] },
   { key: 'confidence', icon: 'check-circle', description: 'PAINS filters, applicability domain, convergence', columns: ['confidence_score', 'pains_alert', 'applicability_domain', 'confidence_flags'] },
   { key: 'retrosynthesis', icon: 'git-branch', description: 'Synthesis feasibility, cost estimation, reagent availability', columns: ['n_synth_steps', 'synth_confidence', 'synth_cost_estimate', 'reagents_available'] },
@@ -278,7 +300,7 @@ export const CALCULATION_SUBTYPES = [
 export const ESTIMATED_TIMES = {
   import: '~5 seconds', calculation: '~1-5 minutes', generation: '~5-10 minutes',
   docking: '~3-5 min', adme: '~30 sec', toxicity: '~15 sec', scoring: '~15 sec',
-  enrichment: '~1-2 min', clustering: '~30 sec', off_target: '~1 min',
+  interactions: '~1-2 min', scaffold: '~15 sec', clustering: '~30 sec', off_target: '~1 min',
   confidence: '~15 sec', retrosynthesis: '~1 min',
   pharmacophore: '~30 sec', activity_cliffs: '~15 sec',
   composite: '~10 sec',

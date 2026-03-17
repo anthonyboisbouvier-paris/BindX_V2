@@ -4,14 +4,26 @@ import React, { useMemo } from 'react'
 // Interaction type visual config
 // --------------------------------------------------
 const TYPE_CONFIG = {
+  // H-bonds (RDKit + ProLIF variants)
   Hbond:       { label: 'H-Bond',       stroke: '#3b82f6', dash: '',      width: 2.5 },
-  HBDonor:     { label: 'H-Bond',       stroke: '#3b82f6', dash: '',      width: 2.5 },
-  HBAcceptor:  { label: 'H-Bond',       stroke: '#3b82f6', dash: '',      width: 2.5 },
+  HBDonor:     { label: 'H-Bond (D)',   stroke: '#3b82f6', dash: '',      width: 2.5 },
+  HBAcceptor:  { label: 'H-Bond (A)',   stroke: '#60a5fa', dash: '',      width: 2.5 },
+  // Hydrophobic
   Hydrophobic: { label: 'Hydrophobic',  stroke: '#9ca3af', dash: '5,4',   width: 1.5 },
+  // Pi interactions
   PiStacking:  { label: 'Pi-Stacking',  stroke: '#8b5cf6', dash: '',      width: 2 },
   CationPi:    { label: 'Cation-Pi',    stroke: '#f97316', dash: '',      width: 2 },
+  PiCation:    { label: 'Cation-Pi',    stroke: '#f97316', dash: '',      width: 2 },
+  // Salt bridge / Ionic (RDKit sends "Ionic", ProLIF sends "SaltBridge" or "Cationic"/"Anionic")
   SaltBridge:  { label: 'Salt Bridge',  stroke: '#0d9488', dash: '3,2',   width: 2 },
+  Ionic:       { label: 'Ionic',        stroke: '#0d9488', dash: '3,2',   width: 2 },
+  Cationic:    { label: 'Ionic (+)',     stroke: '#0d9488', dash: '3,2',   width: 2 },
+  Anionic:     { label: 'Ionic (-)',     stroke: '#0d9488', dash: '3,2',   width: 2 },
+  // Van der Waals (RDKit sends "VDW", ProLIF sends "VdWContact")
   VDW:         { label: 'Van der Waals',stroke: '#d1d5db', dash: '2,3',   width: 1 },
+  VdWContact:  { label: 'Van der Waals',stroke: '#d1d5db', dash: '2,3',   width: 1 },
+  // Metal coordination
+  MetalAcceptor:{ label: 'Metal Coord.', stroke: '#a855f7', dash: '',     width: 2 },
 }
 
 function getTypeConfig(type) {
@@ -21,7 +33,7 @@ function getTypeConfig(type) {
 // --------------------------------------------------
 // Build unique type list for legend (in order of priority)
 // --------------------------------------------------
-const TYPE_ORDER = ['Hbond','HBDonor','HBAcceptor','Hydrophobic','PiStacking','CationPi','SaltBridge','VDW']
+const TYPE_ORDER = ['Hbond','HBDonor','HBAcceptor','Hydrophobic','PiStacking','CationPi','PiCation','SaltBridge','Ionic','Cationic','Anionic','VDW','VdWContact','MetalAcceptor']
 
 // --------------------------------------------------
 // SVG dimensions
@@ -121,6 +133,8 @@ export default function InteractionDiagram({ interactions }) {
         residue: row.residue,
         type: row.type,
         functional: row.is_functional ?? row.functional ?? false,
+        distance: row.distance,
+        residue_number: row.residue_number,
       }))
     }
     if (interactions.residue_contacts && typeof interactions.residue_contacts === 'object') {
@@ -128,6 +142,8 @@ export default function InteractionDiagram({ interactions }) {
         residue: res,
         type: typeof info === 'string' ? info : (info.type || 'Unknown'),
         functional: info.functional ?? info.is_functional ?? false,
+        distance: info.distance,
+        residue_number: info.residue_number,
       }))
     }
     return []
@@ -154,13 +170,21 @@ export default function InteractionDiagram({ interactions }) {
 
   const positions = useMemo(() => residuePositions(contacts.length), [contacts.length])
 
-  // Unique interaction types present (for legend)
+  // Unique interaction types present (for legend — deduplicate by visual label)
   const presentTypes = useMemo(() => {
     const seen = new Set()
     contacts.forEach((c) => seen.add(c.type))
-    return TYPE_ORDER.filter((t) => seen.has(t)).concat(
+    const ordered = TYPE_ORDER.filter((t) => seen.has(t)).concat(
       [...seen].filter((t) => !TYPE_ORDER.includes(t))
     )
+    // Deduplicate by label so VDW + VdWContact don't show twice
+    const seenLabels = new Set()
+    return ordered.filter(t => {
+      const label = getTypeConfig(t).label
+      if (seenLabels.has(label)) return false
+      seenLabels.add(label)
+      return true
+    })
   }, [contacts])
 
   const ligandName = interactions.ligand_name || 'Ligand'
@@ -194,21 +218,51 @@ export default function InteractionDiagram({ interactions }) {
             Protein-Ligand Interaction Map
           </text>
 
-          {/* Lines from ligand to residues */}
+          {/* Lines from ligand to residues + distance labels */}
           {contacts.map((contact, idx) => {
             const pos = positions[idx]
             const cfg = getTypeConfig(contact.type)
+            const dist = contact.distance
+            // Interaction strength: type weight × distance factor
+            const TYPE_STRENGTH = {
+              Hbond: 1.0, HBDonor: 1.0, HBAcceptor: 1.0,
+              SaltBridge: 0.9, Ionic: 0.9, Cationic: 0.9, Anionic: 0.9,
+              PiStacking: 0.7, CationPi: 0.65, PiCation: 0.65,
+              Hydrophobic: 0.4, MetalAcceptor: 0.8,
+              VDW: 0.2, VdWContact: 0.2,
+            }
+            const typeStr = TYPE_STRENGTH[contact.type] || 0.3
+            const distFactor = dist != null ? Math.max(0.3, 1.0 - (dist - 2.0) / 3.5) : 0.5
+            const strength = typeStr * distFactor
+            const lineWidth = 1.0 + strength * 3.0
+            // Mid-point for distance label
+            const dx = pos.x - CX, dy = pos.y - CY
+            const len = Math.sqrt(dx * dx + dy * dy) || 1
+            const midX = CX + dx * 0.55, midY = CY + dy * 0.55
             return (
-              <path
-                key={`line-${idx}`}
-                d={pathTo(pos.x, pos.y)}
-                stroke={cfg.stroke}
-                strokeWidth={cfg.width}
-                strokeDasharray={cfg.dash}
-                strokeLinecap="round"
-                fill="none"
-                opacity={0.8}
-              />
+              <g key={`line-${idx}`}>
+                <path
+                  d={pathTo(pos.x, pos.y)}
+                  stroke={cfg.stroke}
+                  strokeWidth={lineWidth}
+                  strokeDasharray={cfg.dash}
+                  strokeLinecap="round"
+                  fill="none"
+                  opacity={0.8}
+                />
+                {dist != null && (
+                  <text
+                    x={midX} y={midY}
+                    textAnchor="middle"
+                    fontSize={7}
+                    fontWeight={600}
+                    fill={cfg.stroke}
+                    opacity={0.9}
+                  >
+                    {dist.toFixed(1)}Å
+                  </text>
+                )}
+              </g>
             )
           })}
 
@@ -218,13 +272,6 @@ export default function InteractionDiagram({ interactions }) {
             const cfg = getTypeConfig(contact.type)
             const isFunctional = contact.functional === true
             const label = shortLabel(contact.residue)
-
-            // Label position: push outward from center
-            const dx = pos.x - CX
-            const dy = pos.y - CY
-            const len = Math.sqrt(dx * dx + dy * dy) || 1
-            const lx = pos.x + (RES_R + 14) * (dx / len)
-            const ly = pos.y + (RES_R + 14) * (dy / len)
 
             return (
               <g key={`res-${idx}`}>
@@ -257,15 +304,6 @@ export default function InteractionDiagram({ interactions }) {
                   fill={cfg.stroke}
                 >
                   {label}
-                </text>
-                {/* Label outside the circle */}
-                <text
-                  x={lx} y={ly + 3}
-                  textAnchor="middle"
-                  fontSize={8}
-                  fill="#374151"
-                >
-                  {contact.residue || ''}
                 </text>
               </g>
             )

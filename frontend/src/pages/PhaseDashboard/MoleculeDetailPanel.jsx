@@ -6,6 +6,8 @@ import SafetyReport from '../../components/SafetyReport.jsx'
 import SynthesisTree from '../../components/SynthesisTree.jsx'
 import ConfidenceBreakdown from '../../components/ConfidenceBreakdown.jsx'
 import InfoTip, { TIPS } from '../../components/InfoTip.jsx'
+import InteractionDiagram from '../../components/InteractionDiagram.jsx'
+import InteractionView from '../../components/InteractionView.jsx'
 
 // ---------------------------------------------------------------------------
 // Detail panel tab content helpers
@@ -29,7 +31,12 @@ function ScoresTab({ mol }) {
             <div className="mt-2 h-1 bg-gray-200 rounded-full overflow-hidden">
               <div
                 className={`h-1 ${s.color} rounded-full`}
-                style={{ width: s.label === 'CNN Score' ? `${Number(s.value) * 100}%` : '60%' }}
+                style={{ width: (() => {
+                  if (s.label === 'CNN Score') return `${Math.min(100, Number(s.value) * 100)}%`
+                  if (s.label === 'CNN Affinity') return `${Math.min(100, Number(s.value) / 10 * 100)}%`
+                  // Docking score: range -12 to 0, more negative = better
+                  return `${Math.min(100, Math.abs(Number(s.value)) / 12 * 100)}%`
+                })() }}
               />
             </div>
           </div>
@@ -694,34 +701,242 @@ function SynthesisTab({ details, onOpenPopup }) {
   )
 }
 
-function InteractionsTab({ details }) {
-  const inter = details?.interactions
-  if (!inter) {
-    return <p className="text-sm text-gray-400 text-center py-4">No interaction data — run Enrichment to compute ProLIF interactions.</p>
+// Interaction type badge colors
+const INTER_TYPE_STYLES = {
+  Hbond:         { bg: 'bg-blue-100', text: 'text-blue-700' },
+  HBDonor:       { bg: 'bg-blue-100', text: 'text-blue-700' },
+  HBAcceptor:    { bg: 'bg-sky-100', text: 'text-sky-700' },
+  Hydrophobic:   { bg: 'bg-gray-100', text: 'text-gray-600' },
+  PiStacking:    { bg: 'bg-purple-100', text: 'text-purple-700' },
+  CationPi:      { bg: 'bg-orange-100', text: 'text-orange-700' },
+  PiCation:      { bg: 'bg-orange-100', text: 'text-orange-700' },
+  SaltBridge:    { bg: 'bg-teal-100', text: 'text-teal-700' },
+  Ionic:         { bg: 'bg-teal-100', text: 'text-teal-700' },
+  Cationic:      { bg: 'bg-teal-100', text: 'text-teal-700' },
+  Anionic:       { bg: 'bg-teal-100', text: 'text-teal-700' },
+  VDW:           { bg: 'bg-gray-50', text: 'text-gray-400' },
+  VdWContact:    { bg: 'bg-gray-50', text: 'text-gray-400' },
+  MetalAcceptor: { bg: 'bg-violet-100', text: 'text-violet-700' },
+}
+
+const ORIGIN_ROLES = new Set(['active_site', 'binding', 'metal_binding', 'custom', 'key'])
+
+function InteractionsTab({ molecule, details, onHighlightResidue, onShowInteractions, functionalResidues, computedDistances }) {
+  const [viewMode, setViewMode] = useState('diagram')
+
+  const nInteractions = molecule?.n_interactions
+  const functionalContacts = molecule?.functional_contacts
+  const totalFunctional = molecule?.total_functional || 0
+  const interactionQuality = molecule?.interaction_quality
+  const keyHbonds = molecule?.key_hbonds
+  const method = molecule?.interactions_method
+  const rawInterDetail = molecule?.interactions_detail || []
+
+  // Enrich with 3D-computed distances when backend data lacks them
+  const interDetail = useMemo(() => {
+    if (!computedDistances || Object.keys(computedDistances).length === 0) return rawInterDetail
+    return rawInterDetail.map(row => {
+      if (row.distance != null) return row
+      const cd = computedDistances[row.residue_number]
+      return cd != null ? { ...row, distance: cd } : row
+    })
+  }, [rawInterDetail, computedDistances])
+
+  if (nInteractions == null && interDetail.length === 0) {
+    return <p className="text-sm text-gray-400 text-center py-4">No interaction data — run an Interactions analysis first.</p>
   }
 
-  const typeColors = {
-    'HBond': 'bg-blue-100 text-blue-700',
-    'Hydrophobic': 'bg-orange-100 text-orange-700',
-    'Salt Bridge': 'bg-purple-100 text-purple-700',
-    'Pi-Stacking': 'bg-indigo-100 text-indigo-700',
-    'Covalent': 'bg-red-100 text-red-700',
-    'Water Bridge': 'bg-cyan-100 text-cyan-700',
+  // Build the interaction data object for InteractionDiagram / InteractionView
+  const interactionData = {
+    interactions: interDetail,
+    functional_contacts: functionalContacts,
+    total_functional: totalFunctional,
+    interaction_quality: interactionQuality,
+    key_hbonds: keyHbonds,
+    method: method,
   }
 
-  const maxDist = inter.residues ? Math.max(...inter.residues.map(r => r.distance)) : 5
+  // Group interactions by type for badges
+  const typeGroups = {}
+  interDetail.forEach(row => {
+    const t = row.type || 'VDW'
+    if (!typeGroups[t]) typeGroups[t] = { total: 0, functional: 0 }
+    typeGroups[t].total++
+    if (row.is_functional) typeGroups[t].functional++
+  })
+
+  // Missing functional contacts: functional residues NOT contacted
+  const contactedFuncNums = new Set(
+    interDetail.filter(r => r.is_functional && r.residue_number != null).map(r => r.residue_number)
+  )
+
+  // Use mapped_functional from backend (PDB-numbered, offset-corrected) when available
+  const mappedFunc = molecule?.mapped_functional || []
+
+  const missingFunc = useMemo(() => {
+    if (mappedFunc.length > 0) {
+      return mappedFunc.filter(mf => mf.number != null && !contactedFuncNums.has(mf.number))
+    }
+    // Fallback for old runs without mapped_functional
+    return (functionalResidues || []).filter(
+      fr => fr.enabled !== false && fr.number != null
+        && ORIGIN_ROLES.has(fr.role || 'key')
+        && !contactedFuncNums.has(fr.number)
+    )
+  }, [mappedFunc, functionalResidues, contactedFuncNums])
+
+  // Build residue origins map for the Origin column
+  // Uses PDB-numbered data from backend to match interaction table residue numbers
+  const residueOrigins = useMemo(() => {
+    const map = {}
+    if (mappedFunc.length > 0) {
+      mappedFunc.forEach(mf => {
+        if (mf.number != null) {
+          map[mf.number] = { role: mf.role || 'key', label: mf.description || mf.role || 'Key' }
+        }
+      })
+    } else {
+      // Fallback for old runs: use raw functionalResidues (assumes offset=0)
+      ;(functionalResidues || []).forEach(fr => {
+        if (fr.number != null && ORIGIN_ROLES.has(fr.role || 'key')) {
+          map[fr.number] = { role: fr.role || 'key', label: fr.description || fr.role || 'Key' }
+        }
+      })
+    }
+    return map
+  }, [mappedFunc, functionalResidues])
+
+  const handleResidueClick = (resNum, resName) => {
+    if (onHighlightResidue && resNum != null) {
+      onHighlightResidue({ number: resNum, aa: resName, isMissing: false })
+    }
+  }
 
   return (
     <div className="space-y-3">
-      {/* Summary counts */}
+      {/* Summary metrics */}
       <div className="flex flex-wrap gap-2">
         {[
-          { label: 'Total', value: inter.total_contacts, color: 'text-gray-700' },
-          { label: 'H-bonds', value: inter.hbonds, color: 'text-blue-600' },
-          { label: 'Hydrophobic', value: inter.hydrophobic, color: 'text-orange-600' },
-          { label: 'Ionic', value: inter.ionic, color: 'text-purple-600' },
-          { label: 'Pi-stack', value: inter.pi_stacking, color: 'text-indigo-600' },
-          inter.covalent ? { label: 'Covalent', value: inter.covalent, color: 'text-red-600' } : null,
+          { label: 'Contacts', value: nInteractions, color: 'text-gray-700' },
+          totalFunctional > 0
+            ? { label: 'Functional', value: `${functionalContacts ?? 0}/${totalFunctional}`, color: 'text-lime-600' }
+            : { label: 'Functional', value: functionalContacts, color: 'text-lime-600' },
+          interactionQuality != null ? { label: 'Quality', value: (interactionQuality * 100).toFixed(0) + '%', color: 'text-emerald-600' } : null,
+          { label: 'Key HBonds', value: keyHbonds, color: 'text-blue-600' },
+        ].filter(s => s && s.value != null).map(s => (
+          <div key={s.label} className="bg-gray-50 rounded-lg px-2.5 py-1.5 text-center border border-gray-100 min-w-[52px]">
+            <p className={`text-base font-bold tabular-nums ${s.color}`}>{s.value}</p>
+            <p className="text-[9px] text-gray-400">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Type badges */}
+      {Object.keys(typeGroups).length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(typeGroups).map(([type, counts]) => {
+            const st = INTER_TYPE_STYLES[type] || { bg: 'bg-gray-100', text: 'text-gray-600' }
+            return (
+              <span key={type} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${st.bg} ${st.text}`}>
+                {({ Hbond:'H-Bond', HBDonor:'H-Bond Donor', HBAcceptor:'H-Bond Acceptor', PiStacking:'Pi Stacking', CationPi:'Cation-Pi', PiCation:'Cation-Pi', SaltBridge:'Salt Bridge', Ionic:'Ionic', Cationic:'Ionic (+)', Anionic:'Ionic (-)', VDW:'VdW', VdWContact:'VdW', MetalAcceptor:'Metal Coord.' })[type] || type}
+                <span className="font-bold">{counts.total}</span>
+                {counts.functional > 0 && (
+                  <span className="text-green-600 ml-0.5">({counts.functional} func.)</span>
+                )}
+              </span>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Show on 3D button */}
+      {interDetail.length > 0 && onShowInteractions && (
+        <button
+          onClick={() => onShowInteractions(interDetail)}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-lime-50 hover:bg-lime-100 border border-lime-200 rounded-xl text-lime-700 font-semibold text-sm transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
+          </svg>
+          Show on 3D
+        </button>
+      )}
+
+      {/* Missing functional contacts */}
+      {missingFunc.length > 0 && (
+        <div className="p-2.5 bg-red-50 rounded-lg border border-red-200">
+          <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wider mb-1.5">Missing functional contacts</p>
+          <div className="flex flex-wrap gap-1">
+            {missingFunc.map(fr => (
+              <button
+                key={fr.number}
+                onClick={() => onHighlightResidue && onHighlightResidue({ number: fr.number, aa: fr.aa, isMissing: true })}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 hover:bg-red-200 transition-colors cursor-pointer"
+              >
+                {fr.aa || '?'}{fr.number}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* View mode toggle */}
+      <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5 w-fit">
+        <button
+          onClick={() => setViewMode('diagram')}
+          className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+            viewMode === 'diagram' ? 'bg-white text-bx-light-text shadow-sm' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Diagram
+        </button>
+        <button
+          onClick={() => setViewMode('table')}
+          className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+            viewMode === 'table' ? 'bg-white text-bx-light-text shadow-sm' : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          Table
+        </button>
+      </div>
+
+      {/* Interaction visualization */}
+      {viewMode === 'diagram' ? (
+        <InteractionDiagram interactions={interactionData} />
+      ) : (
+        <InteractionView
+          interactions={interactionData}
+          onResidueClick={onHighlightResidue ? handleResidueClick : undefined}
+          residueOrigins={residueOrigins}
+        />
+      )}
+    </div>
+  )
+}
+
+function ScaffoldTab({ molecule }) {
+  const scaffoldSmiles = molecule?.scaffold_smiles
+  const nPositions = molecule?.n_modifiable_positions
+  const bricsBonds = molecule?.brics_bond_count
+  const nRings = molecule?.scaffold_n_rings
+  const scaffoldMw = molecule?.scaffold_mw
+  const positions = molecule?.scaffold_positions || []
+  const svgContent = molecule?.scaffold_svg
+
+  if (!scaffoldSmiles && nPositions == null) {
+    return <p className="text-sm text-gray-400 text-center py-4">No scaffold data — run a Scaffold analysis first.</p>
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Summary stats */}
+      <div className="flex flex-wrap gap-2">
+        {[
+          nPositions != null && { label: 'R-Positions', value: nPositions, color: 'text-emerald-600' },
+          bricsBonds != null && { label: 'BRICS Bonds', value: bricsBonds, color: 'text-teal-600' },
+          nRings != null && { label: 'Rings', value: nRings, color: 'text-blue-600' },
+          scaffoldMw != null && { label: 'MW', value: Number(scaffoldMw).toFixed(0), color: 'text-gray-600' },
         ].filter(Boolean).map(s => (
           <div key={s.label} className="bg-gray-50 rounded-lg px-2.5 py-1.5 text-center border border-gray-100 min-w-[52px]">
             <p className={`text-base font-bold tabular-nums ${s.color}`}>{s.value}</p>
@@ -730,28 +945,43 @@ function InteractionsTab({ details }) {
         ))}
       </div>
 
-      {/* Residue list */}
-      <div className="space-y-1.5">
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Interacting residues</p>
-        {inter.residues?.map((r, i) => (
-          <div key={i} className="flex items-center gap-2.5 py-1.5 border-b border-gray-50 last:border-0">
-            <span className="text-sm font-mono font-semibold text-gray-700 w-16 flex-shrink-0">{r.name}</span>
-            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${typeColors[r.type] || 'bg-gray-100 text-gray-600'} flex-shrink-0`}>
-              {r.type}
-            </span>
-            <div className="flex-1 flex items-center gap-1.5">
-              <div className="flex-1 bg-gray-100 rounded-full h-1">
-                <div
-                  className="h-1 bg-bx-surface rounded-full"
-                  style={{ width: `${((maxDist - r.distance) / maxDist) * 100}%`, opacity: 0.6 }}
-                />
-              </div>
-              <span className="text-[9px] text-gray-400 tabular-nums flex-shrink-0">{r.distance.toFixed(1)} Å</span>
+      {/* Scaffold SMILES */}
+      {scaffoldSmiles && (
+        <div className="bg-gray-50 rounded-xl border border-gray-100 p-3">
+          <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Scaffold SMILES</p>
+          <p className="text-xs font-mono text-gray-600 break-all">{scaffoldSmiles}</p>
+        </div>
+      )}
+
+      {/* SVG visualization */}
+      {svgContent && (
+        <div className="bg-white rounded-xl border border-gray-100 p-2">
+          <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Annotated Structure</p>
+          <div className="flex justify-center" dangerouslySetInnerHTML={{ __html: svgContent }} />
+        </div>
+      )}
+
+      {/* Modifiable positions */}
+      {positions.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Modifiable Positions</p>
+          {positions.map((pos, i) => (
+            <div key={i} className="flex items-center gap-2.5 py-1.5 border-b border-gray-50 last:border-0">
+              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                pos.type === 'R-group' ? 'bg-green-100 text-green-700'
+                : pos.type === 'BRICS' ? 'bg-red-100 text-red-700'
+                : 'bg-gray-100 text-gray-600'
+              }`}>
+                {pos.type || 'R-group'}
+              </span>
+              <span className="text-sm text-gray-700">{pos.label || pos.smiles || `Position ${i + 1}`}</span>
+              {pos.atom_idx != null && (
+                <span className="text-[9px] text-gray-400 ml-auto">atom {pos.atom_idx}</span>
+              )}
             </div>
-            <span className="text-[9px] text-gray-400 flex-shrink-0">{r.chain}</span>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -787,40 +1017,7 @@ function DetailPopupModal({ type, molecule, onClose }) {
           />
         )
       case 'confidence': {
-        // Build confidence from explicit data or derive from available properties
-        let confidence = props.confidence
-        if (!confidence) {
-          const components = {}
-          let total = 0, count = 0
-          // Docking confidence: normalize docking_score (-12 to 0 → 0 to 1)
-          if (flat.docking_score != null) {
-            const ds = Math.min(0, Math.max(-12, flat.docking_score))
-            const score = Math.abs(ds) / 12
-            components.docking = { score: Math.round(score * 100) / 100, note: `Docking score: ${flat.docking_score?.toFixed(1)} kcal/mol` }
-            total += score; count++
-          }
-          // CNN pose quality
-          if (flat.cnn_score != null) {
-            components.pocket = { score: Math.round(flat.cnn_score * 100) / 100, note: `CNN pose score: ${flat.cnn_score?.toFixed(2)}` }
-            total += flat.cnn_score; count++
-          }
-          // ADMET confidence: average of available ADMET values
-          const admetKeys = ['oral_bioavailability', 'solubility', 'BBB', 'half_life']
-          const admetVals = admetKeys.map(k => flat[k]).filter(v => v != null && typeof v === 'number')
-          if (admetVals.length > 0) {
-            const avg = admetVals.reduce((s, v) => s + v, 0) / admetVals.length
-            components.admet = { score: Math.round(avg * 100) / 100, note: `Based on ${admetVals.length} ADMET properties` }
-            total += avg; count++
-          }
-          // Structure / drug-likeness
-          if (flat.QED != null) {
-            components.structure = { score: Math.round(flat.QED * 100) / 100, note: `QED drug-likeness: ${flat.QED?.toFixed(2)}` }
-            total += flat.QED; count++
-          }
-          if (count > 0) {
-            confidence = { overall: Math.round((total / count) * 100) / 100, components }
-          }
-        }
+        const confidence = props.confidence || null
         return (
           <ConfidenceBreakdown
             confidence={confidence}
@@ -877,16 +1074,35 @@ const TABS = [
   { id: 'toxicity',     label: 'Toxicity',    tip: 'Safety endpoints: hERG, Ames, hepatotoxicity, carcinogenicity' },
   { id: 'offtarget',    label: 'Off-Target',  tip: 'Selectivity profiling against off-target proteins' },
   { id: 'synthesis',    label: 'Synth.',      tip: 'Retrosynthesis feasibility, estimated cost, and synthetic route' },
-  { id: 'interactions', label: 'Interact.',   tip: 'Protein-ligand interaction fingerprints (ProLIF): H-bonds, hydrophobic, ionic contacts' },
+  { id: 'scaffold',     label: 'Scaffold',    tip: 'Murcko scaffold decomposition, BRICS bonds, and modifiable R-group positions' },
 ]
 
 function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, onRowClick, isFrozen, project, selectedMolecules, onCellPopup }) {
   const [activeTab, setActiveTab] = useState('scores')
   const [copied, setCopied] = useState(false)
   const [viewerMode, setViewerMode] = useState(null) // null = auto-detect: 'protein' | 'ligand' | 'results'
+  const [highlightedInteraction, setHighlightedInteraction] = useState(null)
+  const [interactionContacts, setInteractionContacts] = useState(null)
+  const [computedDistances, setComputedDistances] = useState({}) // { residue_number: distance }
+
+  // Auto-update interaction contacts when molecule changes (if interactions are shown)
+  const molId = molecule?.id
+  useEffect(() => {
+    if (interactionContacts) {
+      const newDetail = molecule?.interactions_detail || []
+      if (newDetail.length > 0) {
+        setInteractionContacts(newDetail)
+      } else {
+        setInteractionContacts(null)
+      }
+      setHighlightedInteraction(null)
+      setComputedDistances({})
+    }
+  }, [molId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Extract target structure info from project
   const targetPreview = project?.target_preview || {}
+  const funcResidues = targetPreview.functional_residues?.residues || []
   const pdbUrl = targetPreview.structure?.download_url || null
   const selectedPocket = useMemo(() => {
     const pockets = targetPreview.pockets || []
@@ -957,7 +1173,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
                       safetyObj.brenk_alert != null || safetyObj.pfizer_alert != null ||
                       safetyObj.gsk_alert != null || safetyObj.off_target?.length > 0
     return {
-      interactions: props.enrichment || null,
+      interactions: props.interactions || props.enrichment || null,
       synthesis: retro ? {
         feasibility: retro.confidence ?? retro.synth_confidence ?? null,
         total_cost: retro.estimated_cost ?? retro.synth_cost_estimate ?? retro.cost_estimate ?? null,
@@ -1087,13 +1303,36 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
 
               {/* Protein 3D viewer */}
               {effectiveMode === 'protein' && hasProtein && (
-                <ProteinViewer
-                  pdbUrl={pdbUrl}
-                  selectedPocket={selectedPocket}
-                  height={280}
-                  dockedMolblock={!dockedMolblocks ? (molecule.properties?.docking?.pose_molblock || null) : null}
-                  dockedMolblocks={dockedMolblocks}
-                />
+                <>
+                  <ProteinViewer
+                    pdbUrl={pdbUrl}
+                    selectedPocket={selectedPocket}
+                    height={280}
+                    dockedMolblock={!dockedMolblocks ? (molecule.properties?.docking?.pose_molblock || null) : null}
+                    dockedMolblocks={dockedMolblocks}
+                    highlightedResidue={highlightedInteraction}
+                    interactionContacts={interactionContacts}
+                    onEnrichedContacts={setComputedDistances}
+                  />
+                  {/* Interactions panel below 3D viewer */}
+                  <div className="mt-3">
+                    <InteractionsTab
+                      molecule={molecule}
+                      details={details}
+                      onHighlightResidue={(val) => {
+                        // Toggle: clicking the same residue deselects it
+                        setHighlightedInteraction(prev =>
+                          prev && prev.number === val?.number ? null : val
+                        )
+                      }}
+                      onShowInteractions={(contacts) => {
+                        setInteractionContacts(contacts)
+                      }}
+                      functionalResidues={funcResidues}
+                      computedDistances={computedDistances}
+                    />
+                  </div>
+                </>
               )}
 
               {/* Ligand 3D viewer */}
@@ -1129,7 +1368,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
                     {activeTab === 'toxicity' && <ToxicityDetailTab mol={molecule} details={details} />}
                     {activeTab === 'offtarget' && <OffTargetTab mol={molecule} details={details} />}
                     {activeTab === 'synthesis' && <SynthesisTab details={details} onOpenPopup={onCellPopup ? () => onCellPopup('retrosynthesis', molecule) : null} />}
-                    {activeTab === 'interactions' && <InteractionsTab details={details} />}
+                    {activeTab === 'scaffold' && <ScaffoldTab molecule={molecule} />}
                   </div>
                 </div>
               )}

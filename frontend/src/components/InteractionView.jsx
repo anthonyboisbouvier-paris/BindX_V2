@@ -5,12 +5,20 @@ import InfoTip from './InfoTip.jsx'
 // Interaction type config: color + label
 // --------------------------------------------------
 const INTERACTION_TYPES = {
-  HBDonor:     { label: 'H-Bond Donor',    bg: 'bg-blue-100',   text: 'text-blue-700',   dot: '#3b82f6' },
-  HBAcceptor:  { label: 'H-Bond Acceptor', bg: 'bg-red-100',    text: 'text-red-700',    dot: '#ef4444' },
-  Hydrophobic: { label: 'Hydrophobic',     bg: 'bg-gray-100',   text: 'text-gray-600',   dot: '#6b7280' },
-  PiStacking:  { label: 'Pi Stacking',     bg: 'bg-purple-100', text: 'text-purple-700', dot: '#8b5cf6' },
-  CationPi:    { label: 'Cation-Pi',       bg: 'bg-orange-100', text: 'text-orange-700', dot: '#f97316' },
-  VDW:         { label: 'Van der Waals',   bg: 'bg-gray-50',    text: 'text-gray-400',   dot: '#d1d5db' },
+  Hbond:         { label: 'H-Bond',          bg: 'bg-blue-100',   text: 'text-blue-700',   dot: '#3b82f6' },
+  HBDonor:       { label: 'H-Bond Donor',    bg: 'bg-blue-100',   text: 'text-blue-700',   dot: '#3b82f6' },
+  HBAcceptor:    { label: 'H-Bond Acceptor', bg: 'bg-sky-100',    text: 'text-sky-700',    dot: '#60a5fa' },
+  Hydrophobic:   { label: 'Hydrophobic',     bg: 'bg-gray-100',   text: 'text-gray-600',   dot: '#6b7280' },
+  PiStacking:    { label: 'Pi Stacking',     bg: 'bg-purple-100', text: 'text-purple-700', dot: '#8b5cf6' },
+  CationPi:      { label: 'Cation-Pi',       bg: 'bg-orange-100', text: 'text-orange-700', dot: '#f97316' },
+  PiCation:      { label: 'Cation-Pi',       bg: 'bg-orange-100', text: 'text-orange-700', dot: '#f97316' },
+  SaltBridge:    { label: 'Salt Bridge',     bg: 'bg-teal-100',   text: 'text-teal-700',   dot: '#0d9488' },
+  Ionic:         { label: 'Ionic',           bg: 'bg-teal-100',   text: 'text-teal-700',   dot: '#0d9488' },
+  Cationic:      { label: 'Ionic (+)',       bg: 'bg-teal-100',   text: 'text-teal-700',   dot: '#0d9488' },
+  Anionic:       { label: 'Ionic (-)',       bg: 'bg-teal-100',   text: 'text-teal-700',   dot: '#0d9488' },
+  VDW:           { label: 'Van der Waals',   bg: 'bg-gray-50',    text: 'text-gray-400',   dot: '#d1d5db' },
+  VdWContact:    { label: 'Van der Waals',   bg: 'bg-gray-50',    text: 'text-gray-400',   dot: '#d1d5db' },
+  MetalAcceptor: { label: 'Metal Coord.',    bg: 'bg-violet-100', text: 'text-violet-700', dot: '#a855f7' },
 }
 
 function getTypeConfig(type) {
@@ -88,7 +96,30 @@ function FunctionalIcon({ is_functional }) {
 // --------------------------------------------------
 // Main InteractionView
 // --------------------------------------------------
-export default function InteractionView({ interactions }) {
+// --------------------------------------------------
+// Origin badge styles by role
+// --------------------------------------------------
+const ORIGIN_STYLES = {
+  active_site:   { bg: 'bg-red-100',    text: 'text-red-700',    label: 'Active Site' },
+  binding:       { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Binding' },
+  pocket:        { bg: 'bg-amber-100',  text: 'text-amber-700',  label: 'Pocket' },
+  key:           { bg: 'bg-cyan-100',   text: 'text-cyan-700',   label: 'Key Residue' },
+  metal_binding: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Metal' },
+  site:          { bg: 'bg-gray-100',   text: 'text-gray-600',   label: 'Site' },
+}
+
+function OriginBadge({ residueNumber, residueOrigins }) {
+  const origin = residueOrigins?.[residueNumber]
+  if (!origin) return <span className="text-gray-300 text-xs">—</span>
+  const style = ORIGIN_STYLES[origin.role] || ORIGIN_STYLES.site
+  return (
+    <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${style.bg} ${style.text}`}>
+      {style.label}
+    </span>
+  )
+}
+
+export default function InteractionView({ interactions, onResidueClick, residueOrigins }) {
   if (!interactions) {
     return (
       <div className="flex flex-col items-center justify-center py-10 text-gray-300">
@@ -147,6 +178,13 @@ export default function InteractionView({ interactions }) {
                 <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
                   Type
                 </th>
+                <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
+                  Origin
+                </th>
+                <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
+                  Dist.
+                  <InfoTip text="Distance between closest ligand atom and residue atom (Å). Shorter = stronger interaction. H-bonds: 2.5–3.5Å, Hydrophobic: <4.0Å, VDW: 3.5–4.5Å." />
+                </th>
                 <th className="text-center px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
                   Functional
                   <InfoTip text="Residue is part of the known functional/catalytic site of the protein." />
@@ -157,7 +195,8 @@ export default function InteractionView({ interactions }) {
               {rows.map((row, idx) => (
                 <tr
                   key={`${row.residue}-${idx}`}
-                  className={`hover:bg-gray-50 transition-colors ${row.is_functional ? 'bg-green-50/30' : ''}`}
+                  className={`hover:bg-gray-50 transition-colors ${row.is_functional ? 'bg-green-50/30' : ''} ${onResidueClick ? 'cursor-pointer' : ''}`}
+                  onClick={onResidueClick ? () => onResidueClick(row.residue_number, row.residue) : undefined}
                 >
                   <td className="px-3 py-2 font-mono font-semibold text-bx-light-text">
                     {row.residue}
@@ -169,6 +208,23 @@ export default function InteractionView({ interactions }) {
                   </td>
                   <td className="px-3 py-2">
                     <TypeBadge type={row.type} />
+                  </td>
+                  <td className="px-3 py-2">
+                    <OriginBadge residueNumber={row.residue_number} residueOrigins={residueOrigins} />
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-sm tabular-nums">
+                    {row.distance != null ? (
+                      <span className={
+                        row.distance <= 3.0 ? 'text-green-600 font-bold' :
+                        row.distance <= 3.5 ? 'text-emerald-600' :
+                        row.distance <= 4.0 ? 'text-gray-600' :
+                        'text-gray-400'
+                      }>
+                        {row.distance.toFixed(1)}Å
+                      </span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-center">
                     <FunctionalIcon is_functional={row.is_functional} />

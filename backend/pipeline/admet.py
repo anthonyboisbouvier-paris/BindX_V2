@@ -376,25 +376,9 @@ def predict_herg_specialized(smiles: str) -> dict:
         }
 
     except ImportError:
-        # RDKit not available -- use hash-based fallback
-        import hashlib as _hashlib
-        digest = _hashlib.sha256(f"herg_v2:{smiles}".encode("utf-8")).hexdigest()
-        hash_val = int(digest[:8], 16) / 0xFFFFFFFF
-        ic50 = round(10.0 + hash_val * 40.0, 2)  # [10, 50] uM range
-
-        if ic50 > 30.0:
-            risk_level = "LOW"
-        elif ic50 >= 10.0:
-            risk_level = "MODERATE"
-        else:
-            risk_level = "HIGH"
-
-        return {
-            "ic50_um": ic50,
-            "risk_level": risk_level,
-            "method": "heuristic_v2",
-            "features": {"fallback": True},
-        }
+        raise RuntimeError(
+            "hERG prediction requires RDKit. Install rdkit-pypi."
+        )
 
     except Exception as exc:
         logger.warning("Specialized hERG prediction failed for %s: %s", smiles[:60], exc)
@@ -1037,43 +1021,11 @@ def _count_smarts_matches(mol: object, smarts_list: list[str], Chem: object) -> 
 # =====================================================================
 
 def _default_admet_entry(smiles: str) -> dict:
-    """Return a safe default ADMET entry when prediction fails for a single molecule."""
-    admet: dict = {
-        "smiles": smiles,
-        "absorption": {
-            "oral_bioavailability": 0.5,
-            "intestinal_permeability": 0.5,
-            "solubility": 0.5,
-            "pgp_substrate": 0.5,
-        },
-        "distribution": {
-            "plasma_protein_binding": 0.5,
-            "bbb_permeability": 0.5,
-            "vd": 0.5,
-        },
-        "metabolism": {
-            "cyp1a2_inhibitor": 0.0,
-            "cyp2c9_inhibitor": 0.0,
-            "cyp2c19_inhibitor": 0.0,
-            "cyp2d6_inhibitor": 0.0,
-            "cyp3a4_inhibitor": 0.0,
-        },
-        "excretion": {
-            "clearance": 0.5,
-            "half_life": 0.5,
-        },
-        "toxicity": {
-            "herg_inhibition": 0.0,
-            "ames_mutagenicity": 0.0,
-            "hepatotoxicity": 0.0,
-            "skin_sensitization": 0.0,
-            "carcinogenicity": 0.0,
-        },
-        "composite_score": 0.5,
-        "flags": ["info: default ADMET values (prediction failed)"],
-        "color_code": "yellow",
-    }
-    return admet
+    """ADMET prediction failed — raise instead of returning fake 0.5 values."""
+    raise RuntimeError(
+        f"ADMET prediction failed for {smiles[:60]}. "
+        "No fallback available — requires ADMET-AI or RDKit."
+    )
 
 
 # =====================================================================

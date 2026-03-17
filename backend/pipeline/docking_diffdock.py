@@ -164,13 +164,14 @@ def dock_diffdock(
         )
         if result is not None:
             return result
-        logger.warning(
-            "Real DiffDock run failed for %s; falling back to mock",
-            ligand_name,
+        raise RuntimeError(
+            f"DiffDock docking failed for {ligand_name}. "
+            "Check DiffDock installation and input files."
         )
 
-    return _dock_diffdock_mock(
-        protein_pdb, ligand_smiles, ligand_name, work_dir,
+    raise RuntimeError(
+        f"DiffDock is not available for {ligand_name}. "
+        "Install DiffDock or configure a docking service."
     )
 
 
@@ -413,70 +414,11 @@ def _dock_diffdock_mock(
     ligand_name: str,
     work_dir: Path,
 ) -> dict:
-    """Generate deterministic mock DiffDock results.
-
-    Uses the same hash-seeded RNG approach as ``docking._run_vina_mock``
-    but with a shifted distribution to simulate DiffDock's typically
-    stronger and more consistent binding predictions:
-
-    - Affinity range: -8.0 to -14.0 kcal/mol (vs Vina's -4.0 to -12.0)
-    - Lower variance (tighter distribution around -11 kcal/mol)
-    - Confidence score derived from SMILES-based pseudo-drug-likeness
-    - Mock pose PDB files generated with offset coordinates
-
-    Parameters
-    ----------
-    protein_pdb : Path
-        Protein PDB (used for coordinate reference in mock poses).
-    ligand_smiles : str
-        Ligand SMILES string.
-    ligand_name : str
-        Ligand identifier.
-    work_dir : Path
-        Output directory.
-
-    Returns
-    -------
-    dict
-        Same schema as ``dock_diffdock`` return value, with
-        ``method="diffdock_mock"``.
-    """
-    # Deterministic seed from ligand name + a DiffDock-specific salt
-    seed_input = f"diffdock_v2_{ligand_name}_{ligand_smiles}"
-    seed = int(hashlib.sha256(seed_input.encode()).hexdigest()[:8], 16)
-    rng = random.Random(seed)
-
-    # Compute pseudo-drug-likeness from SMILES to influence confidence
-    drug_likeness = _estimate_drug_likeness(ligand_smiles)
-
-    # Confidence: base from drug-likeness, add small random perturbation
-    confidence = max(0.05, min(0.99, drug_likeness + rng.gauss(0.0, 0.08)))
-    confidence = round(confidence, 4)
-
-    # Affinity: DiffDock mock produces stronger affinities than Vina mock.
-    # Mean around -11.0 kcal/mol with std ~1.5 (Vina mock: uniform -4 to -12).
-    # Confidence also influences affinity (higher confidence -> stronger binding).
-    base_affinity = rng.gauss(-11.0, 1.5)
-    confidence_bonus = (confidence - 0.5) * 2.0  # [-1, +1] range
-    affinity = base_affinity + confidence_bonus
-    affinity = round(max(-14.0, min(-8.0, affinity)), 1)
-
-    # Generate a mock pose PDB
-    safe_name = _sanitize_name(ligand_name)
-    pose_path = work_dir / f"{safe_name}_diffdock_pose.pdb"
-    _generate_mock_pose_pdb(pose_path, ligand_name, ligand_smiles, affinity, confidence)
-
-    logger.debug(
-        "Mock DiffDock for %s: affinity=%.1f confidence=%.4f",
-        ligand_name, affinity, confidence,
+    """DiffDock mock — removed. Requires real DiffDock installation."""
+    raise RuntimeError(
+        f"DiffDock mock docking is not available for {ligand_name}. "
+        "Install DiffDock or configure a real docking service."
     )
-
-    return {
-        "affinity": affinity,
-        "confidence": confidence,
-        "pose_pdb_path": pose_path if pose_path.exists() else None,
-        "method": "diffdock_mock",
-    }
 
 
 def _estimate_drug_likeness(smiles: str) -> float:

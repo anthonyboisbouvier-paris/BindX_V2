@@ -556,6 +556,7 @@ export default function PhaseDashboard() {
           selectedMoleculeIds={selectedMoleculeIds}
           submitting={runSubmitting}
           project={currentProject}
+          runs={currentPhaseRuns}
         />
         <FreezeDialog
           isOpen={showFreezeDialog}
@@ -833,6 +834,7 @@ export default function PhaseDashboard() {
         selectedMoleculeIds={selectedMoleculeIds}
         submitting={runSubmitting}
         project={currentProject}
+        runs={currentPhaseRuns}
       />
 
       <FreezeDialog

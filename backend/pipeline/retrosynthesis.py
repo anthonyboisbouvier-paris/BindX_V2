@@ -448,11 +448,11 @@ def plan_synthesis(
         result = _enrich_with_cost_data(result)
         return result
 
-    # ----- Strategy 3: Deterministic hash-based mock -----
-    logger.info("Using hash-based mock retrosynthesis for: %s", smiles[:60])
-    result = _mock_retrosynthesis(smiles)
-    result = _enrich_with_cost_data(result)
-    return result
+    # ----- Strategy 3: No fallback — all real strategies exhausted -----
+    raise RuntimeError(
+        "Retrosynthesis failed: neither AiZynthFinder nor RDKit disconnection "
+        f"could plan a route for {smiles[:60]}."
+    )
 
 
 def plan_synthesis_batch(
@@ -976,23 +976,12 @@ def _fragment_at_bond(mol: object, atom_idx1: int, atom_idx2: int) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _mock_retrosynthesis(smiles: str) -> dict:
-    """Generate a deterministic mock retrosynthesis route.
-
-    Uses a hash of the SMILES string to pick reactions from the
-    knowledge base, ensuring the same molecule always produces
-    the same route. The output looks realistic enough for UI
-    development and testing.
-
-    Parameters
-    ----------
-    smiles : str
-        Target molecule SMILES.
-
-    Returns
-    -------
-    dict
-        Full retrosynthesis result dict.
-    """
+    """Mock retrosynthesis — removed. Requires AiZynthFinder or RDKit."""
+    raise RuntimeError(
+        f"Mock retrosynthesis is not available for {smiles[:60]}. "
+        "Install AiZynthFinder or ensure RDKit disconnection works."
+    )
+    """Original docstring kept for reference:"""
     # Deterministic seed from the SMILES string
     digest = hashlib.sha256(smiles.encode("utf-8")).hexdigest()
     seed = int(digest[:8], 16)

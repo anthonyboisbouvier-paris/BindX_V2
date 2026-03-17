@@ -368,40 +368,12 @@ def predict_disorder(sequence: str) -> dict:
         logger.debug("IUPred3 API unavailable: %s", exc)
 
     # ------------------------------------------------------------------
-    # Mock fallback: composition-based heuristic
+    # No fallback — IUPred3 API required
     # ------------------------------------------------------------------
-    # Disorder-promoting amino acids (from Dunker et al.):
-    #   G, P, S, Q, E, K, A
-    # Order-promoting amino acids:
-    #   W, Y, F, I, L, V, C, N
-    logger.info("Using mock disorder prediction (composition heuristic) for %d residues", len(sequence))
-    disorder_promoting = set("GPSQEKA")
-    scores = []
-    window = 21  # sliding window size
-
-    for i in range(len(sequence)):
-        start = max(0, i - window // 2)
-        end = min(len(sequence), i + window // 2 + 1)
-        region = sequence[start:end]
-        dp_fraction = sum(1 for aa in region if aa in disorder_promoting) / len(region)
-        # Map to 0-1 score: pure disorder-promoting -> ~0.8, pure order -> ~0.1
-        score = 0.1 + 0.7 * dp_fraction
-        scores.append(round(score, 3))
-
-    idr_regions = _find_idr_regions(scores)
-    fraction = sum(e - s for s, e in idr_regions) / max(len(sequence), 1)
-
-    logger.info(
-        "Mock disorder prediction complete: %d IDRs, %.1f%% disordered",
-        len(idr_regions), fraction * 100,
+    raise RuntimeError(
+        "Disorder prediction requires IUPred3 API. "
+        "The API is unavailable. Check network connectivity."
     )
-
-    return {
-        "disorder_scores": scores,
-        "idr_regions": idr_regions,
-        "fraction_disordered": round(fraction, 3),
-        "method": "mock",
-    }
 
 
 def _find_idr_regions(scores: list[float], min_length: int = 20, threshold: float = 0.5) -> list[tuple[int, int]]:
@@ -538,17 +510,12 @@ def fetch_structure(uniprot_id: str, work_dir: Path) -> tuple[Path, str]:
         )
         return pdb_path, "pdb_experimental"
 
-    # ----- Strategy 5: Mock PDB (offline fallback) -----
-    logger.warning(
-        "All structure sources failed for %s, generating mock PDB", uniprot_id
+    # ----- All strategies exhausted -----
+    raise RuntimeError(
+        f"All structure sources failed for {uniprot_id}. "
+        "Tried: AlphaFold DB, UniProt, ESMFold API, and PDB. "
+        "Check network connectivity and UniProt ID validity."
     )
-    mock_content = _generate_mock_pdb(uniprot_id)
-    pdb_path.write_text(mock_content)
-    _save_pdb_info(work_dir, uniprot_id, None, "mock")
-    logger.info(
-        "Mock structure saved: %s (%d bytes)", pdb_path, pdb_path.stat().st_size
-    )
-    return pdb_path, "mock"
 
 
 def fetch_structure_from_sequence(sequence: str, work_dir: Path) -> tuple[Path, str]:
@@ -604,16 +571,11 @@ def fetch_structure_from_sequence(sequence: str, work_dir: Path) -> tuple[Path, 
     except Exception as exc:
         logger.warning("ESMFold failed for direct sequence: %s", exc)
 
-    # ----- Strategy 2: Mock PDB (offline fallback) -----
-    logger.warning("ESMFold failed for sequence, generating mock PDB")
-    mock_content = _generate_mock_pdb(f"SEQ_{seq_hash}")
-    pdb_path.write_text(mock_content)
-    logger.info(
-        "Mock structure saved for sequence: %s (%d bytes)",
-        pdb_path,
-        pdb_path.stat().st_size,
+    # ----- All strategies exhausted -----
+    raise RuntimeError(
+        "Structure prediction from sequence failed. "
+        "ESMFold API is unavailable. Check network connectivity."
     )
-    return pdb_path, "mock"
 
 
 def get_pdb_info(work_dir: Path, uniprot_id: str) -> Optional[dict]:
@@ -825,6 +787,10 @@ def _generate_mock_pdb(identifier: str) -> str:
     str
         A valid-ish PDB string with a few ATOM records.
     """
+    raise RuntimeError(
+        f"Mock PDB generation is not available for {identifier}. "
+        "Use AlphaFold DB, PDB, or ESMFold for real structures."
+    )
     # Deterministic coordinates based on identifier hash
     h = int(hashlib.md5(identifier.encode()).hexdigest()[:8], 16)
     x_base = (h % 100) / 2.0

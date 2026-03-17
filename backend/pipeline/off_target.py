@@ -174,171 +174,28 @@ _SELECTIVE_FEATURES: list[str] = [
 
 
 def predict_off_targets_sea(smiles: str) -> dict:
-    """Mock SEA-based (Similarity Ensemble Approach) broad off-target screening.
+    """SEA-based (Similarity Ensemble Approach) broad off-target screening.
 
-    Simulates a SwissTargetPrediction-style broad screen against ~3000 protein
-    targets. Uses the SMILES hash for reproducible random generation of hits
-    from the ``_SEA_GENE_POOL``.
-
-    Parameters
-    ----------
-    smiles : str
-        SMILES string of the candidate molecule.
-
-    Returns
-    -------
-    dict
-        Keys:
-        - ``targets_hit``: list of dicts with ``target``, ``probability``,
-          ``gene`` for each predicted hit.
-        - ``n_targets_screened``: int (always 3000 for the mock).
-        - ``method``: str, always ``"mock_sea"``.
+    Requires a real SwissTargetPrediction or SEA backend.
     """
-    if not smiles:
-        return {
-            "targets_hit": [],
-            "n_targets_screened": 3000,
-            "method": "mock_sea",
-        }
-
-    # Deterministic seed from SMILES
-    digest = hashlib.sha256(f"sea:{smiles}".encode("utf-8")).hexdigest()
-    seed_int = int(digest[:12], 16)
-
-    # Determine how many hits (5-15) based on hash
-    n_hits = 5 + (seed_int % 11)  # 5..15
-
-    # Select targets deterministically from the gene pool
-    targets_hit: list[dict[str, object]] = []
-    pool_len = len(_SEA_GENE_POOL)
-    seen_genes: set[str] = set()
-
-    for i in range(n_hits):
-        # Use different hash segments to pick gene index and probability
-        sub_digest = hashlib.sha256(f"sea_hit:{smiles}:{i}".encode("utf-8")).hexdigest()
-        sub_int = int(sub_digest[:10], 16)
-
-        gene_idx = sub_int % pool_len
-        entry = _SEA_GENE_POOL[gene_idx]
-
-        # Skip duplicates
-        if entry["gene"] in seen_genes:
-            continue
-        seen_genes.add(entry["gene"])
-
-        # Probability in [0.05, 0.95]
-        prob_raw = int(sub_digest[10:16], 16) / 0xFFFFFF
-        probability = round(0.05 + prob_raw * 0.90, 3)
-
-        targets_hit.append({
-            "target": entry["target"],
-            "probability": probability,
-            "gene": entry["gene"],
-        })
-
-    # Sort by probability descending
-    targets_hit.sort(key=lambda x: x["probability"], reverse=True)
-
-    logger.info(
-        "SEA broad screen for %s: %d targets hit (out of 3000 screened)",
-        smiles[:40], len(targets_hit),
+    raise RuntimeError(
+        "SEA off-target prediction is not implemented. "
+        "Requires a real SwissTargetPrediction or SEA service integration."
     )
-
-    return {
-        "targets_hit": targets_hit,
-        "n_targets_screened": 3000,
-        "method": "mock_sea",
-    }
 
 
 def combined_off_target_screening(
     smiles: str,
     work_dir: Path,
 ) -> dict:
-    """Two-tier combined off-target screening (V6.3).
+    """Two-tier combined off-target screening.
 
-    Tier 1: Broad SEA-based scan via ``predict_off_targets_sea`` (~3000 targets).
-    Tier 2: Focused 10-panel docking via ``screen_off_targets`` (anti-target panel).
-
-    The combined selectivity score is a weighted blend:
-        combined = 0.6 * (docking_safe / 10) + 0.4 * min(sea_clear / 20, 1.0)
-
-    where ``docking_safe`` is the number of safe targets from the docking panel,
-    and ``sea_clear`` is the number of SEA hits below the danger threshold
-    (i.e., hits to targets NOT in ``DANGEROUS_TARGETS``).
-
-    Parameters
-    ----------
-    smiles : str
-        SMILES string of the candidate molecule.
-    work_dir : Path
-        Working directory (passed through to ``screen_off_targets``).
-
-    Returns
-    -------
-    dict
-        Keys:
-        - ``sea_results``: dict from ``predict_off_targets_sea``.
-        - ``docking_results``: dict from ``screen_off_targets``.
-        - ``combined_selectivity``: float in [0, 1].
-        - ``tier1_hits``: list of SEA hits that match dangerous targets.
-        - ``tier2_safe_count``: int, number of safe targets from docking panel.
+    Requires real docking infrastructure with anti-target structures.
     """
-    if not smiles:
-        return {
-            "sea_results": {"targets_hit": [], "n_targets_screened": 3000, "method": "mock_sea"},
-            "docking_results": _empty_result(),
-            "combined_selectivity": 0.0,
-            "tier1_hits": [],
-            "tier2_safe_count": 0,
-        }
-
-    # Tier 1: Broad SEA-based scan
-    sea_results = predict_off_targets_sea(smiles)
-
-    # Tier 2: Focused 10-panel docking
-    docking_results = screen_off_targets(smiles, work_dir)
-
-    # Identify SEA hits that match dangerous targets
-    dangerous_genes = set(DANGEROUS_TARGETS.keys())
-    tier1_hits: list[dict] = []
-    sea_clear_count = 0
-
-    for hit in sea_results.get("targets_hit", []):
-        gene = hit.get("gene", "")
-        prob = hit.get("probability", 0.0)
-        if gene in dangerous_genes and prob > 0.5:
-            tier1_hits.append({
-                "gene": gene,
-                "probability": prob,
-                "risk": DANGEROUS_TARGETS.get(gene, "Unknown risk"),
-            })
-        else:
-            sea_clear_count += 1
-
-    # Compute combined selectivity
-    docking_safe = docking_results.get("n_safe", 0)
-    tier2_safe_count = docking_safe
-
-    combined_selectivity = round(
-        0.6 * (docking_safe / 10.0) + 0.4 * min(sea_clear_count / 20.0, 1.0),
-        3,
+    raise RuntimeError(
+        "Combined off-target screening is not implemented. "
+        "Requires real docking infrastructure with anti-target panel structures."
     )
-
-    logger.info(
-        "Combined off-target screening for %s: selectivity=%.3f "
-        "(docking %d/10 safe, SEA %d clear, %d tier1 hits)",
-        smiles[:40], combined_selectivity, docking_safe,
-        sea_clear_count, len(tier1_hits),
-    )
-
-    return {
-        "sea_results": sea_results,
-        "docking_results": docking_results,
-        "combined_selectivity": combined_selectivity,
-        "tier1_hits": tier1_hits,
-        "tier2_safe_count": tier2_safe_count,
-    }
 
 
 def screen_off_targets(
@@ -347,78 +204,12 @@ def screen_off_targets(
 ) -> dict:
     """Dock a molecule against all 10 anti-targets and evaluate selectivity.
 
-    For each anti-target, a mock docking score is computed deterministically
-    from the SMILES and the target name. If the score is more negative than
-    (i.e. <= ) the threshold, the molecule is flagged as a risk for that
-    target; otherwise it is safe.
-
-    Parameters
-    ----------
-    smiles : str
-        SMILES string of the candidate molecule.
-    work_dir : Path
-        Working directory (unused in mock, kept for future real docking).
-
-    Returns
-    -------
-    dict
-        Keys:
-        - ``results``: dict mapping target name to per-target result dict
-          with ``score``, ``threshold``, ``status`` ("safe"|"risk"),
-          and ``risk_description``.
-        - ``selectivity_score``: float in [0, 1] (fraction of safe targets).
-        - ``n_safe``: int, number of safe targets.
-        - ``n_total``: int, total number of targets screened.
-        - ``warnings``: list[str], human-readable warning messages.
+    Requires real docking against anti-target panel PDB structures.
     """
-    if not smiles:
-        logger.warning("Empty SMILES provided to screen_off_targets")
-        return _empty_result()
-
-    results: dict[str, dict] = {}
-    n_safe = 0
-    n_total = len(OFF_TARGET_PANEL)
-    warnings: list[str] = []
-
-    for target_name, target_info in OFF_TARGET_PANEL.items():
-        threshold = target_info["threshold"]
-        risk_desc = target_info["risk"]
-
-        # Compute mock off-target affinity
-        score = _mock_off_target_affinity(smiles, target_name)
-
-        # Compare to threshold: score <= threshold means risk
-        if score <= threshold:
-            status = "risk"
-            warnings.append(
-                f"{target_name}: score {score:.1f} <= {threshold:.1f} kcal/mol "
-                f"-- risk of {risk_desc}"
-            )
-        else:
-            status = "safe"
-            n_safe += 1
-
-        results[target_name] = {
-            "score": round(score, 2),
-            "threshold": threshold,
-            "status": status,
-            "risk_description": risk_desc,
-        }
-
-    selectivity_score = round(n_safe / n_total, 3) if n_total > 0 else 0.0
-
-    logger.info(
-        "Off-target screening for %s: %d/%d safe (selectivity=%.2f)",
-        smiles[:40], n_safe, n_total, selectivity_score,
+    raise RuntimeError(
+        "Off-target panel screening is not implemented. "
+        "Requires real docking against anti-target panel PDB structures."
     )
-
-    return {
-        "results": results,
-        "selectivity_score": selectivity_score,
-        "n_safe": n_safe,
-        "n_total": n_total,
-        "warnings": warnings,
-    }
 
 
 def screen_candidates(
@@ -485,49 +276,11 @@ def screen_candidates(
 # =====================================================================
 
 def _mock_off_target_affinity(smiles: str, target_name: str) -> float:
-    """Compute a deterministic mock off-target binding affinity.
-
-    The score is in the range [-10.0, -3.0] kcal/mol. Known selective
-    drugs (containing kinase inhibitor pharmacophore features) are biased
-    toward weaker (less negative) off-target binding, meaning they should
-    be flagged as safe more often.
-
-    Parameters
-    ----------
-    smiles : str
-        Candidate molecule SMILES.
-    target_name : str
-        Name of the off-target (used as part of the hash seed).
-
-    Returns
-    -------
-    float
-        Mock off-target binding affinity in kcal/mol.
-    """
-    # Deterministic hash from SMILES + target name
-    key = f"offtarget:{smiles}:{target_name}"
-    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
-    hash_int = int(digest[:10], 16)
-
-    # Base score in [-10.0, -3.0]
-    base = -3.0 - (hash_int % 7001) / 1000.0
-
-    # Selectivity bonus: known selective drugs get weaker off-target binding
-    # (i.e. scores pushed toward -3.0, which is less negative = safer)
-    selectivity_bonus = 0.0
-    smiles_lower = smiles.lower()
-    for feature in _SELECTIVE_FEATURES:
-        if feature.lower() in smiles_lower:
-            selectivity_bonus += 0.5
-
-    # Cap the bonus so we don't go above -3.0
-    selectivity_bonus = min(selectivity_bonus, 3.0)
-
-    score = base + selectivity_bonus
-    # Clamp to valid range
-    score = max(-10.0, min(-3.0, score))
-
-    return round(score, 2)
+    """Compute off-target binding affinity — requires real docking."""
+    raise RuntimeError(
+        "Off-target affinity calculation is not implemented. "
+        "Requires real docking against anti-target PDB structures."
+    )
 
 
 # =====================================================================

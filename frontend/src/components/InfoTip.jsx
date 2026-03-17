@@ -138,9 +138,17 @@ export const TIPS = {
   weighted_score: 'Weighted multi-criteria score combining your selected metrics from previous runs (docking, ADME, selectivity, drug-likeness). Configure weights when creating the Composite Score run. Higher = better overall candidate.',
   ligand_efficiency: 'Ligand Efficiency = -docking_score / heavy_atom_count. Normalizes binding affinity by molecular size. Allows fair comparison between molecules of different sizes. Higher is better.',
 
-  // --- Columns: Enrichment ---
-  interactions_count: 'Total number of protein-ligand interactions detected by ProLIF analysis (H-bonds, hydrophobic contacts, salt bridges, pi-stacking). More interactions generally indicate a more stable and specific binding mode.',
-  scaffold: 'Murcko scaffold: the core ring system and linker chains after removing all side chains. Computed using RDKit\'s MurckoScaffold decomposition. Used to group molecules by chemical family.',
+  // --- Columns: Interactions ---
+  n_interactions: 'Number of specific protein-ligand contacts (H-bonds, hydrophobic, pi-stacking, salt bridges). Computed by ProLIF or RDKit distance-based analysis from the docked pose. More contacts generally indicate a more stable binding mode.',
+  functional_contacts: 'Number of contacts with functionally important residues in the binding site. Identified by cross-referencing detected interactions with known catalytic/binding residues from UniProt.',
+  interaction_quality: 'Quality score (0-1) based on the proportion of functionally important residues contacted. Higher quality means the molecule interacts with key residues for target activity.',
+  key_hbonds: 'Number of hydrogen bonds with key binding site residues. H-bonds with catalytic or conserved residues are the strongest indicator of specific, high-affinity binding.',
+
+  // --- Columns: Scaffold ---
+  scaffold_smiles: 'Murcko scaffold — the core ring system after removing side chains. Computed using RDKit\'s MurckoScaffold decomposition. Molecules sharing the same scaffold belong to the same chemical series.',
+  n_modifiable_positions: 'Number of R-group positions where chemical modifications are possible. Identified by BRICS decomposition and substituent detection. More positions = more room for structure-activity optimization.',
+  brics_bond_count: 'Number of BRICS retrosynthetically accessible bonds. These are bonds that can be cleaved to generate building blocks for combinatorial chemistry. Higher count indicates a more modular molecule.',
+  scaffold_n_rings: 'Number of rings in the Murcko scaffold. Ring count affects molecular complexity, rigidity, and drug-likeness. Most oral drugs have 2-4 rings.',
 
   // --- Columns: Clustering ---
   cluster_id: 'Chemical cluster number assigned by Butina clustering algorithm. Molecules are grouped by Tanimoto similarity of Morgan fingerprints (radius 2). Same cluster = similar chemical scaffold.',
@@ -195,7 +203,8 @@ export const TIPS = {
   run_docking: 'Molecular docking with GNINA (GPU-accelerated). Simulates how each molecule fits into the protein binding pocket and predicts binding energy. Produces docking_score, cnn_score, cnn_affinity columns.',
   run_admet: 'Predicts ADMET properties: Absorption, Distribution, Metabolism, Excretion, Toxicity. Computes logP, MW, HBD, HBA, TPSA, QED, solubility, BBB, hERG, and Lipinski columns from the molecular structure.',
   run_scoring: 'Computes a weighted composite score combining docking_score, QED, and ADMET properties into a single 0-100 ranking. Also computes ligand_efficiency from docking_score and heavy_atom_count.',
-  run_enrichment: 'Enrichment analysis: identifies protein-ligand interactions using ProLIF (interactions_count), extracts Murcko scaffolds (scaffold column), and analyzes structural diversity.',
+  run_interactions: 'Protein-ligand interaction analysis: computes H-bonds, hydrophobic contacts, pi-stacking, and salt bridges from docked poses using ProLIF or RDKit. Requires a prior docking run.',
+  run_scaffold: 'Scaffold decomposition: extracts the Murcko core ring system, identifies BRICS bonds and R-group modification positions. Only requires SMILES — no docking needed.',
   run_generation: 'AI de novo generation. Creates new molecules by modifying top hits: fragment replacement, R-group exploration, scaffold hopping. Produces new molecules with generation_level and parent_molecule_id.',
   run_clustering: 'Chemical clustering using Butina algorithm on Morgan fingerprints (Tanimoto similarity). Groups similar molecules to identify chemical series and ensure structural diversity in the selection.',
   run_off_target: 'Off-target selectivity: docks molecules against anti-target proteins (hERG, CYP450, etc.) to verify they don\'t bind unintended targets. Produces selectivity_score, off_target_hits, selectivity_ratio.',

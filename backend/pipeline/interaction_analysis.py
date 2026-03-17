@@ -114,10 +114,36 @@ def _map_functional_residues(known_residues: list[int], offset: int) -> set[int]
     return {r + offset for r in known_residues}
 
 
+# ---------------------------------------------------------------------------
+# VDW redundancy filter (PLIP / Discovery Studio convention)
+# ---------------------------------------------------------------------------
+
+_VDW_TYPES = {"VDW", "VdWContact"}
+
+
+def _filter_redundant_vdw(interactions: list[dict]) -> list[dict]:
+    """Remove VDW entries when the same residue has a more specific interaction.
+
+    Follows PLIP / Discovery Studio convention: VDW contacts are only
+    reported for residues where no specific interaction (H-bond, hydrophobic,
+    pi-stacking, ionic, etc.) is detected.  This avoids noise in the table
+    and keeps the residue count consistent with the interaction diagram.
+    """
+    has_specific: set[int] = set()
+    for i in interactions:
+        if i.get("type") not in _VDW_TYPES:
+            has_specific.add(i.get("residue_number"))
+    return [
+        i for i in interactions
+        if i.get("type") not in _VDW_TYPES or i.get("residue_number") not in has_specific
+    ]
+
+
 def _compute_quality_metrics(
     interactions: list[dict],
     uniprot_id: str,
     pdb_path: Optional[str] = None,
+    functional_residues: Optional[dict] = None,
 ) -> dict:
     """Compute interaction quality metrics with offset mapping and fuzzy matching.
 
@@ -140,6 +166,9 @@ def _compute_quality_metrics(
     pdb_path : str | None
         Path to the protein PDB file (for DBREF offset).  May be ``None``
         for the mock strategy.
+    functional_residues : dict | None
+        External functional residues from project target_preview.
+        Prioritized over the hardcoded KNOWN_FUNCTIONAL_RESIDUES dict.
 
     Returns
     -------
@@ -147,9 +176,26 @@ def _compute_quality_metrics(
         Keys: ``functional_contacts``, ``total_functional``,
         ``interaction_quality``, ``key_hbonds``.
     """
-    functional = KNOWN_FUNCTIONAL_RESIDUES.get(uniprot_id, {})
-    known_res_uniprot: list[int] = functional.get("residues", [])
-    key_hbond_uniprot: list[int] = functional.get("key_hbond_residues", [])
+    # Roles that are biologically meaningful for quality metrics.
+    # Exclude "pocket" (P2Rank geometry) and "site" (too generic UniProt).
+    _QUALITY_ROLES = {"active_site", "binding", "metal_binding", "custom", "key"}
+
+    # Priority: external functional_residues > hardcoded KNOWN_FUNCTIONAL_RESIDUES
+    if functional_residues and functional_residues.get("residues"):
+        known_res_uniprot = [
+            r["number"] if isinstance(r, dict) else r
+            for r in functional_residues["residues"]
+            if (
+                (isinstance(r, dict) and r.get("enabled", True)
+                 and r.get("role", "key") in _QUALITY_ROLES)
+                or not isinstance(r, dict)
+            )
+        ]
+        key_hbond_uniprot = functional_residues.get("key_hbond_residues", [])
+    else:
+        functional = KNOWN_FUNCTIONAL_RESIDUES.get(uniprot_id, {})
+        known_res_uniprot = functional.get("residues", [])
+        key_hbond_uniprot = functional.get("key_hbond_residues", [])
 
     # --- Compute offset ---
     offset = 0
@@ -159,6 +205,20 @@ def _compute_quality_metrics(
     # --- Map residues to PDB numbering ---
     mapped_residues = _map_functional_residues(known_res_uniprot, offset)
     mapped_key_hbond = _map_functional_residues(key_hbond_uniprot, offset)
+
+    # --- Build PDB-numbered → info mapping for origin tagging ---
+    mapped_to_info: dict[int, dict] = {}
+    if functional_residues and functional_residues.get("residues"):
+        for r in functional_residues["residues"]:
+            if isinstance(r, dict) and r.get("enabled", True) and r.get("role", "key") in _QUALITY_ROLES:
+                pdb_num = r["number"] + offset
+                mapped_to_info[pdb_num] = {
+                    "role": r.get("role", "key"),
+                    "description": r.get("description", ""),
+                    "aa": r.get("aa", ""),
+                    "number": pdb_num,
+                    "uniprot_number": r["number"],
+                }
 
     # --- Build fuzzy set (+-2 around each mapped residue) ---
     fuzzy_residues: set[int] = set()
@@ -210,18 +270,23 @@ def _compute_quality_metrics(
             if i["residue_number"] in fuzzy_key_hbond and "HB" in i.get("type", "")
         )
 
-    # --- Re-tag is_functional on interactions ---
+    # --- Re-tag is_functional + origin on interactions ---
+    # Use the same set that was used for functional_contacts counting
+    # so that checkmark count == KPI number
+    func_set = mapped_residues if func_contacted > 0 else fuzzy_residues
     for i in interactions:
-        i["is_functional"] = (
-            i["residue_number"] in mapped_residues
-            or i["residue_number"] in fuzzy_residues
-        )
+        i["is_functional"] = i["residue_number"] in func_set
+        info = mapped_to_info.get(i["residue_number"])
+        if info:
+            i["origin_role"] = info["role"]
+            i["origin_label"] = info.get("description") or info["role"]
 
     return {
         "functional_contacts": func_contacted,
         "total_functional": len(known_res_uniprot),
         "interaction_quality": round(quality, 3),
         "key_hbonds": key_hb,
+        "mapped_functional": list(mapped_to_info.values()),
     }
 
 
@@ -234,6 +299,7 @@ def analyze_interactions(
     ligand_path: str,
     uniprot_id: str = "",
     smiles: str = "",
+    functional_residues: Optional[dict] = None,
 ) -> dict:
     """Analyze protein-ligand interactions.
 
@@ -250,6 +316,8 @@ def analyze_interactions(
         UniProt accession (e.g. "P00533") for functional residue lookup.
     smiles : str
         SMILES of the ligand (used for deterministic mock fallback).
+    functional_residues : dict | None
+        External functional residues from project target_preview.
 
     Returns
     -------
@@ -265,7 +333,7 @@ def analyze_interactions(
     """
     # Try ProLIF
     try:
-        return _analyze_prolif(protein_path, ligand_path, uniprot_id)
+        return _analyze_prolif(protein_path, ligand_path, uniprot_id, functional_residues=functional_residues)
     except ImportError:
         logger.info("ProLIF not available, using RDKit distance analysis")
     except Exception as exc:
@@ -273,14 +341,15 @@ def analyze_interactions(
 
     # Try RDKit distance-based
     try:
-        return _analyze_rdkit_distance(protein_path, ligand_path, uniprot_id)
+        return _analyze_rdkit_distance(protein_path, ligand_path, uniprot_id, functional_residues=functional_residues)
     except ImportError:
-        logger.info("RDKit not available for distance analysis, using mock")
+        raise RuntimeError(
+            "Interaction analysis requires RDKit. Install rdkit-pypi."
+        )
     except Exception as exc:
-        logger.warning("RDKit distance analysis failed: %s, using mock", exc)
-
-    # Mock fallback
-    return _mock_interactions(uniprot_id, smiles=smiles)
+        raise RuntimeError(
+            f"Interaction analysis failed for {uniprot_id}: {exc}"
+        ) from exc
 
 
 def compute_pose_quality(
@@ -288,6 +357,7 @@ def compute_pose_quality(
     ligand_path: str,
     uniprot_id: str = "",
     smiles: str = "",
+    functional_residues: Optional[dict] = None,
 ) -> dict:
     """Compute structured pose quality metrics from interaction analysis.
 
@@ -304,6 +374,8 @@ def compute_pose_quality(
         UniProt accession for functional residue lookup.
     smiles : str
         SMILES of the ligand (for mock fallback).
+    functional_residues : dict | None
+        External functional residues from project target_preview.
 
     Returns
     -------
@@ -311,7 +383,7 @@ def compute_pose_quality(
         Keys: ``n_contacts_4A``, ``n_hbonds``, ``has_clashes``, ``n_clashes``,
         ``key_residue_distances``, ``interaction_quality``.
     """
-    raw = analyze_interactions(protein_path, ligand_path, uniprot_id, smiles)
+    raw = analyze_interactions(protein_path, ligand_path, uniprot_id, smiles, functional_residues=functional_residues)
     interactions = raw.get("interactions", [])
 
     contacts_4A = 0
@@ -394,6 +466,7 @@ def _analyze_prolif(
     protein_path: str,
     ligand_path: str,
     uniprot_id: str,
+    functional_residues: Optional[dict] = None,
 ) -> dict:
     """Use ProLIF for interaction fingerprinting.
 
@@ -407,6 +480,8 @@ def _analyze_prolif(
         Path to docked ligand file.
     uniprot_id : str
         UniProt accession for functional residue annotation.
+    functional_residues : dict | None
+        External functional residues from project target_preview.
 
     Returns
     -------
@@ -501,21 +576,54 @@ def _analyze_prolif(
     interactions: list[dict] = []
     ifp = fp.ifp[0]  # First (only) frame
 
+    # Compute per-residue min heavy-atom distance (ligand ↔ protein)
+    # ProLIF adds hydrogens, but we report heavy-atom distances (convention)
+    _residue_distances: dict[int, float] = {}
+    try:
+        # Filter to heavy atoms only (exclude H) for distance calculation
+        lig_heavy = lig.select_atoms("not element H")
+        lig_positions = lig_heavy.positions if len(lig_heavy) > 0 else lig.atoms.positions
+        for (lig_res, prot_res), interaction_dict in ifp.items():
+            if not any(interaction_dict.values()):
+                continue
+            rn = prot_res.number
+            if rn in _residue_distances:
+                continue
+            try:
+                res_heavy = prot.select_atoms(f"resid {rn} and not element H")
+                res_atoms = res_heavy if len(res_heavy) > 0 else prot.select_atoms(f"resid {rn}")
+                if len(res_atoms) > 0:
+                    prot_positions = res_atoms.positions  # (M, 3)
+                    # Pairwise distances: (N, M) — find min
+                    diff = lig_positions[:, None, :] - prot_positions[None, :, :]
+                    dists = (diff ** 2).sum(axis=2) ** 0.5
+                    _residue_distances[rn] = round(float(dists.min()), 2)
+            except Exception:
+                pass
+    except Exception:
+        logger.debug("Could not compute ProLIF residue distances")
+
     for (lig_res, prot_res), interaction_dict in ifp.items():
         res_num = prot_res.number
         res_name = f"{prot_res.name}{res_num}"
 
         for int_type, is_present in interaction_dict.items():
             if is_present:
-                interactions.append({
+                entry: dict = {
                     "residue": res_name,
                     "residue_number": res_num,
                     "type": int_type,
                     "is_functional": False,  # re-tagged below
-                })
+                }
+                if res_num in _residue_distances:
+                    entry["distance"] = _residue_distances[res_num]
+                interactions.append(entry)
+
+    # Filter redundant VDW (PLIP convention: only keep VDW when no specific interaction)
+    interactions = _filter_redundant_vdw(interactions)
 
     # Compute quality with offset mapping + fuzzy matching + safety net
-    metrics = _compute_quality_metrics(interactions, uniprot_id, pdb_path=protein_path)
+    metrics = _compute_quality_metrics(interactions, uniprot_id, pdb_path=protein_path, functional_residues=functional_residues)
 
     return {
         "interactions": interactions,
@@ -537,6 +645,7 @@ def _analyze_rdkit_distance(
     protein_path: str,
     ligand_path: str,
     uniprot_id: str,
+    functional_residues: Optional[dict] = None,
 ) -> dict:
     """Simplified interaction analysis using RDKit and coordinate distances.
 
@@ -551,6 +660,8 @@ def _analyze_rdkit_distance(
         Path to docked ligand PDB/SDF.
     uniprot_id : str
         UniProt accession for functional residue annotation.
+    functional_residues : dict | None
+        External functional residues from project target_preview.
 
     Returns
     -------
@@ -559,13 +670,13 @@ def _analyze_rdkit_distance(
     """
     from rdkit import Chem  # type: ignore[import-untyped]
 
-    # Parse protein PDB to extract atom coordinates
-    protein_atoms = _parse_pdb_atoms(protein_path)
+    # Parse protein PDB to extract atom coordinates (heavy atoms only for distances)
+    protein_atoms = [a for a in _parse_pdb_atoms(protein_path) if a["element"].upper() not in ("H", "D")]
     if not protein_atoms:
         raise ValueError(f"Could not parse protein atoms from {protein_path}")
 
-    # Parse ligand atoms
-    ligand_atoms = _parse_ligand_atoms(ligand_path)
+    # Parse ligand atoms (heavy atoms only)
+    ligand_atoms = [a for a in _parse_ligand_atoms(ligand_path) if a["element"].upper() not in ("H", "D")]
     if not ligand_atoms:
         raise ValueError(f"Could not parse ligand atoms from {ligand_path}")
 
@@ -598,16 +709,20 @@ def _analyze_rdkit_distance(
                     "is_functional": False,  # re-tagged below
                 })
 
-    # Deduplicate by residue (keep closest contact per residue)
-    residue_best: dict[int, dict] = {}
+    # Deduplicate by (residue, type) pair — keep closest contact per pair
+    # This preserves multiple interaction types per residue (like ProLIF/PLIP)
+    pair_best: dict[tuple[int, str], dict] = {}
     for interaction in interactions:
-        rn = interaction["residue_number"]
-        if rn not in residue_best or interaction.get("distance", 99) < residue_best[rn].get("distance", 99):
-            residue_best[rn] = interaction
-    interactions = list(residue_best.values())
+        key = (interaction["residue_number"], interaction["type"])
+        if key not in pair_best or interaction.get("distance", 99) < pair_best[key].get("distance", 99):
+            pair_best[key] = interaction
+    interactions = list(pair_best.values())
+
+    # Filter redundant VDW (PLIP convention: only keep VDW when no specific interaction)
+    interactions = _filter_redundant_vdw(interactions)
 
     # Compute quality with offset mapping + fuzzy matching + safety net
-    metrics = _compute_quality_metrics(interactions, uniprot_id, pdb_path=protein_path)
+    metrics = _compute_quality_metrics(interactions, uniprot_id, pdb_path=protein_path, functional_residues=functional_residues)
 
     return {
         "interactions": interactions,
@@ -768,8 +883,12 @@ def _classify_interaction(
 # =====================================================================
 
 def _mock_interactions(uniprot_id: str, smiles: str = "") -> dict:
-    """Mock interaction analysis based on known target data.
-
+    """Mock interaction analysis — removed. Requires ProLIF or RDKit."""
+    raise RuntimeError(
+        f"Mock interaction analysis is not available for {uniprot_id}. "
+        "Install ProLIF or RDKit for real interaction analysis."
+    )
+    """Original docstring:
     Generates deterministic, reproducible interaction data using a hash
     of the SMILES/UniProt ID. Useful for development and testing when
     neither ProLIF nor RDKit is available.

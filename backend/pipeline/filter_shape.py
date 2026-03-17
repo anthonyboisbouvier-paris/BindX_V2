@@ -178,17 +178,11 @@ def filter_by_shape(
                 exc,
             )
 
-    # --- Strategy 3: Hash-based mock (~5% pass rate) ---
-    result = _filter_mock(smiles_list, progress_callback)
-    elapsed = time.monotonic() - start_time
-    logger.info(
-        "filter_by_shape (mock): %d -> %d molecules "
-        "(%.1f%% pass rate) in %.1fs",
-        total, len(result),
-        len(result) / max(total, 1) * 100,
-        elapsed,
+    # --- No fallback — real shape filtering required ---
+    raise RuntimeError(
+        "Shape filtering requires RDKit with 3D conformer generation. "
+        "Install rdkit-pypi to enable shape-based filtering."
     )
-    return result
 
 
 # =========================================================================
@@ -521,71 +515,10 @@ def _filter_mock(
     smiles_list: list[str],
     progress_callback: Optional[Callable[[dict], None]],
 ) -> list[str]:
-    """Deterministic hash-based mock shape filter.
-
-    Keeps approximately 5% of input molecules using a hash of the
-    SMILES string. The same molecule always produces the same pass/fail
-    decision.
-
-    Parameters
-    ----------
-    smiles_list : list[str]
-        Input SMILES.
-    progress_callback : callable, optional
-        Progress callback.
-
-    Returns
-    -------
-    list[str]
-        Approximately 5% of input SMILES, deterministically selected.
-    """
-    logger.info(
-        "filter_by_shape mock: processing %d molecules "
-        "(deterministic ~5%% pass rate)",
-        len(smiles_list),
+    """Mock shape filter — removed. Requires RDKit."""
+    raise RuntimeError(
+        "Mock shape filter is not available. Install rdkit-pypi."
     )
-
-    passed: list[str] = []
-    batch_size = 10000
-    total = len(smiles_list)
-
-    for batch_start in range(0, total, batch_size):
-        batch_end = min(batch_start + batch_size, total)
-        batch = smiles_list[batch_start:batch_end]
-
-        for smi in batch:
-            if not smi or not smi.strip():
-                continue
-
-            smi = smi.strip()
-
-            # Deterministic hash-based decision
-            digest = hashlib.sha256(
-                f"shape:{smi}".encode("utf-8")
-            ).hexdigest()
-            hash_val = int(digest[:8], 16)
-
-            # Keep ~5% (hash modulo 20 == 0)
-            if hash_val % 20 == 0:
-                passed.append(smi)
-
-        if progress_callback is not None:
-            try:
-                progress_callback({
-                    "pass_name": "shape_filter_mock",
-                    "processed": batch_end,
-                    "total": total,
-                    "kept": len(passed),
-                })
-            except Exception:
-                pass
-
-    logger.info(
-        "Mock shape filter: %d -> %d (%.1f%%)",
-        total, len(passed),
-        len(passed) / max(total, 1) * 100,
-    )
-    return passed
 
 
 # =========================================================================

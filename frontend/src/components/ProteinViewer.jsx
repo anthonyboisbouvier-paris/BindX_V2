@@ -352,8 +352,15 @@ function ZoneCard({ zone, isDarkBg, isEditing, onUpdate, onToggleVisibility, onT
   )
 }
 
+// Interaction type → color mapping for 3D overlay
+const INTERACTION_COLORS = {
+  HBDonor: '#3b82f6', HBAcceptor: '#ef4444', Hbond: '#3b82f6',
+  Hydrophobic: '#6b7280', PiStacking: '#8b5cf6',
+  CationPi: '#f97316', SaltBridge: '#0d9488', VDW: '#d1d5db',
+}
+
 // Props: pdbUrl, pdbData, selectedPocket, uniprotFeatures, height, onDiagnostic, ligandSmiles
-export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480, onDiagnostic, ligandSmiles, dockedMolblock, dockedMolblocks }) {
+export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprotFeatures, height = 480, onDiagnostic, ligandSmiles, dockedMolblock, dockedMolblocks, highlightedResidue, functionalResidues, interactionContacts, onEnrichedContacts }) {
   const wrapperRef = useRef(null)
   const containerRef = useRef(null)
   const viewerRef = useRef(null)
@@ -371,14 +378,17 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
   const [ligandStyle, setLigandStyle] = useState('ball+stick') // 'ball+stick' | 'stick' | 'sphere' | 'line' | 'cross' | 'surface'
   const [showDockedLigand, setShowDockedLigand] = useState(true) // show docked pose when available
   const [showRefLigand, setShowRefLigand] = useState(true) // show co-crystallized reference ligand
+  const [refLigandAutoHidden, setRefLigandAutoHidden] = useState(false) // track if auto-hidden
   const [showProtein, setShowProtein] = useState(true)
   const [pocketRadius, setPocketRadius] = useState(8)
   const [pocketOpacity, setPocketOpacity] = useState(0.70)
-  const [pocketStyle, setPocketStyle] = useState('sphere+stick')
+  const [pocketStyle, setPocketStyle] = useState('auto')
   const [spinning, setSpinning] = useState(false)
   const [showDomains, setShowDomains] = useState(false)
   const [showActiveSites, setShowActiveSites] = useState(true)
   const [showBindingSites, setShowBindingSites] = useState(true)
+  const [showFunctionalResidues, setShowFunctionalResidues] = useState(false)
+  const [showInteractions, setShowInteractions] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showColorPanel, setShowColorPanel] = useState(false)
@@ -414,6 +424,10 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
   const onDiagnosticRef = useRef(onDiagnostic)
   useEffect(() => { onDiagnosticRef.current = onDiagnostic }, [onDiagnostic])
 
+  // Stable ref for onEnrichedContacts callback
+  const onEnrichedContactsRef = useRef(onEnrichedContacts)
+  useEffect(() => { onEnrichedContactsRef.current = onEnrichedContacts }, [onEnrichedContacts])
+
   // Track labels and distance shapes for cleanup
   const labelsRef = useRef([])
   const distanceLinesRef = useRef([])
@@ -422,6 +436,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
   const labelModeRef = useRef(false)
   const distanceModeRef = useRef(false)
   const distanceAtom1Ref = useRef(null)
+  const handleClickRef = useRef(null) // stored so style useEffect can re-apply setClickable
 
   // ---------------------------------------------------------------------------
   // Click-outside handler for settings panel
@@ -488,6 +503,15 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
   // Keep refs in sync for click handler
   useEffect(() => { zoneEditModeRef.current = zoneEditMode }, [zoneEditMode])
   useEffect(() => { customZonesRef.current = customZones }, [customZones])
+
+  // Auto-hide reference ligand when docked data is available (only once)
+  useEffect(() => {
+    const hasDocked = !!(dockedMolblock || (dockedMolblocks && dockedMolblocks.length > 0))
+    if (hasDocked && !refLigandAutoHidden) {
+      setShowRefLigand(false)
+      setRefLigandAutoHidden(true)
+    }
+  }, [dockedMolblock, dockedMolblocks, refLigandAutoHidden])
 
   // ---------------------------------------------------------------------------
   // Load PDB data
@@ -598,7 +622,11 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
     const handleClick = (atom) => {
       if (!atom) return
 
-      const resLabel = `${atom.resn} ${atom.resi}${atom.chain ? ':' + atom.chain : ''}`
+      // For ligand/HETATM atoms, show element + atom name instead of residue info
+      const isLigandAtom = atom.hetflag || (atom.resn && !['ALA','ARG','ASN','ASP','CYS','GLU','GLN','GLY','HIS','ILE','LEU','LYS','MET','PHE','PRO','SER','THR','TRP','TYR','VAL'].includes(atom.resn))
+      const resLabel = isLigandAtom
+        ? `${atom.atom || atom.elem}${atom.serial ? '#' + atom.serial : ''}`
+        : `${atom.resn} ${atom.resi}${atom.chain ? ':' + atom.chain : ''}`
 
       // Label mode (read from ref, not state)
       if (labelModeRef.current) {
@@ -713,6 +741,7 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       })
     }
 
+    handleClickRef.current = handleClick
     viewer.setClickable({}, true, handleClick)
     return () => {
       try { viewer.setClickable({}, false) } catch (_) {}
@@ -862,7 +891,6 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
 
     // Step 3: Docked ligand(s) — render from molblock(s) as separate model(s)
     // Supports both single dockedMolblock (string) and dockedMolblocks (array of {molblock, color?, label?})
-    const DOCKED_COLORS = ['#06d6a0', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#ec4899', '#14b8a6', '#f97316']
     const allDocked = dockedMolblocks && dockedMolblocks.length > 0
       ? dockedMolblocks
       : dockedMolblock
@@ -874,22 +902,22 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
         try {
           const mb = entry.molblock || entry
           const format = mb.includes('$$$$') || mb.includes('V2000') || mb.includes('V3000') ? 'sdf' : 'pdb'
-          const color = entry.color || DOCKED_COLORS[idx % DOCKED_COLORS.length]
           const dockedModel = viewer.addModel(mb, format)
+          // Use element-based CPK colors (like reference ligand) for scientific accuracy
           const dockedSpec = (() => {
             switch (effectiveLigandStyle) {
-              case 'stick':   return { stick: { color, radius: 0.15 } }
-              case 'sphere':  return { sphere: { color, scale: 1.0 } }
-              case 'line':    return { line: { color, linewidth: 2 } }
-              case 'cross':   return { cross: { color, linewidth: 2 } }
+              case 'stick':   return { stick: { colorscheme: 'default', radius: 0.15 } }
+              case 'sphere':  return { sphere: { colorscheme: 'default', scale: 1.0 } }
+              case 'line':    return { line: { colorscheme: 'default', linewidth: 2 } }
+              case 'cross':   return { cross: { colorscheme: 'default', linewidth: 2 } }
               case 'surface': return {}
-              default:        return { stick: { color, radius: 0.2 }, sphere: { color, radius: 0.4, opacity: 0.9 } }
+              default:        return { stick: { colorscheme: 'default', radius: 0.2 }, sphere: { colorscheme: 'default', radius: 0.4, opacity: 0.9 } }
             }
           })()
           viewer.setStyle({ model: dockedModel }, dockedSpec)
           if (effectiveLigandStyle === 'surface') {
             const ST = mol3dRef.current?.SurfaceType?.VDW ?? 1
-            viewer.addSurface(ST, { opacity: 0.8, color }, { model: dockedModel }, undefined, undefined, () => viewer.render())
+            viewer.addSurface(ST, { opacity: 0.8 }, { model: dockedModel }, undefined, undefined, () => viewer.render())
           }
           diag.dockedLigandRendered = true
         } catch (err) {
@@ -912,14 +940,23 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       const parsedResidues = residues.map(r => {
         const parts = r.split('_')
         if (parts.length >= 3) {
-          return { resi: parseInt(parts[parts.length - 1]), chain: parts[parts.length - 2], raw: r, format: '3-part' }
+          // "ALA_A_123" (resName_chain_resNum) or "ALA_123_A" (resName_resNum_chain)
+          const last = parseInt(parts[parts.length - 1])
+          if (!isNaN(last)) {
+            return { resi: last, chain: parts[parts.length - 2], raw: r, format: '3-part' }
+          }
+          // Try middle part as number (P2Rank format: ALA_123_A)
+          const mid = parseInt(parts[1])
+          if (!isNaN(mid)) {
+            return { resi: mid, chain: parts[2] || null, raw: r, format: '3-part-p2rank' }
+          }
         } else if (parts.length === 2) {
           const num = parseInt(parts[1])
           if (!isNaN(num)) return { resi: num, chain: null, raw: r, format: '2-part-num' }
           const match = parts[1].match(/(\d+)$/)
           if (match) return { resi: parseInt(match[1]), chain: parts[0].length === 1 ? parts[0] : null, raw: r, format: '2-part-legacy' }
         }
-        const fallback = r.match(/(\d+)$/)
+        const fallback = r.match(/(\d+)/)
         if (fallback) return { resi: parseInt(fallback[1]), chain: null, raw: r, format: 'fallback' }
         return null
       }).filter(p => p != null && !isNaN(p.resi))
@@ -1017,8 +1054,8 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
               center: { x: center[0], y: center[1], z: center[2] },
               radius: pocketRadius,
               color: pocketColor,
-              opacity: pocketOpacity,
-              wireframe: false,
+              opacity: pocketOpacity * 0.4,
+              wireframe: true,
             })
             diag.pocketSphereRendered = true
           } else {
@@ -1028,15 +1065,23 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
         } else if (pocketStyle === 'surface') {
           diag.pocketSurfaceAttempted = true
           diag.pocketSurfaceType = 'VDW'
-          // Sticks as anchor + VDW surface on pocket residues
           viewer.addStyle(sel, { stick: { color: pocketColor, radius: 0.1, opacity: 0.4 } })
           doAddSurface({ opacity: pocketOpacity, color: pocketColor }, sel)
         } else {
-          viewer.addStyle(sel, {
-            stick: { color: pocketColor, radius: 0.18 },
-            sphere: { color: pocketColor, radius: 0.35 },
-          })
-          diag.pocketStickRendered = true
+          // "auto" — match the current protein rendering style (solid color, no opacity)
+          const autoStyle = (() => {
+            switch (style) {
+              case 'cartoon':    return { cartoon: { color: pocketColor } }
+              case 'tube':       return { cartoon: { color: pocketColor, tubes: true, thickness: 0.4 } }
+              case 'ball+stick': return { stick: { color: pocketColor, radius: 0.18 }, sphere: { color: pocketColor, radius: 0.4 } }
+              case 'stick':      return { stick: { color: pocketColor, radius: 0.18 } }
+              case 'line':       return { line: { color: pocketColor, linewidth: 3 } }
+              case 'sphere':     return { sphere: { color: pocketColor } }
+              default:           return { cartoon: { color: pocketColor } }
+            }
+          })()
+          viewer.addStyle(sel, autoStyle)
+          diag.pocketAutoRendered = true
         }
       }
 
@@ -1046,27 +1091,6 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
           ? { resi: resis, model: protein }
           : { resi: resis, chain, model: protein }
         applyPocketStyle(sel)
-      })
-    }
-
-    // Selected residues highlight (multi-select)
-    if (selectedResidues.length > 0) {
-      const resis = selectedResidues.map(r => r.resi)
-      viewer.addStyle(
-        { resi: resis, model: protein },
-        { stick: { color: '#06b6d4', radius: 0.16, opacity: 0.9 } }
-      )
-      // Add labels for each selected residue
-      selectedResidues.forEach(r => {
-        viewer.addLabel(`${r.resn} ${r.resi}`, {
-          position: undefined,
-          sel: { resi: r.resi, atom: 'CA', model: protein },
-          fontSize: 11,
-          fontColor: '#06b6d4',
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          backgroundOpacity: 0.7,
-          borderRadius: 3,
-        })
       })
     }
 
@@ -1082,6 +1106,26 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
         case 'surface':    return { stick: { color, radius: 0.18 } }
         default:           return { cartoon: { color } }
       }
+    }
+
+    // Selected residues — use current protein style with cyan color
+    if (selectedResidues.length > 0) {
+      const resis = selectedResidues.map(r => r.resi)
+      viewer.addStyle(
+        { resi: resis, model: protein },
+        buildAnnotationStyle('#06b6d4')
+      )
+      selectedResidues.forEach(r => {
+        viewer.addLabel(`${r.resn} ${r.resi}`, {
+          position: undefined,
+          sel: { resi: r.resi, atom: 'CA', model: protein },
+          fontSize: 11,
+          fontColor: '#06b6d4',
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          backgroundOpacity: 0.7,
+          borderRadius: 3,
+        })
+      })
     }
 
     // UniProt annotations — follow the protein style with annotation color
@@ -1151,12 +1195,186 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
       }
     })
 
+    // Functional residues overlay (from Key Binding Residues editor)
+    if (showFunctionalResidues && functionalResidues?.length > 0) {
+      const funcResis = functionalResidues
+        .filter(r => r.enabled !== false)
+        .map(r => r.number)
+        .filter(n => typeof n === 'number' && !isNaN(n))
+      if (funcResis.length > 0) {
+        const funcColor = '#22d3ee' // cyan
+        viewer.addStyle({ resi: funcResis, model: protein }, buildAnnotationStyle(funcColor))
+        if (style === 'surface') {
+          doAddSurface({ color: funcColor, opacity: 0.7 }, { resi: funcResis, model: protein })
+        }
+      }
+    }
+
+    // Interaction contacts overlay — dashed lines from ligand centroid to contacted residues
+    if (showInteractions && interactionContacts?.length > 0) {
+      // Deduplicate by residue_number (keep functional contact in priority)
+      const contactMap = new Map()
+      interactionContacts.forEach(c => {
+        const key = c.residue_number
+        if (key == null) return
+        const existing = contactMap.get(key)
+        if (!existing || (c.is_functional && !existing.is_functional)) {
+          contactMap.set(key, c)
+        }
+      })
+      const uniqueContacts = [...contactMap.values()]
+
+      // Collect all ligand atoms (from docked models, index >= 1)
+      const ligandAtoms = []
+      try {
+        const models = viewer.getModelList()
+        for (let mi = 1; mi < models.length; mi++) {
+          const atoms = viewer.selectedAtoms({ model: models[mi] })
+          atoms.forEach(a => ligandAtoms.push({ x: a.x, y: a.y, z: a.z }))
+        }
+      } catch (_) {}
+
+      // Helper: find closest ligand atom to a given point
+      const closestLigandAtom = (px, py, pz) => {
+        let best = null, bestDist = Infinity
+        for (const a of ligandAtoms) {
+          const d = (a.x - px) ** 2 + (a.y - py) ** 2 + (a.z - pz) ** 2
+          if (d < bestDist) { bestDist = d; best = a }
+        }
+        return best
+      }
+
+      // Collect computed distances to enrich parent data (for table/diagram)
+      const computedDistances = {}
+
+      uniqueContacts.forEach(contact => {
+        const resi = contact.residue_number
+        const cType = contact.type || 'VDW'
+        const iColor = INTERACTION_COLORS[cType] || '#9ca3af'
+        const resAtoms = viewer.selectedAtoms({ resi, model: protein })
+        if (resAtoms.length === 0) return
+
+        // Color the backbone ribbon by interaction type
+        viewer.addStyle({ resi, model: protein }, buildAnnotationStyle(iColor))
+
+        // Adaptive target position based on display style:
+        // - Cartoon/tube/surface: CA atom (sits on ribbon center)
+        // - Ball+stick/stick/line/sphere: closest atom pair between residue and ligand
+        const useAtomicPrecision = ['ball+stick', 'stick', 'line', 'sphere'].includes(style)
+        let rx, ry, rz, startX, startY, startZ
+
+        if (useAtomicPrecision && ligandAtoms.length > 0) {
+          // Find closest (residue atom, ligand atom) pair for precise connection
+          let bestDist = Infinity
+          let bestRes = resAtoms[0], bestLig = ligandAtoms[0]
+          for (const ra of resAtoms) {
+            for (const la of ligandAtoms) {
+              const d = (ra.x - la.x) ** 2 + (ra.y - la.y) ** 2 + (ra.z - la.z) ** 2
+              if (d < bestDist) { bestDist = d; bestRes = ra; bestLig = la }
+            }
+          }
+          rx = bestRes.x; ry = bestRes.y; rz = bestRes.z
+          startX = bestLig.x; startY = bestLig.y; startZ = bestLig.z
+        } else {
+          // Cartoon/tube: use CA alpha carbon position
+          const caAtom = resAtoms.find(a => a.atom === 'CA')
+          const target = caAtom || resAtoms[0]
+          rx = target.x; ry = target.y; rz = target.z
+          if (ligandAtoms.length > 0) {
+            const nearest = closestLigandAtom(rx, ry, rz)
+            if (nearest) { startX = nearest.x; startY = nearest.y; startZ = nearest.z }
+          }
+        }
+
+        // Distance: use stored value or compute from 3D coordinates
+        let displayDist = contact.distance
+        if (displayDist == null && startX != null) {
+          displayDist = Math.sqrt((rx - startX) ** 2 + (ry - startY) ** 2 + (rz - startZ) ** 2)
+          displayDist = Math.round(displayDist * 100) / 100
+          computedDistances[resi] = displayDist
+        }
+        const distStr = displayDist != null ? `${displayDist.toFixed(1)}Å` : ''
+
+        // Label: "MET793 (HB) 3.2Å"
+        const typeShort = cType === 'HBDonor' ? 'HD' : cType === 'HBAcceptor' ? 'HA' : cType === 'Hydrophobic' ? 'Hφ' : cType === 'PiStacking' ? 'π' : cType === 'CationPi' ? 'C-π' : cType === 'SaltBridge' ? 'SB' : cType === 'VDW' ? 'vdW' : cType.slice(0, 3)
+        const resLabel = `${contact.residue || `RES${resi}`} (${typeShort})${distStr ? ' ' + distStr : ''}`
+        viewer.addLabel(resLabel, {
+          position: { x: rx, y: ry, z: rz },
+          fontSize: 13, fontColor: iColor,
+          backgroundColor: 'rgba(0,0,0,0.75)',
+          backgroundOpacity: 0.75, borderRadius: 4, padding: 4,
+        })
+
+        // Dashed line — thickness modulated by distance (shorter = thicker = stronger)
+        if (startX != null) {
+          // Radius: 0.10 at 2.0Å (strong) → 0.04 at 4.0Å (weak)
+          const d = displayDist || 3.5
+          const lineRadius = Math.max(0.04, Math.min(0.10, 0.16 - d * 0.03))
+          viewer.addCylinder({
+            start: { x: startX, y: startY, z: startZ },
+            end: { x: rx, y: ry, z: rz },
+            radius: lineRadius, color: iColor,
+            fromCap: true, toCap: true, dashed: true,
+            dashLength: 0.15, gapLength: 0.1,
+          })
+        }
+
+        // Functional contact → green halo sphere
+        if (contact.is_functional) {
+          viewer.addSphere({
+            center: { x: rx, y: ry, z: rz },
+            radius: 2.0, color: '#00e6a0', opacity: 0.15,
+          })
+        }
+      })
+
+      // Send computed distances to parent so table/diagram can display them
+      if (onEnrichedContactsRef.current && Object.keys(computedDistances).length > 0) {
+        onEnrichedContactsRef.current(computedDistances)
+      }
+    }
+
+    // Highlighted residue — single residue glow (from editor click)
+    if (highlightedResidue) {
+      const hResi = highlightedResidue.number || highlightedResidue
+      const isMissing = highlightedResidue.isMissing === true
+      const hColor = isMissing ? '#ef4444' : '#00ff88'
+      const hBgColor = isMissing ? 'rgba(239,68,68,0.7)' : 'rgba(0,255,136,0.7)'
+      const hAtoms = viewer.selectedAtoms({ resi: hResi, model: protein })
+      if (hAtoms.length > 0) {
+        viewer.addStyle({ resi: hResi, model: protein }, buildAnnotationStyle(hColor))
+        // Compute centroid for label + sphere
+        let cx = 0, cy = 0, cz = 0
+        hAtoms.forEach(a => { cx += a.x; cy += a.y; cz += a.z })
+        cx /= hAtoms.length; cy /= hAtoms.length; cz /= hAtoms.length
+        const label = highlightedResidue.aa
+          ? `${highlightedResidue.aa} ${hResi}${isMissing ? ' (missing)' : ''}`
+          : `${hResi}${isMissing ? ' (missing)' : ''}`
+        viewer.addLabel(label, {
+          position: { x: cx, y: cy, z: cz },
+          fontSize: 14, fontColor: 'white',
+          backgroundColor: hBgColor,
+          borderColor: hColor, borderThickness: 1,
+          showBackground: true,
+        })
+        viewer.addSphere({
+          center: { x: cx, y: cy, z: cz },
+          radius: 2.5, color: hColor, opacity: 0.25,
+        })
+      }
+    }
+
+    // Re-apply setClickable so newly added docked models are also clickable
+    if (handleClickRef.current) {
+      viewer.setClickable({}, true, handleClickRef.current)
+    }
+
     viewer.render()
 
     // Report diagnostic to parent
     if (onDiagnosticRef.current) onDiagnosticRef.current(diag)
 
-  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, showPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, ligandStyle, showProtein, customZones, dockedMolblock, dockedMolblocks, showDockedLigand, showRefLigand])
+  }, [ready, style, colorMode, customColor, pocketColor, pocketRadius, pocketOpacity, pocketStyle, selectedPocket, showPocket, selectedResidues, uniprotFeatures, showDomains, showActiveSites, showBindingSites, ligandStyle, showProtein, customZones, dockedMolblock, dockedMolblocks, showDockedLigand, showRefLigand, showFunctionalResidues, functionalResidues, highlightedResidue, showInteractions, interactionContacts])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -1457,9 +1675,9 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
                   </div>
                   <div className="flex items-center gap-1 mb-2">
                     {[
+                      { v: 'auto', l: 'Auto' },
                       { v: 'sphere+stick', l: 'Sphere' },
                       { v: 'surface', l: 'Surface' },
-                      { v: 'stick', l: 'Ball+Stick' },
                     ].map(ps => (
                       <button key={ps.v} onClick={() => setPocketStyle(ps.v)}
                         className={`px-2 py-0.5 text-xs rounded transition-colors ${
@@ -1742,18 +1960,16 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
             Docked{dockedMolblocks && dockedMolblocks.length > 1 ? ` (${dockedMolblocks.length})` : ''}
           </button>
         )}
-        {(dockedMolblock || (dockedMolblocks && dockedMolblocks.length > 0)) && (
-          <button
-            onClick={() => setShowRefLigand(v => !v)}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
-              showRefLigand ? 'bg-gray-700/40 border-gray-400/50 text-gray-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
-            }`}
-            title="Toggle reference (co-crystallized) ligand"
-          >
-            <span className="w-2.5 h-2.5 rounded-full bg-gray-400" style={{ opacity: showRefLigand ? 1 : 0.3 }} />
-            Ref
-          </button>
-        )}
+        <button
+          onClick={() => setShowRefLigand(v => !v)}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
+            showRefLigand ? 'bg-gray-700/40 border-gray-400/50 text-gray-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
+          }`}
+          title="Toggle co-crystallized ligand"
+        >
+          <span className="w-2.5 h-2.5 rounded-full bg-gray-400" style={{ opacity: showRefLigand ? 1 : 0.3 }} />
+          Ligand
+        </button>
         {selectedResidues.length > 0 && (
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" /> Selected
@@ -1779,6 +1995,28 @@ export default function ProteinViewer({ pdbUrl, pdbData, selectedPocket, uniprot
           >
             <span className="w-2.5 h-2.5 rounded-full bg-orange-500" style={{ opacity: showBindingSites ? 1 : 0.3 }} />
             Binding Sites
+          </button>
+        )}
+        {functionalResidues?.length > 0 && (
+          <button
+            onClick={() => setShowFunctionalResidues(v => !v)}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
+              showFunctionalResidues ? 'bg-cyan-900/30 border-cyan-500/50 text-cyan-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
+            }`}
+          >
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" style={{ opacity: showFunctionalResidues ? 1 : 0.3 }} />
+            Key Residues
+          </button>
+        )}
+        {interactionContacts?.length > 0 && (
+          <button
+            onClick={() => setShowInteractions(v => !v)}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors ${
+              showInteractions ? 'bg-lime-900/30 border-lime-500/50 text-lime-300' : `border-gray-600 ${isDarkBg ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`
+            }`}
+          >
+            <span className="w-2.5 h-2.5 rounded-full bg-lime-400" style={{ opacity: showInteractions ? 1 : 0.3 }} />
+            Interactions
           </button>
         )}
         {uniprotFeatures?.domains?.length > 0 && (

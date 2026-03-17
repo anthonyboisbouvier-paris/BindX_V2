@@ -23,7 +23,7 @@ function polarToXY(value, axisIndex, totalAxes, cx, cy, radius) {
 function buildPoints(values, cx, cy, radius, totalAxes) {
   return values
     .map((v, i) => {
-      const { x, y } = polarToXY(v, i, totalAxes, cx, cy, radius)
+      const { x, y } = polarToXY(v === null ? 0 : v, i, totalAxes, cx, cy, radius)
       return `${x.toFixed(2)},${y.toFixed(2)}`
     })
     .join(' ')
@@ -48,20 +48,20 @@ function resolveColor(colorCode) {
 // Handles both flat and nested payload shapes.
 // --------------------------------------------------
 function extractAxisValues(admet) {
-  if (!admet) return Array(6).fill(0.5)
+  if (!admet) return Array(6).fill(null)
 
   const getFlat   = (key)          => admet[key]
   const getNested = (sec, key)     => admet[sec]?.[key]
-  const get       = (fk, sec, nk, fallback = 0.5) => {
+  const get       = (fk, sec, nk) => {
     const v = getFlat(fk) ?? getNested(sec, nk)
-    return v !== null && v !== undefined ? Number(v) : fallback
+    return v !== null && v !== undefined ? Number(v) : null
   }
 
   // 1. Absorption — oral bioavailability (0-1, high = good)
-  const absorption = get('oral_bioavailability', 'absorption', 'oral_bioavailability', 0.5)
+  const absorption = get('oral_bioavailability', 'absorption', 'oral_bioavailability')
 
   // 2. Distribution — BBB permeability (0-1)
-  const distribution = get('bbb_permeability', 'distribution', 'bbb_permeability', 0.5)
+  const distribution = get('bbb_permeability', 'distribution', 'bbb_permeability')
 
   // 3. Metabolism — average CYP inhibition then INVERTED (low inhibition = high score)
   const cypPairs = [
@@ -75,10 +75,9 @@ function extractAxisValues(admet) {
     .map(([fk, sec, nk]) => getFlat(fk) ?? getNested(sec, nk))
     .filter((v) => v !== null && v !== undefined)
     .map(Number)
-  const avgCyp = cypVals.length
-    ? cypVals.reduce((a, b) => a + b, 0) / cypVals.length
-    : 0.3
-  const metabolism = Math.max(0, Math.min(1, 1 - avgCyp))
+  const metabolism = cypVals.length
+    ? Math.max(0, Math.min(1, 1 - cypVals.reduce((a, b) => a + b, 0) / cypVals.length))
+    : null
 
   // 4. Excretion — renal clearance mapped to favour moderate values
   const rawClear = getFlat('clearance')
@@ -88,10 +87,9 @@ function extractAxisValues(admet) {
   let excretion
   if (rawClear !== null && rawClear !== undefined) {
     const norm = Math.min(1, Number(rawClear) / 100)
-    // Best score around 0.2-0.3 normalised (moderate clearance)
     excretion = Math.max(0, Math.min(1, 1 - Math.abs(norm - 0.25) * 2))
   } else {
-    excretion = 0.5
+    excretion = null
   }
 
   // 5. Toxicity — invert average of hERG + ames + hepatotox (low risk = high score)
@@ -100,13 +98,12 @@ function extractAxisValues(admet) {
     getFlat('ames_mutagenicity') ?? getNested('toxicity', 'ames_mutagenicity'),
     getFlat('hepatotoxicity')   ?? getNested('toxicity', 'hepatotoxicity'),
   ].filter((v) => v !== null && v !== undefined).map(Number)
-  const avgTox = toxRaw.length
-    ? toxRaw.reduce((a, b) => a + b, 0) / toxRaw.length
-    : 0.2
-  const toxicity = Math.max(0, Math.min(1, 1 - avgTox))
+  const toxicity = toxRaw.length
+    ? Math.max(0, Math.min(1, 1 - toxRaw.reduce((a, b) => a + b, 0) / toxRaw.length))
+    : null
 
   // 6. Drug-likeness — composite score (0-1)
-  const drugLikeness = get('composite_score', null, null, 0.5)
+  const drugLikeness = get('composite_score', null, null)
 
   return [absorption, distribution, metabolism, excretion, toxicity, drugLikeness]
 }
@@ -263,14 +260,16 @@ export default function ADMETRadar({ admet }) {
 
           {/* Data dots */}
           {values.map((v, i) => {
-            const { x, y } = polarToXY(v, i, N, CX, CY, R)
+            const isNull = v === null
+            const { x, y } = polarToXY(isNull ? 0 : v, i, N, CX, CY, R)
             return (
               <circle
                 key={i}
-                cx={x} cy={y} r={4.5}
-                fill={fillColor}
+                cx={x} cy={y} r={isNull ? 3.5 : 4.5}
+                fill={isNull ? '#d1d5db' : fillColor}
                 stroke="white"
                 strokeWidth={1.5}
+                strokeDasharray={isNull ? '2,2' : undefined}
               />
             )
           })}
@@ -292,11 +291,11 @@ export default function ADMETRadar({ admet }) {
                 <text
                   x={lp.x} y={lp.y + 7}
                   fontSize="7.5"
-                  fill="#6b7280"
+                  fill={values[i] === null ? '#d1d5db' : '#6b7280'}
                   textAnchor={anchor}
                   dominantBaseline="central"
                 >
-                  {Math.round(values[i] * 100)}%
+                  {values[i] === null ? 'N/A' : `${Math.round(values[i] * 100)}%`}
                 </text>
               </g>
             )
@@ -315,8 +314,8 @@ export default function ADMETRadar({ admet }) {
                 {axis.label}
                 <InfoTip text={AXIS_TIPS[axis.label] || axis.label} />
               </span>
-              <span className="text-sm font-semibold text-gray-700 ml-auto">
-                {Math.round(values[i] * 100)}%
+              <span className={`text-sm font-semibold ml-auto ${values[i] === null ? 'text-gray-300' : 'text-gray-700'}`}>
+                {values[i] === null ? 'N/A' : `${Math.round(values[i] * 100)}%`}
               </span>
             </div>
           ))}

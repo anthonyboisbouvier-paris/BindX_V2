@@ -179,76 +179,14 @@ _ENAMINE_TAILS: list[str] = [
 
 
 def sample_enamine_real(n: int = 500) -> list[dict]:
-    """Sample drug-like molecules from a mock ENAMINE REAL virtual library.
+    """Sample drug-like molecules from the ENAMINE REAL virtual library.
 
-    Uses a 2-pass approach for speed:
-      1. Pure Python combinatorial SMILES generation (fast)
-      2. Batch RDKit validation + descriptor computation (single import)
-
-    Parameters
-    ----------
-    n : int
-        Number of molecules to generate (default 500).
-
-    Returns
-    -------
-    list[dict]
-        Each dict has keys: ``name``, ``smiles``, ``source``, ``canonical_smiles``,
-        ``mwt``, ``logp``, ``hbd``, ``hba``, ``tpsa``.
+    Requires a real ENAMINE REAL database connection or API access.
     """
-    # Pass 1: Pure Python generation (no RDKit)
-    candidates: list[str] = []
-    seen_smiles: set[str] = set()
-    base_seed = "enamine_real_v6.3_dockit"
-
-    for i in range(n * 3):
-        if len(candidates) >= n * 2:  # Over-generate for validation losses
-            break
-        digest = hashlib.sha256(f"{base_seed}_{i}".encode("utf-8")).hexdigest()
-        h = int(digest[:16], 16)
-        core = _ENAMINE_CORES[h % len(_ENAMINE_CORES)]
-        linker = _ENAMINE_LINKERS[(h >> 8) % len(_ENAMINE_LINKERS)]
-        tail = _ENAMINE_TAILS[(h >> 16) % len(_ENAMINE_TAILS)]
-        use_three = (h >> 24) % 3 != 0
-        smiles = f"{core}{linker}{tail}" if use_three else f"{core}{linker}"
-        if smiles in seen_smiles:
-            continue
-        seen_smiles.add(smiles)
-        candidates.append(smiles)
-
-    # Pass 2: Batch RDKit validation + descriptors
-    ligands: list[dict] = []
-    try:
-        from rdkit import Chem
-        from rdkit.Chem import Descriptors
-
-        for smi in candidates:
-            if len(ligands) >= n:
-                break
-            mol = Chem.MolFromSmiles(smi)
-            if mol is None:
-                continue
-            canonical = Chem.MolToSmiles(mol)
-            ligands.append({
-                "name": f"ENAMINE_{len(ligands):06d}",
-                "smiles": canonical,
-                "canonical_smiles": canonical,
-                "source": "enamine_real",
-            })
-    except ImportError:
-        # No RDKit — accept as-is without validation
-        for smi in candidates[:n]:
-            ligands.append({
-                "name": f"ENAMINE_{len(ligands):06d}",
-                "smiles": smi,
-                "source": "enamine_real",
-            })
-
-    logger.info(
-        "Sampled %d molecules from ENAMINE REAL mock library (requested %d)",
-        len(ligands), n,
+    raise RuntimeError(
+        "ENAMINE REAL sampling is not available. "
+        "Configure ENAMINE REAL database access or API credentials."
     )
-    return ligands
 
 
 # ---------------------------------------------------------------------------
@@ -608,13 +546,37 @@ def _fetch_activities(
 
 
 # ---------------------------------------------------------------------------
-# ZINC20 API
+# ZINC API
 # ---------------------------------------------------------------------------
 
-ZINC20_BASE = "https://zinc20.docking.org/substances"
+ZINC20_BASE = "https://zinc.docking.org/substances"
 ZINC20_PAGE_SIZE = 3000  # Max reliable page size (4000+ returns 502)
 ZINC20_TIMEOUT = (10, 60)  # (connect, read) seconds
 ZINC20_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; BindX/1.0)"}
+
+
+def _zinc_session() -> requests.Session:
+    """Create a requests Session with a custom SSL adapter for ZINC.
+
+    The ZINC server uses weak TLS ciphers that OpenSSL 3.5+ rejects by default.
+    This adapter forces TLS 1.2 max and SECLEVEL=0 to maintain compatibility.
+    """
+    import ssl
+    from urllib3.util.ssl_ import create_urllib3_context
+    from requests.adapters import HTTPAdapter
+
+    class _ZincSSLAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            ctx = create_urllib3_context()
+            ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+            ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+            kwargs["ssl_context"] = ctx
+            return super().init_poolmanager(*args, **kwargs)
+
+    session = requests.Session()
+    session.mount("https://zinc.docking.org", _ZincSSLAdapter())
+    session.headers.update(ZINC20_HEADERS)
+    return session
 
 # Available subsets with human-readable labels
 ZINC20_SUBSETS: dict[str, str] = {
@@ -733,7 +695,8 @@ def _fetch_zinc_api(
     subset: str | None,
     filters: dict | None,
 ) -> list[dict]:
-    """Paginated fetch from ZINC20 REST API."""
+    """Paginated fetch from ZINC REST API."""
+    session = _zinc_session()
     url = _build_zinc_url(subset)
     ligands: list[dict] = []
     seen_ids: set[str] = set()
@@ -741,7 +704,7 @@ def _fetch_zinc_api(
     page_size = min(max_count, ZINC20_PAGE_SIZE)
 
     logger.info(
-        "Fetching up to %d molecules from ZINC20 (subset=%s, filters=%s)",
+        "Fetching up to %d molecules from ZINC (subset=%s, filters=%s)",
         max_count, subset, filters,
     )
 
@@ -751,30 +714,34 @@ def _fetch_zinc_api(
         params = _build_zinc_params(current_page_size, page, filters)
 
         try:
-            resp = requests.get(url, params=params, timeout=ZINC20_TIMEOUT, headers=ZINC20_HEADERS)
+            resp = session.get(url, params=params, timeout=ZINC20_TIMEOUT)
             resp.raise_for_status()
-        except requests.exceptions.Timeout:
-            if not ligands:
-                raise RuntimeError(
-                    "ZINC20 API timeout — the server did not respond. "
-                    "Try a smaller subset or fewer filters."
-                )
-            logger.warning("ZINC20 API timeout on page %d, returning %d molecules fetched so far", page, len(ligands))
-            break
         except requests.exceptions.RequestException as exc:
-            if not ligands:
-                raise RuntimeError(f"ZINC20 API error: {exc}")
-            logger.warning("ZINC20 API error on page %d: %s — returning %d molecules", page, exc, len(ligands))
-            break
+            if page == 1 and subset:
+                # Subset endpoint may be unreachable — retry without subset
+                logger.warning(
+                    "ZINC subset '%s' failed (%s), retrying without subset filter",
+                    subset, exc,
+                )
+                url = _build_zinc_url(None)
+                try:
+                    resp = session.get(url, params=params, timeout=ZINC20_TIMEOUT)
+                    resp.raise_for_status()
+                except requests.exceptions.RequestException as exc2:
+                    raise RuntimeError(f"ZINC API error: {exc2}")
+            elif not ligands:
+                raise RuntimeError(f"ZINC API error: {exc}")
+            else:
+                logger.warning("ZINC API error on page %d: %s — returning %d molecules", page, exc, len(ligands))
+                break
 
         try:
             data = resp.json()
         except ValueError:
-            logger.warning("ZINC20 returned invalid JSON on page %d", page)
+            logger.warning("ZINC returned invalid JSON on page %d", page)
             break
 
         if not data:
-            # Empty page = no more results
             break
 
         for entry in data:
@@ -799,14 +766,13 @@ def _fetch_zinc_api(
             if len(ligands) >= max_count:
                 break
 
-        # If we got fewer results than requested, we've exhausted results
         if len(data) < current_page_size:
             break
 
         page += 1
 
     logger.info(
-        "Fetched %d molecules from ZINC20 API (subset=%s)",
+        "Fetched %d molecules from ZINC API (subset=%s)",
         len(ligands), subset,
     )
     return ligands

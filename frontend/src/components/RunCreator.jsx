@@ -202,7 +202,8 @@ const DEFAULT_CONFIGS = {
     toxicity: {},
     scoring: {},
     composite: { weights: { docking_score: 0.30, cnn_score: 0.20, logP: 0.15, solubility: 0.10, selectivity: 0.15, novelty: 0.10 } },
-    enrichment: { analyses: ['prolif', 'clustering', 'scaffold', 'pharmacophore'] },
+    interactions: {},
+    scaffold: {},
     clustering: { method: 'butina', cutoff: 0.5 },
     off_target: {},
     confidence: {},
@@ -520,7 +521,7 @@ function ImportFilters({ filters, onChange, selectedDBs }) {
 // ---------------------------------------------------------------------------
 // Step 2: Configuration forms
 // ---------------------------------------------------------------------------
-function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEngines, project }) {
+function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEngines, project, hasDockingRun = false }) {
   const set = (key, value) => onChange({ ...config, [key]: value })
 
   // Auto-switch engine if GPU is unavailable and current selection is gnina_gpu
@@ -602,23 +603,32 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
               {CALCULATION_SUBTYPES.map(sub => {
                 const checked = selectedCalc === sub.key
                 const subColor = RUN_TYPE_COLORS[sub.key] || RUN_TYPE_COLORS.calculation
+                const disabled = (sub.key === 'interactions' && !hasDockingRun) || sub.key === 'off_target'
                 return (
                   <button key={sub.key}
-                    onClick={() => selectCalcType(sub.key)}
+                    onClick={() => !disabled && selectCalcType(sub.key)}
+                    disabled={disabled}
+                    title={disabled ? 'Run docking first to enable interactions analysis' : undefined}
                     className={`flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                      checked ? `border-blue-400 ${subColor.bg}` : 'border-gray-100 hover:border-gray-200'
+                      disabled ? 'opacity-50 cursor-not-allowed border-gray-100 bg-gray-50'
+                      : checked ? `border-blue-400 ${subColor.bg}` : 'border-gray-100 hover:border-gray-200'
                     }`}
                   >
                     <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 border-2 transition-colors ${
-                      checked ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                      checked && !disabled ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
                     }`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className={`text-sm font-semibold ${checked ? 'text-bx-light-text' : 'text-gray-700'}`}>
+                        <p className={`text-sm font-semibold ${disabled ? 'text-gray-400' : checked ? 'text-bx-light-text' : 'text-gray-700'}`}>
                           {sub.label}
                           {TIPS[`run_${sub.key}`] && <InfoTip text={TIPS[`run_${sub.key}`]} size="xs" />}
                         </p>
                         <span className="text-[9px] text-gray-400">{ESTIMATED_TIMES[sub.key]}</span>
+                        {disabled && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">
+                            {sub.key === 'off_target' ? 'Not available' : 'Requires docking'}
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-gray-500 mt-0.5">{sub.description}</p>
                       <div className="flex flex-wrap gap-1 mt-1">
@@ -645,6 +655,16 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
               <span>
                 <strong>Receptor not prepared.</strong> Go to Target Setup and click "Prepare Receptor" before running docking.
               </span>
+            </div>
+          )}
+
+          {/* Interactions info cards */}
+          {selectedCalc === 'interactions' && (
+            <div className="space-y-3">
+              <div className="p-3 rounded-xl border border-lime-200 bg-lime-50">
+                <p className="text-sm font-semibold text-lime-700">Protein-Ligand Interaction Analysis</p>
+                <p className="text-sm text-lime-600 mt-1">Computes H-bonds, hydrophobic contacts, pi-stacking and salt bridges using ProLIF/RDKit.</p>
+              </div>
             </div>
           )}
 
@@ -854,51 +874,13 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
       )
     }
 
-    case 'enrichment': {
-      const allAnalyses = [
-        { value: 'prolif',        label: 'ProLIF Interactions',  desc: 'Protein-ligand interaction fingerprints', implemented: true },
-        { value: 'clustering',    label: 'Tanimoto Clustering',  desc: 'Group molecules by structural similarity', implemented: true },
-        { value: 'scaffold',      label: 'Scaffold Analysis',    desc: 'Identify core scaffolds across hits', implemented: true },
-        { value: 'pharmacophore', label: 'Pharmacophore',        desc: 'Map 3D pharmacophoric features', implemented: true },
-      ]
+    case 'scaffold': {
       return (
-        <div className="space-y-2">
-          <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            Analyses to run
-          </label>
-          {allAnalyses.map(a => {
-            const checked = (config.analyses || []).includes(a.value)
-            return (
-              <label key={a.value}
-                className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
-                  !a.implemented
-                    ? 'border-gray-100 bg-gray-50/50 opacity-60 cursor-not-allowed'
-                    : checked
-                      ? 'border-purple-200 bg-purple-50 cursor-pointer'
-                      : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50 cursor-pointer'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked && a.implemented}
-                  onChange={() => a.implemented && toggleArr('analyses', a.value)}
-                  disabled={!a.implemented}
-                  className="accent-purple-600 mt-0.5 flex-shrink-0"
-                />
-                <div>
-                  <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                    {a.label}
-                    {!a.implemented && (
-                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 border border-amber-200">
-                        Coming Soon
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-sm text-gray-400">{a.desc}</p>
-                </div>
-              </label>
-            )
-          })}
+        <div className="space-y-3">
+          <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50">
+            <p className="text-sm font-semibold text-emerald-700">Scaffold Decomposition</p>
+            <p className="text-sm text-emerald-600 mt-1">Murcko scaffold extraction, BRICS bond analysis, and R-group position identification. Only requires SMILES — no docking needed.</p>
+          </div>
         </div>
       )
     }
@@ -1653,7 +1635,7 @@ function DockingEstimate({ nMols, exhaustiveness = 8, cnnScoring = 'rescore' }) 
 
 // Step 3: Confirmation
 // ---------------------------------------------------------------------------
-function ConfirmationView({ runType, config, selectedCount, includedColumns, onIncludedColumnsChange, runAllMolecules, onRunAllMoleculesChange, onConfigChange, gpuEngines }) {
+function ConfirmationView({ runType, config, selectedCount, includedColumns, onIncludedColumnsChange, runAllMolecules, onRunAllMoleculesChange, onConfigChange, gpuEngines, project }) {
   const rt = RUN_TYPES.find(t => t.type === runType)
   if (!rt) return null
   const c = runColor(runType)
@@ -1698,9 +1680,11 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
     configLines.push(`${Object.keys(ws).length} score weights, total: ${total.toFixed(2)}`)
     configLines.push('Aggregates results from previous runs (docking, ADME, scoring, etc.)')
   }
-  if (runType === 'enrichment') {
-    const a = config.analyses || []
-    configLines.push(`Analyses: ${a.join(', ') || 'none selected'}`)
+  if (runType === 'interactions') {
+    configLines.push('Protein-ligand interaction analysis (H-bonds, hydrophobic, pi-stacking)')
+  }
+  if (runType === 'scaffold') {
+    configLines.push('Murcko scaffold decomposition + BRICS bonds + R-group positions')
   }
   if (runType === 'generation') {
     if (config.mode === 'optimization') {
@@ -1872,6 +1856,69 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
         </div>
       )}
 
+      {/* Interactions: functional residues checklist */}
+      {runType === 'calculation' && config.calculation_types?.[0] === 'interactions' && onConfigChange && (() => {
+        const funcRes = project?.target_preview?.functional_residues?.residues || []
+        const keyHbondNums = new Set(project?.target_preview?.functional_residues?.key_hbond_residues || [])
+        const excluded = config.interactions?.excluded_residues || []
+        const activeCount = funcRes.filter(r => r.enabled !== false && !excluded.includes(r.number)).length
+
+        const toggleExclude = (num) => {
+          const prev = config.interactions?.excluded_residues || []
+          const next = prev.includes(num) ? prev.filter(n => n !== num) : [...prev, num]
+          onConfigChange({ ...config, interactions: { ...config.interactions, excluded_residues: next } })
+        }
+
+        return (
+          <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Functional Residues</p>
+              {funcRes.length > 0 && (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-lime-100 text-lime-700">
+                  {activeCount}/{funcRes.length} active
+                </span>
+              )}
+            </div>
+            {funcRes.length === 0 ? (
+              <p className="text-xs text-gray-400">No functional residues defined — all contacts will be reported without quality scoring.</p>
+            ) : (
+              <>
+                <p className="text-[10px] text-gray-400 mb-1">Uncheck residues to exclude from quality scoring</p>
+                <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
+                  {funcRes.filter(r => r.enabled !== false).map(r => {
+                    const isExcluded = excluded.includes(r.number)
+                    const isKeyHB = keyHbondNums.has(r.number)
+                    return (
+                      <label
+                        key={r.number}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border cursor-pointer transition-colors ${
+                          isExcluded
+                            ? 'border-gray-200 bg-white opacity-50'
+                            : 'border-lime-200 bg-lime-50/50 hover:bg-lime-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!isExcluded}
+                          onChange={() => toggleExclude(r.number)}
+                          className="w-3.5 h-3.5 rounded border-gray-300 text-lime-600 focus:ring-lime-500"
+                        />
+                        <span className="text-xs font-mono font-medium text-gray-700">
+                          {r.aa || '?'}{r.number}
+                        </span>
+                        {isKeyHB && (
+                          <span className="text-[9px] font-semibold px-1 py-0.5 rounded bg-blue-100 text-blue-600 ml-auto">HB</span>
+                        )}
+                      </label>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })()}
+
       {/* Column checklist for calculation runs */}
       {runType === 'calculation' && config.calculation_types?.length === 1 && includedColumns && onIncludedColumnsChange && (
         <ColumnChecklist
@@ -1950,7 +1997,7 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
 // ---------------------------------------------------------------------------
 // RunCreator — main component
 // ---------------------------------------------------------------------------
-export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubmit, selectedMoleculeIds, submitting, project }) {
+export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubmit, selectedMoleculeIds, submitting, project, runs = [] }) {
   const [step, setStep] = useState(1)
   const [selectedType, setSelectedType] = useState(null)
   const [config, setConfig] = useState({})
@@ -1964,6 +2011,10 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
       .then(data => setGpuEngines(data.engines || {}))
       .catch(() => setGpuEngines({ gnina_gpu: false, gnina_cpu: true, vina: true, diffdock: false }))
   }, [isOpen])
+
+  const hasDockingRun = runs.some(
+    r => r.status === 'completed' && r.calculation_types?.includes('docking')
+  )
 
   if (!isOpen) return null
 
@@ -2025,6 +2076,10 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
     }
     if (runAllMolecules) {
       payload.config = { ...payload.config, run_all_molecules: true }
+    }
+    const excludedRes = config.interactions?.excluded_residues
+    if (excludedRes?.length > 0) {
+      payload.config = { ...payload.config, excluded_residues: excludedRes }
     }
     if (onSubmit) onSubmit(payload)
     handleClose()
@@ -2129,12 +2184,13 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
               selectedCount={selectedMoleculeIds?.size || 0}
               gpuEngines={gpuEngines}
               project={project}
+              hasDockingRun={hasDockingRun}
             />
           )}
 
           {/* Step 3: Confirm */}
           {step === 3 && selectedType && (
-            <ConfirmationView runType={selectedType} config={config} selectedCount={selectedMoleculeIds?.size || 0} includedColumns={includedColumns} onIncludedColumnsChange={setIncludedColumns} runAllMolecules={runAllMolecules} onRunAllMoleculesChange={setRunAllMolecules} onConfigChange={setConfig} gpuEngines={gpuEngines} />
+            <ConfirmationView runType={selectedType} config={config} selectedCount={selectedMoleculeIds?.size || 0} includedColumns={includedColumns} onIncludedColumnsChange={setIncludedColumns} runAllMolecules={runAllMolecules} onRunAllMoleculesChange={setRunAllMolecules} onConfigChange={setConfig} gpuEngines={gpuEngines} project={project} />
           )}
         </div>
 

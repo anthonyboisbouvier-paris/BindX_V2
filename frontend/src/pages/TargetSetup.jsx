@@ -27,6 +27,7 @@ async function fetchUniProtInfo(uniprotId) {
   const gene = data.genes?.[0]?.geneName?.value || ''
   const organism = data.organism?.scientificName || ''
   const seqLen = data.sequence?.length || 0
+  const seqValue = data.sequence?.value || ''
 
   const funcComment = data.comments?.find(c => c.commentType === 'FUNCTION')
   const funcText = funcComment?.texts?.[0]?.value || ''
@@ -49,11 +50,82 @@ async function fetchUniProtInfo(uniprotId) {
     .filter(f => f.type === 'Domain')
     .map(f => ({ name: f.description, start: f.location?.start?.value, end: f.location?.end?.value }))
 
+  // 1-letter → 3-letter amino acid code mapping
+  const AA_MAP = {
+    A:'ALA', R:'ARG', N:'ASN', D:'ASP', C:'CYS', E:'GLU', Q:'GLN', G:'GLY',
+    H:'HIS', I:'ILE', L:'LEU', K:'LYS', M:'MET', F:'PHE', P:'PRO', S:'SER',
+    T:'THR', W:'TRP', Y:'TYR', V:'VAL',
+  }
+  const getAA = (pos) => {
+    if (!seqValue || pos < 1 || pos > seqValue.length) return null
+    return AA_MAP[seqValue[pos - 1]] || null
+  }
+
+  // Extract individual functional residues for interaction analysis
+  const functionalResidues = []
+  const seen = new Set()
+
+  // Active sites → importance: "key"
+  activeSites.forEach(as => {
+    if (as.position && !seen.has(as.position)) {
+      seen.add(as.position)
+      const aa = getAA(as.position)
+      functionalResidues.push({
+        number: as.position, aa, role: 'active_site',
+        importance: 'key', description: 'Active site',
+        source: 'uniprot', enabled: true,
+      })
+    }
+  })
+
+  // Binding sites (ranges) → each position, importance: "key"
+  // Skip ranges > 20 residues (likely entire domains, not specific binding sites)
+  bindingSites.forEach(bs => {
+    if (!bs.start || !bs.end) return
+    if (bs.end - bs.start > 20) return
+    for (let pos = bs.start; pos <= bs.end; pos++) {
+      if (!seen.has(pos)) {
+        seen.add(pos)
+        const aa = getAA(pos)
+        functionalResidues.push({
+          number: pos, aa, role: 'binding',
+          importance: 'key',
+          description: `Binding site (${bs.start}-${bs.end})`,
+          source: 'uniprot', enabled: true,
+        })
+      }
+    }
+  })
+
+  // Site features (metal binding, nucleotide binding) → importance: "normal"
+  // Expand ranges like binding sites (with same >20 safety)
+  const siteFeatures = features.filter(f => f.type === 'Site' || f.type === 'Metal binding')
+  siteFeatures.forEach(f => {
+    const start = f.location?.start?.value
+    const end = f.location?.end?.value || start
+    if (!start) return
+    if (end - start > 20) return
+    const role = f.type === 'Metal binding' ? 'metal_binding' : 'site'
+    for (let pos = start; pos <= end; pos++) {
+      if (!seen.has(pos)) {
+        seen.add(pos)
+        const aa = getAA(pos)
+        functionalResidues.push({
+          number: pos, aa, role,
+          importance: 'normal',
+          description: f.description || f.type,
+          source: 'uniprot', enabled: true,
+        })
+      }
+    }
+  })
+
   return {
-    name, gene, organism, seqLen,
+    name, gene, organism, seqLen, seqValue,
     function: funcText,
     diseases, keywords,
     activeSites, bindingSites, domains,
+    functionalResidues,
   }
 }
 
@@ -187,6 +259,268 @@ function PocketCard({ pocket, index, selected, onSelect }) {
 }
 
 // ---------------------------------------------------------------------------
+// Functional Residues Editor
+// ---------------------------------------------------------------------------
+
+const ROLE_BADGES = {
+  active_site:    { bg: 'bg-red-100',    text: 'text-red-700',    label: 'Active Site' },
+  binding:        { bg: 'bg-blue-100',   text: 'text-blue-700',   label: 'Binding' },
+  metal_binding:  { bg: 'bg-amber-100',  text: 'text-amber-700',  label: 'Metal' },
+  site:           { bg: 'bg-gray-100',   text: 'text-gray-600',   label: 'Site' },
+  pocket:         { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Pocket' },
+  custom:         { bg: 'bg-teal-100',   text: 'text-teal-700',   label: 'Custom' },
+}
+
+// 1-letter → 3-letter amino acid code mapping (duplicated for standalone use)
+const AA_MAP_EDITOR = {
+  A:'ALA', R:'ARG', N:'ASN', D:'ASP', C:'CYS', E:'GLU', Q:'GLN', G:'GLY',
+  H:'HIS', I:'ILE', L:'LEU', K:'LYS', M:'MET', F:'PHE', P:'PRO', S:'SER',
+  T:'THR', W:'TRP', Y:'TYR', V:'VAL',
+}
+
+function FunctionalResiduesEditor({ residues, onChange, pockets, selectedPocketIdx, onSelectResidue, selectedResidueNum, seqValue }) {
+  const [showAdd, setShowAdd] = useState(false)
+  const [newNumber, setNewNumber] = useState('')
+  const [newDescription, setNewDescription] = useState('')
+  const [newRole, setNewRole] = useState('custom')
+
+  // Resolve AA code from sequence for custom residues
+  const resolveAA = (pos) => {
+    if (!seqValue || pos < 1 || pos > seqValue.length) return null
+    return AA_MAP_EDITOR[seqValue[pos - 1]] || null
+  }
+
+  const enabledCount = residues.filter(r => r.enabled).length
+
+  const handleToggle = (idx) => {
+    const updated = [...residues]
+    updated[idx] = { ...updated[idx], enabled: !updated[idx].enabled }
+    onChange(updated)
+  }
+
+  const handleRemove = (idx) => {
+    onChange(residues.filter((_, i) => i !== idx))
+  }
+
+  const handleAdd = () => {
+    const num = parseInt(newNumber, 10)
+    if (isNaN(num) || num <= 0) return
+    if (residues.some(r => r.number === num)) return
+    const aa = resolveAA(num)
+    onChange([...residues, {
+      number: num, aa, role: newRole,
+      importance: newRole === 'active_site' || newRole === 'binding' ? 'key' : 'normal',
+      description: newDescription || 'User-defined',
+      source: 'user', enabled: true,
+    }])
+    setNewNumber('')
+    setNewDescription('')
+    setShowAdd(false)
+  }
+
+  const handleImportFromPocket = () => {
+    const pocket = pockets?.[selectedPocketIdx]
+    if (!pocket) return
+    const pocketResidues = Array.isArray(pocket.residues)
+      ? (typeof pocket.residues[0] === 'string' && pocket.residues[0].includes(' ')
+          ? pocket.residues[0].split(' ')
+          : pocket.residues)
+      : []
+    const existingNums = new Set(residues.map(r => r.number))
+    const newResidues = []
+    pocketResidues.forEach(r => {
+      const str = String(r).trim()
+      let aa = null, num = null
+
+      // Format 1: "ALA_A_123" (co-crystallized: resName_chain_resNum)
+      const m1 = str.match(/^([A-Z]{3})_[A-Z]_(\d+)$/i)
+      if (m1) { aa = m1[1].toUpperCase(); num = parseInt(m1[2], 10) }
+
+      // Format 2: "ALA_123_A" (P2Rank: resName_resNum_chain)
+      if (!num) {
+        const m2 = str.match(/^([A-Z]{3})_(\d+)_[A-Z]$/i)
+        if (m2) { aa = m2[1].toUpperCase(); num = parseInt(m2[2], 10) }
+      }
+
+      // Format 3: "ALA123" (compact)
+      if (!num) {
+        const m3 = str.match(/^([A-Z]{3})(\d+)$/i)
+        if (m3) { aa = m3[1].toUpperCase(); num = parseInt(m3[2], 10) }
+      }
+
+      // Format 4: just a number "123"
+      if (!num) {
+        const m4 = str.match(/^(\d+)$/)
+        if (m4) { num = parseInt(m4[1], 10) }
+      }
+
+      // Fallback: extract any number from the string
+      if (!num) {
+        const mFall = str.match(/(\d+)/)
+        if (mFall) { num = parseInt(mFall[1], 10) }
+        const mAA = str.match(/([A-Z]{3})/i)
+        if (mAA) { aa = mAA[1].toUpperCase() }
+      }
+
+      if (num && !existingNums.has(num)) {
+        // If no AA from parsing, try resolving from sequence
+        if (!aa) aa = resolveAA(num)
+        existingNums.add(num)
+        newResidues.push({
+          number: num, aa, role: 'pocket',
+          importance: 'normal',
+          description: `From pocket #${selectedPocketIdx + 1}`,
+          source: 'pocket', enabled: true,
+        })
+      }
+    })
+    if (newResidues.length > 0) onChange([...residues, ...newResidues])
+  }
+
+  return (
+    <div className="card px-5 py-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-lime-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          <h3 className="text-sm font-semibold text-gray-700">Key Binding Residues</h3>
+          <span className="text-xs bg-lime-100 text-lime-700 px-2 py-0.5 rounded-full font-medium">
+            {enabledCount} active
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {pockets?.length > 0 && (
+            <button
+              onClick={handleImportFromPocket}
+              className="text-xs text-purple-600 hover:text-purple-700 font-medium px-2 py-1 rounded hover:bg-purple-50 transition-colors"
+            >
+              Import from pocket #{selectedPocketIdx + 1}
+            </button>
+          )}
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="text-xs text-bx-light-text hover:text-bx-surface font-medium px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+          >
+            + Add custom
+          </button>
+        </div>
+      </div>
+
+      {/* Add custom residue form */}
+      {showAdd && (
+        <div className="flex items-end gap-2 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+          <div className="flex-shrink-0">
+            <label className="text-[10px] text-gray-400 uppercase tracking-wider block mb-1">Residue #</label>
+            <input
+              type="number" min={1} value={newNumber}
+              onChange={e => setNewNumber(e.target.value)}
+              className="w-20 px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-bx-mint font-mono"
+              placeholder="793"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-[10px] text-gray-400 uppercase tracking-wider block mb-1">Description</label>
+            <input
+              type="text" value={newDescription}
+              onChange={e => setNewDescription(e.target.value)}
+              className="w-full px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-bx-mint"
+              placeholder="e.g. Hinge region"
+            />
+          </div>
+          <div className="flex-shrink-0">
+            <label className="text-[10px] text-gray-400 uppercase tracking-wider block mb-1">Role</label>
+            <select
+              value={newRole} onChange={e => setNewRole(e.target.value)}
+              className="px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-bx-mint"
+            >
+              <option value="active_site">Active Site</option>
+              <option value="binding">Binding</option>
+              <option value="metal_binding">Metal</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <button
+            onClick={handleAdd} disabled={!newNumber}
+            className="px-3 py-1.5 text-sm font-semibold rounded bg-bx-surface text-white hover:bg-bx-elevated disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
+          >
+            Add
+          </button>
+        </div>
+      )}
+
+      {/* Residues table */}
+      {residues.length > 0 ? (
+        <div className="max-h-[200px] overflow-y-auto scrollbar-thin">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[10px] text-gray-400 uppercase tracking-wider border-b border-gray-100">
+                <th className="text-left py-1.5 w-8"></th>
+                <th className="text-left py-1.5 w-24">Residue</th>
+                <th className="text-left py-1.5">Role</th>
+                <th className="text-center py-1.5 w-8">Key</th>
+                <th className="text-left py-1.5">Description</th>
+                <th className="w-8"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {residues.map((r, i) => {
+                const badge = ROLE_BADGES[r.role] || ROLE_BADGES.custom
+                const isSelected = selectedResidueNum === r.number
+                return (
+                  <tr
+                    key={`${r.number}-${i}`}
+                    className={`${r.enabled ? '' : 'opacity-40'} ${isSelected ? 'bg-cyan-50 ring-1 ring-cyan-300' : 'hover:bg-gray-50'} transition-colors cursor-pointer`}
+                    onClick={() => onSelectResidue?.(isSelected ? null : r)}
+                  >
+                    <td className="py-1.5">
+                      <input type="checkbox" checked={r.enabled} onChange={(e) => { e.stopPropagation(); handleToggle(i) }}
+                        className="w-3.5 h-3.5 rounded border-gray-300 text-bx-mint focus:ring-bx-mint cursor-pointer" />
+                    </td>
+                    <td className="py-1.5 font-mono font-semibold text-gray-700">
+                      {r.aa && <span className="text-gray-400 font-normal mr-1">{r.aa}</span>}
+                      {r.number}
+                    </td>
+                    <td className="py-1.5">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${badge.bg} ${badge.text}`}>
+                        {badge.label}
+                      </span>
+                    </td>
+                    <td className="py-1.5 text-center">
+                      {r.importance === 'key' ? (
+                        <svg className="w-3.5 h-3.5 text-amber-400 mx-auto" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                        </svg>
+                      ) : (
+                        <span className="text-gray-300">-</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-xs text-gray-500 truncate max-w-[140px]">{r.description}</td>
+                    <td className="py-1.5">
+                      {r.source === 'user' || r.source === 'pocket' ? (
+                        <button onClick={() => handleRemove(i)} className="text-gray-300 hover:text-red-400 transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 text-center py-4">
+          No functional residues detected. Add custom residues or import from a pocket.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // TargetSetup — main component
 // ---------------------------------------------------------------------------
 
@@ -218,6 +552,11 @@ export default function TargetSetup() {
   // Pockets cache per structure source (keyed by download_url)
   const [pocketsCache, setPocketsCache] = useState({})
   const [pocketsLoading, setPocketsLoading] = useState(false)
+
+  // Functional residues (auto-detected + user-editable)
+  const [functionalResidues, setFunctionalResidues] = useState([])
+  // Highlighted residue for 3D viewer (click from editor)
+  const [highlightedResidue, setHighlightedResidue] = useState(null)
 
   // Live diagnostic from ProteinViewer
   const [viewerDiag, setViewerDiag] = useState(null)
@@ -255,6 +594,12 @@ export default function TargetSetup() {
     }
     if (tp.uniprot) {
       setUniprotInfo(tp.uniprot)
+      // Restore functional residues from saved data or re-extract from UniProt info
+      if (tp.functional_residues?.residues?.length > 0) {
+        setFunctionalResidues(tp.functional_residues.residues)
+      } else if (tp.uniprot?.functionalResidues?.length > 0) {
+        setFunctionalResidues(tp.uniprot.functionalResidues)
+      }
     }
 
     // Reconstruct previewData from saved target_preview
@@ -298,6 +643,7 @@ export default function TargetSetup() {
       setLoadingStep('Fetching protein data from UniProt...')
       const info = await fetchUniProtInfo(id)
       setUniprotInfo(info)
+      setFunctionalResidues(info.functionalResidues || [])
 
       // Step 2: Backend — structure + pocket detection + ChEMBL
       setLoadingStep('Resolving structure & detecting pockets (P2Rank)...')
@@ -350,6 +696,7 @@ export default function TargetSetup() {
           const info = await fetchUniProtInfo(pdbInfo.uniprotId)
           setUniprotInfo(info)
           setUniprotId(pdbInfo.uniprotId)
+          setFunctionalResidues(info.functionalResidues || [])
         } catch (_) { /* non-critical */ }
       }
 
@@ -428,6 +775,16 @@ export default function TargetSetup() {
           structures: previewData.structures || [],
           pockets: currentPockets,
           selected_pocket_index: selectedPocketIdx,
+          functional_residues: {
+            source: inputMode,
+            residues: functionalResidues.filter(r => r.enabled),
+            key_hbond_residues: functionalResidues
+              .filter(r => r.enabled && r.importance === 'key')
+              .map(r => r.number),
+            all_residue_numbers: functionalResidues
+              .filter(r => r.enabled).map(r => r.number),
+            auto_detected: true,
+          },
         },
         pockets_detected: currentPockets,
         chembl_actives_count: previewData.chembl_info?.n_actives || null,
@@ -452,7 +809,7 @@ export default function TargetSetup() {
     } finally {
       setSaving(false)
     }
-  }, [previewData, projectId, selectedStructureIdx, selectedPocketIdx, uniprotId, pdbCode, inputMode, uniprotInfo, updateProject, refreshProjects, addToast, navigate, pocketsCache])
+  }, [previewData, projectId, selectedStructureIdx, selectedPocketIdx, uniprotId, pdbCode, inputMode, uniprotInfo, functionalResidues, updateProject, refreshProjects, addToast, navigate, pocketsCache])
 
   // ---------------------------------------------------------------------------
   // Selected structure for 3D viewer
@@ -563,6 +920,32 @@ export default function TargetSetup() {
               disabled={loading}
             />
             <button
+              onClick={async () => {
+                try {
+                  const res = await fetch('https://rest.uniprot.org/uniprotkb/search?query=(reviewed:true)+AND+(organism_id:9606)+AND+(length:[200+TO+1000])&format=json&size=500&fields=accession')
+                  if (!res.ok) throw new Error('UniProt search failed')
+                  const data = await res.json()
+                  const entries = data.results || []
+                  if (entries.length > 0) {
+                    const random = entries[Math.floor(Math.random() * entries.length)]
+                    setUniprotId(random.primaryAccession)
+                  }
+                } catch (err) {
+                  console.warn('Random UniProt failed:', err)
+                  // Fallback: curated list of well-known drug targets
+                  const targets = ['P00533','P04637','P10275','P23458','P00519','P15056','P07900','P35354','P08684','P11511','P11309','P38398','P29597','P29274','P14416','Q16539','P35968','P00918','P21802','P09874']
+                  setUniprotId(targets[Math.floor(Math.random() * targets.length)])
+                }
+              }}
+              disabled={loading}
+              className="px-3 py-2.5 text-sm font-medium rounded-lg transition-colors border border-gray-200 text-gray-500 hover:text-bx-surface hover:border-bx-surface hover:bg-blue-50"
+              title="Load a random human protein target"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            <button
               onClick={handleSearch}
               disabled={loading || !uniprotId.trim()}
               className={`px-5 py-2.5 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 ${
@@ -591,6 +974,19 @@ export default function TargetSetup() {
               disabled={loading}
             />
             <button
+              onClick={() => {
+                const pdbTargets = ['1M17','4HJO','6LU7','3ERT','1OHR','2HYY','3NYA','4MQT','5HT1','6GCZ','1XKK','3PXF','4DKL','5C1M','2RGP','3QKK','1ERE','4ASD','5UIG','3EQM','1YCR','4JXS','2VT4','3K5V','5T35','6HD4','1GOS','4WKQ','2W96','3G0E']
+                setPdbCode(pdbTargets[Math.floor(Math.random() * pdbTargets.length)])
+              }}
+              disabled={loading}
+              className="px-3 py-2.5 text-sm font-medium rounded-lg transition-colors border border-gray-200 text-gray-500 hover:text-bx-surface hover:border-bx-surface hover:bg-blue-50"
+              title="Load a random PDB structure"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            <button
               onClick={handleSearchPDB}
               disabled={loading || !pdbCode.trim()}
               className={`px-5 py-2.5 text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 ${
@@ -618,6 +1014,28 @@ export default function TargetSetup() {
               disabled={loading}
             />
             <div className="flex items-center gap-3">
+              <button
+                onClick={async () => {
+                  try {
+                    const targets = ['P00533','P04637','P10275','P23458','P00519','P15056','P07900','P35354','P08684','P11511','P11309','P38398','P29597','P29274','P14416','Q16539','P35968','P00918','P21802','P09874']
+                    const acc = targets[Math.floor(Math.random() * targets.length)]
+                    const res = await fetch(`https://rest.uniprot.org/uniprotkb/${acc}.fasta`)
+                    if (res.ok) {
+                      const fasta = await res.text()
+                      setFastaInput(fasta.trim())
+                    }
+                  } catch (err) {
+                    console.warn('Random FASTA failed:', err)
+                  }
+                }}
+                disabled={loading}
+                className="px-3 py-2.5 text-sm font-medium rounded-lg transition-colors border border-gray-200 text-gray-500 hover:text-bx-surface hover:border-bx-surface hover:bg-blue-50"
+                title="Load a random FASTA sequence"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
               <button
                 onClick={async () => {
                   if (!fastaInput.trim()) return
@@ -759,6 +1177,35 @@ export default function TargetSetup() {
                     </div>
                   </div>
                 )}
+                {/* ChEMBL + PubChem — inline in protein header */}
+                {(previewData?.chembl_info?.has_data || previewData?.pubchem_info?.has_data) && (
+                  <div>
+                    <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Known Activity Data</p>
+                  <div className="flex flex-wrap gap-3">
+                    {previewData.chembl_info?.has_data && (
+                      <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+                        <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
+                        <div className="text-sm">
+                          <span className="font-bold text-green-700">{previewData.chembl_info.n_actives?.toLocaleString()}</span>
+                          <span className="text-green-600 ml-1">ChEMBL actives</span>
+                          {previewData.chembl_info.n_with_ic50 > 0 && (
+                            <span className="text-green-500 ml-1">({previewData.chembl_info.n_with_ic50?.toLocaleString()} IC50)</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {previewData.pubchem_info?.has_data && (
+                      <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                        <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                        <div className="text-sm">
+                          <span className="font-bold text-blue-700">{previewData.pubchem_info.n_compounds?.toLocaleString()}</span>
+                          <span className="text-blue-600 ml-1">PubChem compounds</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -788,6 +1235,8 @@ export default function TargetSetup() {
                   uniprotFeatures={uniprotFeaturesMemo}
                   height={420}
                   onDiagnostic={setViewerDiag}
+                  highlightedResidue={highlightedResidue}
+                  functionalResidues={functionalResidues}
                 />
               ) : (
                 <div className="h-[420px] bg-[#0f1923] rounded-xl flex items-center justify-center">
@@ -894,7 +1343,7 @@ export default function TargetSetup() {
                     <BindXLogo variant="loading" size={48} label="Running P2Rank on this structure..." />
                   </div>
                 ) : pocketsForStructure.length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
                     {pocketsForStructure.map((p, i) => (
                       <PocketCard
                         key={i}
@@ -912,47 +1361,16 @@ export default function TargetSetup() {
                 )}
               </div>
 
-              {/* ChEMBL + PubChem info */}
-              <div className="grid grid-cols-1 gap-3">
-                {previewData.chembl_info?.has_data && (
-                  <div className="bg-green-50 border border-green-100 rounded-lg p-4">
-                    <h3 className="text-sm font-semibold text-green-800 mb-2">ChEMBL Data Available</h3>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="text-center">
-                        <p className="text-xl font-bold text-green-700">
-                          {previewData.chembl_info.n_actives?.toLocaleString()}
-                        </p>
-                        <p className="text-sm text-green-600">Active compounds</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-xl font-bold text-green-700">
-                          {previewData.chembl_info.n_with_ic50?.toLocaleString()}
-                        </p>
-                        <p className="text-sm text-green-600">With IC50 data</p>
-                      </div>
-                    </div>
-                    <p className="text-sm text-green-600 mt-2">
-                      Target: {previewData.chembl_info.target_chembl_id}
-                    </p>
-                  </div>
-                )}
-                {previewData.pubchem_info?.has_data && (
-                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-                    <h3 className="text-sm font-semibold text-blue-800 mb-2">PubChem Bioassay Data</h3>
-                    <div className="text-center">
-                      <p className="text-xl font-bold text-blue-700">
-                        {previewData.pubchem_info.n_compounds?.toLocaleString()}
-                      </p>
-                      <p className="text-sm text-blue-600">Active compounds</p>
-                    </div>
-                    {previewData.pubchem_info.gene_name && (
-                      <p className="text-sm text-blue-600 mt-2">
-                        Gene: {previewData.pubchem_info.gene_name}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+              {/* Functional Residues Editor — below pockets */}
+              <FunctionalResiduesEditor
+                residues={functionalResidues}
+                onChange={setFunctionalResidues}
+                pockets={pocketsForStructure}
+                selectedPocketIdx={selectedPocketIdx}
+                onSelectResidue={(r) => setHighlightedResidue(r)}
+                selectedResidueNum={highlightedResidue?.number || null}
+                seqValue={uniprotInfo?.seqValue || ''}
+              />
 
             </div>
           </div>

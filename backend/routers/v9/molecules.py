@@ -119,9 +119,17 @@ SORT_FIELD_MAP = {
     "selectivity_score": ("off_target", ["selectivity_score"]),
     "off_target_hits": ("off_target", ["off_target_hits"]),
     "selectivity_ratio": ("off_target", ["selectivity_ratio"]),
-    # --- enrichment ---
-    "interactions_count": ("enrichment", ["interactions_count"]),
-    "scaffold": ("enrichment", ["scaffold"]),
+    # --- interactions ---
+    "n_interactions": ("interactions", ["n_interactions"]),
+    "functional_contacts": ("interactions", ["functional_contacts"]),
+    "interaction_quality": ("interactions", ["interaction_quality"]),
+    "key_hbonds": ("interactions", ["key_hbonds"]),
+    # --- scaffold ---
+    "scaffold_smiles": ("scaffold", ["scaffold_smiles"]),
+    "n_modifiable_positions": ("scaffold", ["n_modifiable_positions"]),
+    "brics_bond_count": ("scaffold", ["brics_bond_count"]),
+    "scaffold_n_rings": ("scaffold", ["scaffold_n_rings"]),
+    "scaffold_mw": ("scaffold", ["scaffold_mw"]),
     # --- retrosynthesis ---
     "n_synth_steps": ("retrosynthesis", ["n_synth_steps"]),
     "synth_confidence": ("retrosynthesis", ["synth_confidence"]),

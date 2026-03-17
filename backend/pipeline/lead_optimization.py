@@ -327,14 +327,21 @@ def run_optimization(
             start_affinity = start_dock["affinity"]
             start_dock_meta = start_dock
         else:
-            start_affinity = _mock_dock(starting_smiles, pocket_center, rng)
-            start_dock_meta = {"docking_engine": "mock"}
+            raise RuntimeError(
+                f"Real docking failed for starting molecule {starting_smiles[:60]}. "
+                "Cannot proceed with lead optimization without docking scores."
+            )
         admet_batch = _real_admet_batch([starting_smiles])
-        start_admet = admet_batch.get(starting_smiles, _mock_admet_simple(starting_smiles, rng))
+        if starting_smiles not in admet_batch:
+            raise RuntimeError(
+                f"ADMET prediction failed for starting molecule {starting_smiles[:60]}."
+            )
+        start_admet = admet_batch[starting_smiles]
     else:
-        start_affinity = _mock_dock(starting_smiles, pocket_center, rng)
-        start_admet = _mock_admet_simple(starting_smiles, rng)
-        start_dock_meta = {"docking_engine": "mock"}
+        raise RuntimeError(
+            "Lead optimization requires real docking infrastructure. "
+            "Configure a docking engine (Vina/smina/GNINA) to enable this feature."
+        )
 
     start_score = _multi_objective_score(start_affinity, start_admet, w)
 
@@ -931,76 +938,22 @@ def _mock_dock(
     pocket_center: list[float],
     rng: random.Random,
 ) -> float:
-    """Compute a deterministic mock docking affinity.
-
-    Parameters
-    ----------
-    smiles : str
-        Molecule SMILES.
-    pocket_center : list[float]
-        [x, y, z] pocket center coordinates.
-    rng : random.Random
-        RNG (used for slight noise, but main score is hash-based).
-
-    Returns
-    -------
-    float
-        Mock affinity in kcal/mol (negative = better).
-    """
-    key = f"optdock:{smiles}:{pocket_center[0]:.1f}"
-    digest = hashlib.sha256(key.encode()).hexdigest()
-    hash_int = int(digest[:10], 16)
-    # Range: [-11.0, -5.0]
-    affinity = -5.0 - (hash_int % 6001) / 1000.0
-    return round(affinity, 2)
+    """Mock docking — removed. Requires real docking engine."""
+    raise RuntimeError(
+        f"Mock docking is not available for {smiles[:60]}. "
+        "Configure a real docking engine (Vina/smina/GNINA)."
+    )
 
 
 def _mock_admet_simple(
     smiles: str,
     rng: random.Random,
 ) -> dict:
-    """Compute simplified mock ADMET properties.
-
-    Returns a dict with scores in [0, 1] for key ADMET endpoints.
-
-    Parameters
-    ----------
-    smiles : str
-        Molecule SMILES.
-    rng : random.Random
-        RNG for reproducibility.
-
-    Returns
-    -------
-    dict
-        Keys: toxicity_score, bioavailability_score, synthesis_score,
-        herg_risk, hepatotoxicity_risk, composite_score.
-    """
-    h = hashlib.sha256(f"optadmet:{smiles}".encode()).hexdigest()
-
-    def _hval(offset: int) -> float:
-        seg = h[(offset * 3) % len(h):(offset * 3 + 4) % len(h)]
-        if not seg:
-            seg = h[:4]
-        return int(seg, 16) / 0xFFFF
-
-    toxicity = round(1.0 - _hval(0) * 0.6, 3)  # Higher = safer (less toxic)
-    bioavail = round(0.3 + _hval(1) * 0.5, 3)   # Higher = better
-    synthesis = round(0.4 + _hval(2) * 0.5, 3)   # Higher = easier to synthesize
-    herg = round(_hval(3) * 0.4, 3)               # Lower = safer
-    hepatotox = round(_hval(4) * 0.3, 3)          # Lower = safer
-    composite = round(
-        0.4 * toxicity + 0.3 * bioavail + 0.3 * synthesis, 3,
+    """Mock ADMET — removed. Requires real ADMET prediction."""
+    raise RuntimeError(
+        f"Mock ADMET prediction is not available for {smiles[:60]}. "
+        "Install ADMET-AI or use RDKit-based estimation."
     )
-
-    return {
-        "toxicity_score": toxicity,
-        "bioavailability_score": bioavail,
-        "synthesis_score": synthesis,
-        "herg_risk": herg,
-        "hepatotoxicity_risk": hepatotox,
-        "composite_score": composite,
-    }
 
 
 def _multi_objective_score(

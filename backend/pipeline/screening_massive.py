@@ -140,9 +140,11 @@ def load_chembl_smiles(max_count: int = 0) -> list[str]:
     if check_chembl_dump_available():
         return _load_chembl_from_file(max_count)
 
-    # Fallback: generate a mock set from the hardcoded list
-    logger.info("Generating mock ChEMBL set from %d seed molecules", len(_MOCK_DRUGLIKE_SMILES))
-    return _generate_mock_chembl(max_count)
+    # No fallback — real ChEMBL dump required
+    raise RuntimeError(
+        "ChEMBL dump file not found. Download and place the ChEMBL SMILES dump "
+        "in the expected location to enable massive screening."
+    )
 
 
 def _load_chembl_from_file(max_count: int) -> list[str]:
@@ -193,61 +195,18 @@ def _load_chembl_from_file(max_count: int) -> list[str]:
         return smiles_list
 
     except Exception as exc:
-        logger.error("Failed to load ChEMBL dump: %s", exc)
-        logger.info("Falling back to mock molecule set")
-        return _generate_mock_chembl(max_count)
+        raise RuntimeError(
+            f"Failed to load ChEMBL dump: {exc}. "
+            "Ensure the ChEMBL SMILES dump file is valid and accessible."
+        ) from exc
 
 
 def _generate_mock_chembl(max_count: int) -> list[str]:
-    """Generate a mock molecule set by mutating seed molecules.
-
-    Creates ~10000 molecules (or max_count if specified) by:
-      1. Starting with the ~50 hardcoded drug-like SMILES.
-      2. If RDKit is available, applying simple mutations (halogen swaps,
-         functional group additions) to expand the set.
-      3. If RDKit is not available, repeating and hashing the seed set
-         to generate unique identifiers.
-
-    Parameters
-    ----------
-    max_count : int
-        Target number of molecules. 0 defaults to 10000.
-
-    Returns
-    -------
-    list[str]
-        Mock SMILES list for screening.
-    """
-    target_count = max_count if max_count > 0 else 10000
-    seeds = list(_MOCK_DRUGLIKE_SMILES)
-
-    # If we already have enough seeds, return a subset
-    if len(seeds) >= target_count:
-        return seeds[:target_count]
-
-    # Try RDKit-based expansion
-    expanded = _expand_with_rdkit(seeds, target_count)
-    if expanded is not None and len(expanded) >= target_count:
-        logger.info("Generated %d mock molecules via RDKit expansion", len(expanded))
-        return expanded[:target_count]
-
-    # Fallback: repeat seeds with index-based uniqueness
-    # (same SMILES but differentiated by position for mock purposes)
-    result: list[str] = list(seeds)
-    rng = random.Random(42)  # deterministic
-
-    while len(result) < target_count:
-        # Cycle through seeds
-        base_smi = seeds[len(result) % len(seeds)]
-        # Add a small variation tag (won't parse as real SMILES in mock mode)
-        # For the mock, we just repeat the seeds -- downstream mock filters
-        # use hash-based selection so different positions get different results
-        result.append(base_smi)
-
-    logger.info(
-        "Generated %d mock molecules via seed repetition", len(result)
+    """Mock ChEMBL generation — removed. Use real ChEMBL dump."""
+    raise RuntimeError(
+        "Mock ChEMBL generation is not available. "
+        "Download the ChEMBL SMILES dump to enable massive screening."
     )
-    return result[:target_count]
 
 
 def _expand_with_rdkit(

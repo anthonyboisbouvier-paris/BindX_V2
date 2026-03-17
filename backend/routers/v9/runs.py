@@ -30,10 +30,12 @@ router = APIRouter()
 
 VALID_RUN_TYPES = {"import", "calculation", "generation"}
 VALID_CALCULATION_TYPES = {
-    "docking", "adme", "toxicity", "scoring", "enrichment", "clustering",
+    "docking", "adme", "toxicity", "scoring", "clustering",
     "off_target", "confidence", "retrosynthesis",
     "pharmacophore", "activity_cliffs",
     "composite",   # weighted multi-criteria score (meta-analysis)
+    "interactions",  # protein-ligand interactions (ProLIF/RDKit)
+    "scaffold",      # Murcko scaffold + BRICS + R-groups
     "admet",  # legacy alias → runs adme + toxicity together
 }
 
@@ -98,6 +100,32 @@ async def create_run(
                 status_code=400,
                 detail="Receptor not prepared. Go to Target Setup and click 'Prepare Receptor' before running docking.",
             )
+
+    # Validate interactions require a completed docking run
+    if body.type == "calculation" and "interactions" in (body.calculation_types or []):
+        stmt_docking = (
+            select(RunORM_V9)
+            .where(
+                RunORM_V9.phase_id == phase_id,
+                RunORM_V9.type == "calculation",
+                RunORM_V9.status == "completed",
+                RunORM_V9.calculation_types.contains(["docking"]),
+            )
+            .limit(1)
+        )
+        result = await db.execute(stmt_docking)
+        if not result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="Interactions require a completed docking run. Run docking first.",
+            )
+
+    # Block off_target — not yet available (requires real anti-target docking)
+    if body.type == "calculation" and "off_target" in (body.calculation_types or []):
+        raise HTTPException(
+            status_code=400,
+            detail="Off-target screening is not yet available. This feature requires real docking infrastructure with anti-target structures.",
+        )
 
     # Validate import has data
     if body.type == "import":

@@ -372,6 +372,16 @@ async def _get_docking_context(phase_id):
             if pdb_candidate.exists() and pdb_candidate.stat().st_size > 100:
                 prepared_pdb = pdb_candidate
 
+        # Resolve UniProt ID from input type or target_preview
+        uniprot_id = ""
+        if project.target_input_type == "uniprot" and project.target_input_value:
+            uniprot_id = project.target_input_value
+        elif tp.get("uniprot", {}).get("uniprotId"):
+            uniprot_id = tp["uniprot"]["uniprotId"]
+
+        # Functional residues from target_preview (user-defined + auto-detected)
+        functional_residues = tp.get("functional_residues", None)
+
         return {
             "pdb_url": pdb_url,
             "pocket_center": pocket_center,
@@ -380,6 +390,8 @@ async def _get_docking_context(phase_id):
             "structure_source": project.structure_source,
             "prepared_pdbqt": prepared_pdbqt,
             "prepared_pdb": prepared_pdb,
+            "uniprot_id": uniprot_id,
+            "functional_residues": functional_residues,
         }
 
 
@@ -1227,18 +1239,28 @@ def _expand_included(included: set | None) -> set | None:
     return expanded
 
 
+_ALWAYS_KEEP = {
+    "interactions_method", "interactions_detail", "mapped_functional",
+    "pose_molblock", "method", "summary",
+}
+
+
 def _filter_cols(props: dict, included: set | None) -> dict:
     """Filter a properties dict keeping only keys whose frontend column is included.
 
     Handles nested dicts (e.g. ADMET absorption/distribution/toxicity sub-dicts)
     by recursively filtering. Pass-through if included is None.
+    Keys in _ALWAYS_KEEP are never filtered out (metadata fields).
     """
     if included is None:
         return props
     result = {}
     for k, v in props.items():
+        # Always keep metadata keys
+        if k in _ALWAYS_KEEP:
+            result[k] = v
         # Check if this key (or its frontend alias) is in the included set
-        if k in included or _BACKEND_TO_FRONTEND.get(k) in included:
+        elif k in included or _BACKEND_TO_FRONTEND.get(k) in included:
             result[k] = v
         elif isinstance(v, dict) and k not in included:
             # Recurse into nested dicts (e.g. admet.absorption, admet.toxicity)
@@ -1605,34 +1627,111 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     except Exception:
                         pass
 
-            elif calc_type == "enrichment":
-                # Enrichment needs docking results — load existing properties from DB
+            elif calc_type == "interactions":
+                import tempfile as _tmpfile
+                from pipeline.interaction_analysis import analyze_interactions
+
+                # Get protein path from project (same navigation as docking)
+                phase_id = molecules[0]["phase_id"] if molecules else None
+                docking_ctx = _db_sync(_get_docking_context(phase_id)) if phase_id else None
+                protein_path = None
+                if docking_ctx:
+                    pp = docking_ctx.get("prepared_pdb") or docking_ctx.get("prepared_pdbqt")
+                    if pp:
+                        protein_path = str(pp)
+
+                # Load existing docking poses from DB
                 existing_props = _db_sync(_get_existing_properties(mol_ids))
-                mol_dicts = []
-                for m in molecules:
-                    d = {"smiles": m["smiles"], "name": m["name"], "_id": m["id"]}
-                    props = existing_props.get(m["id"], {})
-                    for prop_key in ("affinity", "vina_score", "cnn_score", "cnn_affinity",
-                                     "composite_score", "qed", "logP", "source"):
-                        if props.get(prop_key) is not None:
-                            d[prop_key] = props[prop_key]
-                    mol_dicts.append(d)
-                try:
-                    from pipeline.enrich import enrich_results
-                    scored, eliminated, summary = enrich_results(mol_dicts)
-                    # Match results by SMILES to avoid misalignment from eliminated molecules
-                    scored_by_smi = {s.get("smiles") or s.get("name"): s for s in scored}
-                    enrich_entries = []
-                    for mol in molecules:
-                        enrichment = scored_by_smi.get(mol["smiles"]) or scored_by_smi.get(mol["name"])
-                        if enrichment:
-                            enrich_entries.append((mol["id"], run_uuid, "enrichment", _filter_cols(enrichment, _inc)))
-                    _db_sync(_store_properties_batch(enrich_entries))
-                    _write_log(run_id, "info", f"Enrichment complete: {len(scored)} enriched, {len(eliminated)} eliminated")
-                    results["enrichment"] = f"{len(scored)} molecules enriched ({len(eliminated)} eliminated)"
-                except Exception as e:
-                    logger.warning("Enrichment failed: %s", e)
-                    results["enrichment"] = f"failed: {e}"
+
+                inter_entries = []
+                skipped = 0
+                for mol in molecules:
+                    props = existing_props.get(mol["id"], {})
+                    pose_molblock = props.get("pose_molblock")
+
+                    if not pose_molblock:
+                        logger.info("Skipping %s — no docked pose available", mol["smiles"][:40])
+                        skipped += 1
+                        continue
+
+                    # Write pose to temp file
+                    ligand_path = None
+                    if pose_molblock:
+                        tmp = _tmpfile.NamedTemporaryFile(suffix=".sdf", delete=False, mode="w")
+                        tmp.write(pose_molblock)
+                        tmp.close()
+                        ligand_path = tmp.name
+
+                    try:
+                        _uniprot_id = docking_ctx.get("uniprot_id", "") if docking_ctx else ""
+                        _func_residues = docking_ctx.get("functional_residues") if docking_ctx else None
+
+                        # Apply excluded_residues from run config
+                        _excluded = _run_config.get("excluded_residues", [])
+                        if _excluded and _func_residues and _func_residues.get("residues"):
+                            _func_residues = dict(_func_residues)
+                            _func_residues["residues"] = [
+                                r for r in _func_residues["residues"]
+                                if (r["number"] if isinstance(r, dict) else r) not in _excluded
+                            ]
+                            if _func_residues.get("key_hbond_residues"):
+                                _func_residues["key_hbond_residues"] = [
+                                    n for n in _func_residues["key_hbond_residues"] if n not in _excluded
+                                ]
+
+                        result = analyze_interactions(
+                            protein_path=protein_path or "",
+                            ligand_path=ligand_path or "",
+                            uniprot_id=_uniprot_id,
+                            smiles=mol["smiles"],
+                            functional_residues=_func_residues,
+                        )
+                        _inters = result.get("interactions", [])
+                        inter_data = {
+                            "n_interactions": len({i.get("residue_number") for i in _inters}),
+                            "functional_contacts": result.get("functional_contacts", 0),
+                            "total_functional": result.get("total_functional", 0),
+                            "interaction_quality": result.get("interaction_quality"),
+                            "key_hbonds": result.get("key_hbonds", 0),
+                            "interactions_method": result.get("method", "unknown"),
+                            "interactions_detail": result.get("interactions", []),
+                            "mapped_functional": result.get("mapped_functional", []),
+                        }
+                        inter_entries.append((mol["id"], run_uuid, "interactions", _filter_cols(inter_data, _inc)))
+                    except Exception as e:
+                        logger.warning("Interactions failed for %s: %s", mol["smiles"], e)
+                    finally:
+                        if ligand_path:
+                            Path(ligand_path).unlink(missing_ok=True)
+
+                _db_sync(_store_properties_batch(inter_entries))
+                _write_log(run_id, "info", f"Interactions analysis complete: {len(inter_entries)}/{len(molecules)} molecules ({skipped} skipped — no pose)")
+                results["interactions"] = f"{len(inter_entries)} molecules analyzed"
+
+            elif calc_type == "scaffold":
+                from pipeline.scaffold_analysis import analyze_scaffold
+
+                scaffold_entries = []
+                for mol in molecules:
+                    try:
+                        result = analyze_scaffold(mol["smiles"])
+                        stats = result.get("stats", {})
+                        scaffold_data = {
+                            "scaffold_smiles": result.get("scaffold_smiles"),
+                            "n_modifiable_positions": stats.get("n_positions", 0),
+                            "brics_bond_count": stats.get("n_brics_bonds", 0),
+                            "scaffold_n_rings": stats.get("n_rings", 0),
+                            "scaffold_mw": stats.get("scaffold_mw"),
+                            "scaffold_positions": result.get("positions", []),
+                            "scaffold_svg": result.get("annotated_svg", ""),
+                        }
+                        scaffold_entries.append((mol["id"], run_uuid, "scaffold", _filter_cols(scaffold_data, _inc)))
+                    except Exception as e:
+                        logger.warning("Scaffold analysis failed for %s: %s", mol["smiles"], e)
+
+                _db_sync(_store_properties_batch(scaffold_entries))
+                _write_log(run_id, "info", f"Scaffold analysis complete: {len(scaffold_entries)}/{len(molecules)} molecules")
+                results["scaffold"] = f"{len(scaffold_entries)} molecules analyzed"
 
             elif calc_type == "clustering":
                 from pipeline.scoring import cluster_results

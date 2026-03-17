@@ -201,17 +201,11 @@ def filter_pharmacological(
                 exc,
             )
 
-    # --- Strategy 3: Hash-based mock (~10% pass rate) ---
-    result = _filter_mock(smiles_list, progress_callback)
-    elapsed = time.monotonic() - start_time
-    logger.info(
-        "filter_pharmacological (mock): %d -> %d molecules "
-        "(%.1f%% pass rate) in %.1fs",
-        total, len(result),
-        len(result) / max(total, 1) * 100,
-        elapsed,
+    # --- No fallback — real filtering required ---
+    raise RuntimeError(
+        "Pharmacological filtering requires RDKit. "
+        "Install rdkit-pypi to enable molecule filtering."
     )
-    return result
 
 
 # =========================================================================
@@ -495,69 +489,10 @@ def _filter_mock(
     smiles_list: list[str],
     progress_callback: Optional[Callable[[dict], None]],
 ) -> list[str]:
-    """Deterministic hash-based mock filter.
-
-    Keeps approximately 10% of input molecules using a hash of the
-    SMILES string. The same molecule always produces the same pass/fail
-    decision, ensuring reproducibility.
-
-    Parameters
-    ----------
-    smiles_list : list[str]
-        Input SMILES.
-    progress_callback : callable, optional
-        Progress reporting callback.
-
-    Returns
-    -------
-    list[str]
-        Approximately 10% of input SMILES, deterministically selected.
-    """
-    logger.info(
-        "filter_pharmacological mock: processing %d molecules "
-        "(deterministic ~10%% pass rate)",
-        len(smiles_list),
+    """Mock filter — removed. Requires RDKit."""
+    raise RuntimeError(
+        "Mock pharmacological filter is not available. Install rdkit-pypi."
     )
-
-    passed: list[str] = []
-    batch_size = 10000
-    total = len(smiles_list)
-
-    for batch_start in range(0, total, batch_size):
-        batch_end = min(batch_start + batch_size, total)
-        batch = smiles_list[batch_start:batch_end]
-
-        for smi in batch:
-            if not smi or not smi.strip():
-                continue
-
-            smi = smi.strip()
-
-            # Deterministic hash-based decision
-            digest = hashlib.sha256(smi.encode("utf-8")).hexdigest()
-            hash_val = int(digest[:8], 16)
-
-            # Keep ~10% (hash modulo 10 == 0)
-            if hash_val % 10 == 0:
-                passed.append(smi)
-
-        if progress_callback is not None:
-            try:
-                progress_callback({
-                    "pass_name": "pharmacological_filter_mock",
-                    "processed": batch_end,
-                    "total": total,
-                    "kept": len(passed),
-                })
-            except Exception:
-                pass
-
-    logger.info(
-        "Mock pharma filter: %d -> %d (%.1f%%)",
-        total, len(passed),
-        len(passed) / max(total, 1) * 100,
-    )
-    return passed
 
 
 # =========================================================================

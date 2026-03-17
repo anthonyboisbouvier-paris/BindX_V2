@@ -47,7 +47,7 @@ export default function ViewerDiagnostic({ pdbUrl, selectedPocket, uniprotFeatur
       </div>
 
       {/* Scrollable content */}
-      <div className="px-4 py-3 space-y-3 text-sm text-gray-500 leading-relaxed overflow-y-auto" style={{ maxHeight: 360 }}>
+      <div className="px-4 py-3 space-y-3 text-sm text-gray-500 leading-relaxed overflow-y-auto" style={{ maxHeight: 216 }}>
 
         {/* ── Warnings (top, prominent) ── */}
         {hasWarnings && (

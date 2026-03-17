@@ -162,8 +162,11 @@ def score_rapid_single(
                 "source": "vina_rapid",
             }
 
-    # Mock fallback
-    return _mock_score_single(smiles, name, center)
+    # No fallback — real scoring required
+    raise RuntimeError(
+        f"Rapid scoring failed for {name}: no scoring engine available. "
+        "Install Vina/smina or configure a scoring service."
+    )
 
 
 def _run_smina(
@@ -546,8 +549,9 @@ def score_rapid_batch(
             work_dir, n_cpus, progress_callback,
         )
     else:
-        results = _batch_mock_scoring(
-            smiles_list, center, progress_callback,
+        raise RuntimeError(
+            "No scoring engine available (smina/vina not found). "
+            "Install smina or AutoDock Vina to enable rapid scoring."
         )
 
     # Sort by affinity (most negative = best)
@@ -668,64 +672,11 @@ def _batch_mock_scoring(
     center: tuple[float, float, float],
     progress_callback: Optional[Callable[[dict], None]],
 ) -> list[dict]:
-    """Score molecules using hash-based mock when no docking tools exist.
-
-    Parameters
-    ----------
-    smiles_list : list[str]
-        SMILES to score.
-    center : tuple
-        Pocket centre (used for hash salting).
-    progress_callback : callable, optional
-        Progress callback.
-
-    Returns
-    -------
-    list[dict]
-        Mock-scored molecules.
-    """
-    logger.info(
-        "score_rapid_batch: using mock scoring for %d molecules",
-        len(smiles_list),
+    """Batch mock scoring — removed. Requires real scoring engine."""
+    raise RuntimeError(
+        "Batch mock scoring is not available. "
+        "Install smina or AutoDock Vina to enable rapid scoring."
     )
-
-    results: list[dict] = []
-    total = len(smiles_list)
-
-    for i, smi in enumerate(smiles_list):
-        if not smi or not smi.strip():
-            continue
-
-        smi = smi.strip()
-        result = _mock_score_single(smi, f"RAPID_{i:06d}", center)
-        if result is not None:
-            results.append(result)
-
-        # Progress report every 1000 molecules
-        if progress_callback is not None and (i + 1) % 1000 == 0:
-            try:
-                progress_callback({
-                    "pass_name": "rapid_scoring_mock",
-                    "processed": i + 1,
-                    "total": total,
-                    "kept": len(results),
-                })
-            except Exception:
-                pass
-
-    # Final progress
-    if progress_callback is not None:
-        try:
-            progress_callback({
-                "pass_name": "rapid_scoring_mock",
-                "processed": total,
-                "total": total,
-                "kept": len(results),
-            })
-        except Exception:
-            pass
-
-    return results
 
 
 # ---------------------------------------------------------------------------
@@ -737,53 +688,11 @@ def _mock_score_single(
     name: str,
     center: tuple[float, float, float],
 ) -> Optional[dict]:
-    """Generate a deterministic mock score for a single molecule.
-
-    Uses a hash of the SMILES and pocket centre to produce a
-    reproducible affinity in the range [-12.0, -4.0] kcal/mol.
-    Molecules with common kinase-inhibitor pharmacophore features
-    get a small bonus (more negative = better).
-
-    Parameters
-    ----------
-    smiles : str
-        SMILES string.
-    name : str
-        Molecule name.
-    center : tuple
-        Pocket centre (used for salting).
-
-    Returns
-    -------
-    dict or None
-        Mock scoring result, or None if SMILES is empty.
-    """
-    if not smiles:
-        return None
-
-    # Deterministic hash
-    key = f"rapid:{smiles}:{center[0]:.2f}:{center[1]:.2f}:{center[2]:.2f}"
-    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
-    hash_int = int(digest[:12], 16)
-
-    # Map to [-12.0, -4.0]
-    base = -4.0 - (hash_int % 8001) / 1000.0
-
-    # Pharmacophore bonus for kinase-inhibitor-like features
-    bonus = 0.0
-    ki_features = ["ncnc", "Nc1", "c1ccc", "C(=O)N", "c2cc", "OCCOC"]
-    for feat in ki_features:
-        if feat.lower() in smiles.lower():
-            bonus -= 0.12
-
-    affinity = max(-12.0, min(-4.0, base + bonus))
-
-    return {
-        "name": name,
-        "smiles": smiles,
-        "affinity": round(affinity, 2),
-        "source": "mock_rapid",
-    }
+    """Mock scoring — removed. Requires real scoring engine."""
+    raise RuntimeError(
+        f"Mock scoring is not available for {name}. "
+        "Install smina or AutoDock Vina."
+    )
 
 
 # =========================================================================
