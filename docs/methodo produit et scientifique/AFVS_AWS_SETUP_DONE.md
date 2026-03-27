@@ -142,45 +142,49 @@ AFVS_VENV_PATH=/home/ubuntu/afvs_env
 
 ---
 
-## 5. Ce qui reste à faire
+## 5. Infrastructure déployée (2026-03-26)
 
-### Infrastructure (pas encore fait)
+### CloudFormation Stacks
 
-1. **AWS Batch** — Non configuré. Nécessaire pour lancer les jobs de docking :
-   - Créer un Compute Environment (Spot instances recommandées)
-   - Créer une Job Queue
-   - Créer une Job Definition pointant vers l'image Docker AFVS
-   - Le script `afvs_build_docker.sh` attend un repo ECR configuré
+| Stack | Statut | Ressources |
+|-------|--------|------------|
+| `af-vpc` | CREATE_COMPLETE | VPC, subnets, NAT gateway, Internet gateway |
+| `af` | CREATE_COMPLETE | 3 CE (Spot), Job Queue, 2 Job Definitions, 2 ECR repos |
 
-2. **ECR (Elastic Container Registry)** — Non créé. Nécessaire pour stocker l'image Docker AFVS utilisée par AWS Batch
+### AWS Batch
 
-3. **Build Docker AFVS** — Le script `tools/afvs_build_docker.sh` existe mais échoue car :
-   - Pas de repo ECR créé
-   - Nécessite un fichier `workflow/config.json` avec le nom du repo ECR
+| Ressource | Nom | Détails |
+|-----------|-----|---------|
+| Compute Env 1 | `af-CE1` | Spot, c5 instances, max 16 vCPUs |
+| Compute Env 2 | `af-CE2` | Spot, c5 instances, max 16 vCPUs |
+| Compute Env 3 | `af-CE3` | Spot, c5 instances, max 16 vCPUs |
+| Job Queue | `af-queue1` | Priority 1, linked to CE1/CE2/CE3 |
+| Job Definition | `af-jobdef-afvs` | Image ECR af-afvs-ecr:latest, timeout 7200s |
+| Job Definition | `af-jobdef-aflp` | Image ECR af-aflp-ecr:latest (unused for now) |
 
-4. **Accès librairie REAL Space** — Demande à faire sur virtual-flow.org avec l'Account ID `890004513839`
+### ECR
 
-5. **Test manuel** — Lancer Tutorial 1 d'AdaptiveFlow (1 work unit) pour valider le pipeline et calibrer les coûts
+| Repo | URI |
+|------|-----|
+| `af-afvs-ecr` | `890004513839.dkr.ecr.us-east-1.amazonaws.com/af-afvs-ecr:latest` |
+| `af-aflp-ecr` | `890004513839.dkr.ecr.us-east-1.amazonaws.com/af-aflp-ecr` (empty) |
 
-### Développement backend (BLOC 4-7 de la spec)
+Image Docker buildée et pushée (sha256:cf60d0594fd0...). Contient : smina, qvina02, gwovina, vina, idock, etc.
 
-1. **BLOC 4 — Base de données** :
-   - Créer la table `afvs_jobs` (migration Supabase)
-   - Ajouter `'afvs'` au type constraint des runs dans `models_v9.py` (ligne avec `('import', 'calculation', 'generation')`)
-   - Migration SQL : ajouter `'afvs'` dans le CHECK constraint de `v9_schema.sql` ligne 61
+### Développement BindX (DONE)
 
-2. **BLOC 5 — Backend** :
-   - Créer `backend/pipeline/afvs_controller.py` — classe AFVSController (SSH via paramiko)
-   - Créer les tâches Celery AFVS dans `backend/tasks_v9.py`
-   - Ajouter 3 endpoints API : POST launch, GET status, GET results
+| Bloc | Statut | Détails |
+|------|--------|---------|
+| BLOC 4 — DB | DONE | Table `afvs_jobs`, ORM `AFVSJobORM_V9`, migration appliquée |
+| BLOC 5 — Backend | DONE | `pipeline/afvs.py` (AFVSController SSH), `routers/v9/afvs.py` (3 endpoints), `tasks_v9.py` (_run_afvs) |
+| BLOC 6 — Frontend | DONE | `AFVSConfigForm.jsx`, RunCreator integration, PhaseDashboard wiring |
+| BLOC 7 — Config | DONE | Docker env vars, SSH key mount, `.env` variables |
 
-3. **BLOC 6 — Frontend** :
-   - Composant RunConfigAFVS (formulaire de lancement)
-   - Intégration dans le PhaseDashboard
+## 5b. Ce qui reste
 
-4. **BLOC 7 — Configuration** :
-   - Variables d'env (voir section 4 ci-dessus)
-   - Tests unitaires
+1. **Accès librairie REAL Space** — Demande à faire sur virtual-flow.org avec Account ID `890004513839`
+   - Sans cet accès, le bucket S3 data (`AFVS_S3_DATA_BUCKET`) est vide → les jobs n'ont pas de ligands à docker
+2. **Test E2E** — Lancer 1 workunit de test après obtention REAL Space
 
 ---
 
