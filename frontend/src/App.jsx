@@ -20,6 +20,9 @@ const PhaseDashboard = lazy(() => import('./pages/PhaseDashboard/index.jsx'))
 const TargetSetup = lazy(() => import('./pages/TargetSetup.jsx'))
 const MethodologyPage = lazy(() => import('./components/MethodologyPage.jsx'))
 const SurfaceTest = lazy(() => import('./pages/SurfaceTest.jsx'))
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage.jsx'))
+const ComparisonPage = lazy(() => import('./pages/ComparisonPage.jsx'))
+const ActivityExplorerPage = lazy(() => import('./pages/ActivityExplorerPage.jsx'))
 
 // --------------------------------------------------
 // ProtectedRoute — redirects to /login if not authenticated
@@ -84,6 +87,24 @@ export default function App() {
           <Route
             path="/project/:projectId/phase/:phaseId"
             element={<PhaseDashboard />}
+          />
+
+          {/* Analytics page */}
+          <Route
+            path="/project/:projectId/phase/:phaseId/analytics"
+            element={<AnalyticsPage />}
+          />
+
+          {/* Comparison page */}
+          <Route
+            path="/project/:projectId/phase/:phaseId/compare"
+            element={<ComparisonPage />}
+          />
+
+          {/* Activity Explorer */}
+          <Route
+            path="/project/:projectId/phase/:phaseId/activity"
+            element={<ActivityExplorerPage />}
           />
 
           {/* Static reference pages */}

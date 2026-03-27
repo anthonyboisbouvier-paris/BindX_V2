@@ -28,11 +28,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-VALID_RUN_TYPES = {"import", "calculation", "generation"}
+VALID_RUN_TYPES = {"import", "calculation", "generation", "afvs"}
 VALID_CALCULATION_TYPES = {
     "docking", "adme", "toxicity", "scoring", "clustering",
     "off_target", "confidence", "retrosynthesis",
-    "pharmacophore", "activity_cliffs",
+    "pharmacophore",
     "composite",   # weighted multi-criteria score (meta-analysis)
     "interactions",  # protein-ligand interactions (ProLIF/RDKit)
     "scaffold",      # Murcko scaffold + BRICS + R-groups

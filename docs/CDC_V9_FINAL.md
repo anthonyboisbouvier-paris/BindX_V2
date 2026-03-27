@@ -135,7 +135,7 @@ L'utilisateur sélectionne un ou plusieurs types de calcul dans un seul run via 
 | Docking | Docking moléculaire | docking_score, CNNscore, CNNaffinity, poses |
 | ADMET | Propriétés ADMET complètes | logP, solubility, BBB, hERG_inhibition, metabolic_stability, oral_bioavailability, plasma_protein_binding, CYP inhibitions |
 | Scoring | Score composite pondéré | composite_score |
-| Enrichment | ProLIF interactions, clustering | interactions, interaction_count, cluster_id, scaffold |
+| Interactions | Analyse ProLIF (PLIP-standard: heavy-atom distances, VDW filtré, Origin PDB-mapped) | n_interactions (résidus uniques), functional_contacts, interaction_quality, key_hbonds, mapped_functional |
 | Clustering | Diversité, scaffolds, Tanimoto | cluster_id, scaffold_smiles, tanimoto_to_centroid |
 | Off-target | Sélectivité off-target | selectivity_score, off_target_hits, selectivity_ratio |
 | Confidence | PAINS, applicability domain, convergence | confidence_score, pains_alert, applicability_domain, confidence_flags |
@@ -220,7 +220,7 @@ Le dashboard est LE lieu de travail de l'utilisateur. Tableau enrichi progressiv
 - Drawer latéral 40%, table compressée à 60%
 - Toggle plein écran (overlay)
 - Réutilise Viewer3D existant (3Dmol.js)
-- Affiche : protéine + ligand posé + interactions ProLIF + surface pocket
+- Affiche : protéine + ligand posé + interactions ProLIF (heavy-atom distances, VDW filtré convention PLIP) + surface pocket
 - **Modes de coloration** : standard, hydrophobicité (échelle Kyte-Doolittle), B-factor, secondaire
 - **Toggles** : ligand on/off, surface on/off, interactions on/off, pocket résidus on/off, labels on/off
 - **Toutes les options de la version actuelle conservées**
@@ -395,7 +395,7 @@ CREATE TABLE phases (
 CREATE TABLE runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   phase_id UUID REFERENCES phases(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('import', 'calculation', 'generation')),
+  type TEXT NOT NULL CHECK (type IN ('import', 'calculation', 'generation', 'afvs')),
   -- Pour run calcul : liste des calculs cochés
   calculation_types TEXT[], -- ex: {'docking','admet','scoring','confidence'}
   status TEXT DEFAULT 'created' CHECK (status IN ('created', 'queued', 'running', 'completed', 'failed')),
@@ -660,6 +660,8 @@ GET /api/legacy/jobs/:id/results
 
 **Epic 6 — Polish & intégration** : legacy view, agent IA campagne, Pareto, export (CSV/SDF/PDF), audit log, tests
 
+**Epic 7 — AFVS (BDX-41)** : intégration AdaptiveFlow (VirtualFlow 2.0) pour screening ultra-large 69B molécules via AWS Batch. Spec complète : `docs/methodo produit et scientifique/AFVS_SPEC_BINDX_V9.md`. Run type `afvs`, table `afvs_jobs`, orchestration SSH EC2 → Batch Spot, budget cap, import top hits dans Phase A.
+
 ---
 
 ## 16. Exemple — EGFR Kinase
@@ -670,6 +672,7 @@ GET /api/legacy/jobs/:id/results
 **Campagne** : ATP Pocket (pocket #1, druggability 0.92)
 
 **Phase A** : import 20000 mols SDF → run calcul [docking GNINA GPU + ADMET + confidence] ~30min → run calcul [scoring] → dashboard : trier par composite_score, filtrer confidence > 0.7, bookmarker top 50 → freeze
+**Phase A (variante AFVS)** : run AFVS [69B REAL Space, stratégie Balanced, budget $200] ~6h → 10000 top hits importés avec docking_score → run calcul [ADMET + scoring] → filtrer + bookmarker → freeze
 
 **Phase B** : run génération batch sur 50 hits (3 itérations × 50 mols) → 150 nouvelles mols taguées "IA generated" avec docking+ADMET auto → Pareto (affinity vs ADMET) → 15 leads → freeze
 

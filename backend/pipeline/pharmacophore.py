@@ -1,200 +1,176 @@
 """
-BindX pipeline -- Pharmacophore feature extraction.
+BindX pipeline -- Reference ligand similarity scoring.
 
-Extracts 3D pharmacophoric features (H-bond donors/acceptors, hydrophobic
-regions, aromatic rings, charge centers) from molecule conformers using RDKit.
-Falls back to 2D feature counting when 3D conformer generation fails.
+Scores library molecules against a single reference ligand using Gobbi 2D
+pharmacophore fingerprints (Tanimoto similarity) and feature-type comparison.
+
+Main entry point:
+  - score_against_reference(smiles, ref_smiles) → dict  (called per molecule in a run)
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Feature types tracked in pharmacophore models
+FEATURE_TYPES = ["donor", "acceptor", "hydrophobic", "aromatic", "positive", "negative"]
 
-def extract_pharmacophore(smiles: str) -> dict:
-    """Extract pharmacophore features from a SMILES string.
+FEATURE_SMARTS = {
+    "donor": ["[NH]", "[NH2]", "[OH]", "[nH]"],
+    "acceptor": ["[#7;!$([nH])]", "[O;!$([OH])]", "[F]"],
+    "hydrophobic": ["[CH3]", "[CH2]", "[S;!$([S;H1])]"],
+    "aromatic": ["a1aaaa1", "a1aaaaa1"],
+    "positive": ["[NH3+]", "[NH2+]", "[nH+]", "[#7;+]"],
+    "negative": ["[O-]", "[S-]", "C(=O)[O-]", "S(=O)(=O)[O-]"],
+}
+
+# Priority order for SVG coloring: most specific features first so they
+# take visual precedence when an atom participates in multiple types.
+_SVG_PRIORITY = ["positive", "negative", "donor", "acceptor", "aromatic", "hydrophobic"]
+
+
+def _get_gobbi_fingerprint(mol):
+    """Generate Gobbi 2D pharmacophore fingerprint for an RDKit mol object."""
+    from rdkit.Chem.Pharm2D import Gobbi_Pharm2D, Generate
+    factory = Gobbi_Pharm2D.factory
+    fp = Generate.Gen2DFingerprint(mol, factory)
+    return fp
+
+
+def _count_features(mol) -> dict:
+    """Count pharmacophore features using RDKit's standard BaseFeatures.fdef.
+
+    Uses MolChemicalFeatureFactory (industry standard) instead of custom SMARTS.
+    Each feature = one functional group (not individual atoms).
+    """
+    from rdkit.Chem import ChemicalFeatures
+    from rdkit import RDConfig
+    import os
+
+    fdef = os.path.join(RDConfig.RDDataDir, "BaseFeatures.fdef")
+    factory = ChemicalFeatures.BuildFeatureFactory(fdef)
+    feats = factory.GetFeaturesForMol(mol)
+
+    _FAMILY_MAP = {
+        "Donor": "donor",
+        "Acceptor": "acceptor",
+        "Hydrophobe": "hydrophobic",
+        "LumpedHydrophobe": "hydrophobic",
+        "Aromatic": "aromatic",
+        "PosIonizable": "positive",
+        "NegIonizable": "negative",
+    }
+
+    counts = {ft: 0 for ft in FEATURE_TYPES}
+    for feat in feats:
+        mapped = _FAMILY_MAP.get(feat.GetFamily())
+        if mapped:
+            counts[mapped] += 1
+    return counts
+
+
+def score_against_reference(smiles: str, ref_smiles: str) -> dict:
+    """Score a molecule against a single reference ligand.
 
     Parameters
     ----------
     smiles : str
-        Input SMILES string.
+        SMILES of the molecule to score.
+    ref_smiles : str
+        SMILES of the reference ligand.
 
     Returns
     -------
     dict
-        Keys: smiles, features (list of dicts), feature_counts,
-        fingerprint (list of int), n_features.
+        Keys: pharmacophore_fit (0-1), feature_counts, ref_feature_counts,
+        matched_types (list), missing_types (list).
     """
+    from rdkit import Chem, DataStructs
+    from rdkit.DataStructs import ExplicitBitVect
+
+    mol = Chem.MolFromSmiles(smiles)
+    ref_mol = Chem.MolFromSmiles(ref_smiles)
+
+    if mol is None or ref_mol is None:
+        return {
+            "pharmacophore_fit": 0.0,
+            "feature_counts": {},
+            "ref_feature_counts": {},
+            "matched_types": [],
+            "missing_types": list(FEATURE_TYPES),
+        }
+
     try:
-        from rdkit import Chem
-        return _extract_rdkit(smiles)
-    except ImportError:
-        logger.warning("RDKit not available; returning empty pharmacophore")
-        return _fallback(smiles)
+        mol_fp = _get_gobbi_fingerprint(mol)
+        ref_fp = _get_gobbi_fingerprint(ref_mol)
 
+        mol_on_bits = set(mol_fp.GetOnBits())
+        ref_on_bits = set(ref_fp.GetOnBits())
 
-def compute_pharmacophore_similarity(smiles_list: list[str]) -> dict:
-    """Compute pairwise pharmacophore similarity for a list of molecules.
+        if not mol_on_bits and not ref_on_bits:
+            pharmacophore_fit = 1.0
+        elif not mol_on_bits or not ref_on_bits:
+            pharmacophore_fit = 0.0
+        else:
+            max_bit = max(max(mol_on_bits), max(ref_on_bits)) + 1
+            bv_mol = ExplicitBitVect(max_bit)
+            for b in mol_on_bits:
+                bv_mol.SetBit(b)
+            bv_ref = ExplicitBitVect(max_bit)
+            for b in ref_on_bits:
+                bv_ref.SetBit(b)
+            pharmacophore_fit = round(DataStructs.TanimotoSimilarity(bv_mol, bv_ref), 4)
+    except Exception as e:
+        logger.warning("Pharmacophore scoring failed for %s: %s", smiles, e)
+        pharmacophore_fit = 0.0
 
-    Returns
-    -------
-    dict
-        Keys: similarity_matrix (list of lists), labels (list of str).
-    """
-    try:
-        from rdkit import Chem
-        return _similarity_rdkit(smiles_list)
-    except ImportError:
-        return {"similarity_matrix": [], "labels": smiles_list}
+    mol_features = _count_features(mol)
+    ref_features = _count_features(ref_mol)
 
+    # Feature types present in the reference
+    ref_types = [ft for ft in FEATURE_TYPES if ref_features.get(ft, 0) > 0]
+    matched_types = [ft for ft in ref_types if mol_features.get(ft, 0) > 0]
+    missing_types = [ft for ft in ref_types if mol_features.get(ft, 0) == 0]
 
-def _fallback(smiles: str) -> dict:
     return {
-        "smiles": smiles,
-        "features": [],
-        "feature_counts": {},
-        "fingerprint": [],
-        "n_features": 0,
+        "pharmacophore_fit": pharmacophore_fit,
+        "feature_counts": mol_features,
+        "ref_feature_counts": ref_features,
+        "matched_types": matched_types,
+        "missing_types": missing_types,
     }
 
 
-def _extract_rdkit(smiles: str) -> dict:
-    """Full pharmacophore extraction using RDKit."""
+# Feature type → highlight color (RGB tuples for RDKit MolDraw2DSVG)
+_FEATURE_COLORS = {
+    "donor":       (0.23, 0.51, 0.96),   # blue
+    "acceptor":    (0.94, 0.27, 0.27),   # red
+    "hydrophobic": (0.98, 0.75, 0.15),   # yellow
+    "aromatic":    (0.66, 0.33, 0.97),   # violet
+    "positive":    (0.06, 0.73, 0.51),   # green
+    "negative":    (0.98, 0.47, 0.22),   # orange
+}
+
+
+def generate_feature_map_svg(smiles: str, width: int = 400, height: int = 250) -> str:
+    """Generate a clean 2D structure SVG for a molecule using rdMolDraw2D."""
     from rdkit import Chem
-    from rdkit.Chem import AllChem, Descriptors, rdMolChemicalFeatures
+    from rdkit.Chem import AllChem
+    from rdkit.Chem.Draw import rdMolDraw2D
 
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        return _fallback(smiles)
+        raise ValueError(f"Invalid SMILES: {smiles}")
 
-    # Generate 3D conformer
-    mol_3d = Chem.AddHs(mol)
-    conf_ok = False
-    try:
-        result = AllChem.EmbedMolecule(mol_3d, AllChem.ETKDGv3())
-        if result == 0:
-            AllChem.MMFFOptimizeMolecule(mol_3d, maxIters=200)
-            conf_ok = True
-    except Exception:
-        pass
+    AllChem.Compute2DCoords(mol)
 
-    # Use built-in feature factory
-    try:
-        from rdkit.Chem.Pharm2D import Gobbi_Pharm2D, Generate
-        factory = Gobbi_Pharm2D.factory
-    except Exception:
-        factory = None
+    drawer = rdMolDraw2D.MolDraw2DSVG(width, height)
+    opts = drawer.drawOptions()
+    opts.clearBackground = True
+    opts.bondLineWidth = 1.5
 
-    features = []
-    feature_counts = {
-        "donor": 0,
-        "acceptor": 0,
-        "hydrophobic": 0,
-        "aromatic": 0,
-        "positive": 0,
-        "negative": 0,
-    }
-
-    # Extract features using SMARTS patterns
-    FEATURE_SMARTS = {
-        "donor": ["[NH]", "[NH2]", "[OH]", "[nH]"],
-        "acceptor": ["[#7;!$([nH])]", "[O;!$([OH])]", "[F]"],
-        "hydrophobic": ["[CH3]", "[CH2]", "c1ccccc1", "[S;!$([S;H1])]"],
-        "aromatic": ["a1aaaa1", "a1aaaaa1"],
-        "positive": ["[NH3+]", "[NH2+]", "[NX3;H2]", "[nH+]", "[#7;+]"],
-        "negative": ["[O-]", "[S-]", "C(=O)[O-]", "S(=O)(=O)[O-]"],
-    }
-
-    for feat_type, smarts_list in FEATURE_SMARTS.items():
-        for smarts in smarts_list:
-            pat = Chem.MolFromSmarts(smarts)
-            if pat is None:
-                continue
-            matches = mol.GetSubstructMatches(pat)
-            for match in matches:
-                center = list(match)
-                position = None
-                if conf_ok and mol_3d.GetNumConformers() > 0:
-                    conf = mol_3d.GetConformer()
-                    # Get centroid of matched atoms
-                    try:
-                        xs, ys, zs = [], [], []
-                        for idx in match:
-                            pos = conf.GetAtomPosition(idx)
-                            xs.append(pos.x)
-                            ys.append(pos.y)
-                            zs.append(pos.z)
-                        position = [
-                            round(sum(xs) / len(xs), 3),
-                            round(sum(ys) / len(ys), 3),
-                            round(sum(zs) / len(zs), 3),
-                        ]
-                    except Exception:
-                        pass
-
-                features.append({
-                    "type": feat_type,
-                    "atom_indices": list(match),
-                    "position": position,
-                    "smarts": smarts,
-                })
-                feature_counts[feat_type] = feature_counts.get(feat_type, 0) + 1
-
-    # Generate pharmacophore fingerprint
-    fingerprint = []
-    if factory:
-        try:
-            fp = Generate.Gen2DFingerprint(mol, factory)
-            fingerprint = list(fp.GetOnBits())
-        except Exception:
-            pass
-
-    return {
-        "smiles": smiles,
-        "features": features,
-        "feature_counts": feature_counts,
-        "fingerprint": fingerprint,
-        "n_features": len(features),
-    }
-
-
-def _similarity_rdkit(smiles_list: list[str]) -> dict:
-    """Compute pairwise pharmacophore fingerprint similarity."""
-    from rdkit import Chem, DataStructs
-    from rdkit.Chem.Pharm2D import Gobbi_Pharm2D, Generate
-
-    factory = Gobbi_Pharm2D.factory
-    fps = []
-    valid_smiles = []
-
-    for smi in smiles_list:
-        mol = Chem.MolFromSmiles(smi)
-        if mol is None:
-            continue
-        try:
-            fp = Generate.Gen2DFingerprint(mol, factory)
-            fps.append(fp)
-            valid_smiles.append(smi)
-        except Exception:
-            continue
-
-    n = len(fps)
-    matrix = [[0.0] * n for _ in range(n)]
-
-    for i in range(n):
-        matrix[i][i] = 1.0
-        for j in range(i + 1, n):
-            try:
-                sim = DataStructs.TanimotoSimilarity(fps[i], fps[j])
-            except Exception:
-                sim = 0.0
-            matrix[i][j] = round(sim, 4)
-            matrix[j][i] = round(sim, 4)
-
-    return {
-        "similarity_matrix": matrix,
-        "labels": valid_smiles,
-    }
+    drawer.DrawMolecule(mol)
+    drawer.FinishDrawing()
+    return drawer.GetDrawingText()

@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 from sqlalchemy import Float, case, func, literal, or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -130,15 +130,13 @@ SORT_FIELD_MAP = {
     "brics_bond_count": ("scaffold", ["brics_bond_count"]),
     "scaffold_n_rings": ("scaffold", ["scaffold_n_rings"]),
     "scaffold_mw": ("scaffold", ["scaffold_mw"]),
+    "scaffold_group": ("scaffold", ["scaffold_group"]),
+    "scaffold_group_size": ("scaffold", ["scaffold_group_size"]),
     # --- retrosynthesis ---
     "n_synth_steps": ("retrosynthesis", ["n_synth_steps"]),
     "synth_confidence": ("retrosynthesis", ["synth_confidence"]),
     "synth_cost_estimate": ("retrosynthesis", ["synth_cost_estimate"]),
     "reagents_available": ("retrosynthesis", ["reagents_available"]),
-    # --- activity_cliffs ---
-    "is_cliff": ("activity_cliffs", ["is_cliff"]),
-    "sali_max": ("activity_cliffs", ["sali_max"]),
-    "n_cliffs": ("activity_cliffs", ["n_cliffs"]),
     # --- pharmacophore ---
     "pharmacophore_features": ("pharmacophore", ["pharmacophore_features"]),
     "pharmacophore_similarity": ("pharmacophore", ["pharmacophore_similarity"]),
@@ -490,6 +488,28 @@ async def get_molecule(
     return _mol_to_response(mol)
 
 
+@router.get("/molecules/{molecule_id}/feature-map")
+async def get_feature_map(
+    molecule_id: UUID,
+    user_id: str = Depends(require_v9_user),
+    db: AsyncSession = Depends(get_v9_db),
+):
+    """Generate a 2D SVG with pharmacophore features highlighted."""
+    mol = await get_molecule_owned(molecule_id, user_id, db)
+    smiles = mol.canonical_smiles or mol.smiles
+    if not smiles:
+        raise HTTPException(status_code=422, detail="Molecule has no SMILES")
+
+    try:
+        from pipeline.pharmacophore import generate_feature_map_svg
+        svg = generate_feature_map_svg(smiles)
+    except Exception as e:
+        logger.error("Feature map generation failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Feature map generation failed: {e}")
+
+    return Response(content=svg, media_type="image/svg+xml")
+
+
 @router.put("/molecules/{molecule_id}/bookmark", response_model=MoleculeResponse)
 async def bookmark_molecule(
     molecule_id: UUID,
@@ -551,6 +571,30 @@ async def bookmark_batch(
 
     await db.flush()
     return {"updated": updated, "bookmarked": body.bookmarked}
+
+
+# ---------------------------------------------------------------------------
+# SMILES → feature map SVG
+# ---------------------------------------------------------------------------
+
+@router.post("/feature-map")
+async def feature_map_from_smiles(
+    body: dict = Body(...),
+    user_id: str = Depends(require_v9_user),
+):
+    """Generate a 2D SVG with pharmacophore features from a SMILES string."""
+    smiles = body.get("smiles")
+    if not smiles or not isinstance(smiles, str):
+        raise HTTPException(status_code=422, detail="Missing or invalid 'smiles' field")
+
+    try:
+        from pipeline.pharmacophore import generate_feature_map_svg
+        svg = generate_feature_map_svg(smiles, width=300, height=200)
+    except Exception as e:
+        logger.error("Feature map generation failed for SMILES: %s", e)
+        raise HTTPException(status_code=500, detail=f"Feature map generation failed: {e}")
+
+    return Response(content=svg, media_type="image/svg+xml")
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +705,148 @@ async def get_molecule_confidence(
 # ---------------------------------------------------------------------------
 # Scaffold analysis
 # ---------------------------------------------------------------------------
+
+@router.post("/molecule/smiles-to-svg")
+async def smiles_to_svg(
+    body: dict = Body(...),
+    user_id: str = Depends(require_v9_user),
+):
+    """Render a SMILES string as a 2D SVG image using RDKit."""
+    smiles = body.get("smiles")
+    if not smiles or not isinstance(smiles, str):
+        raise HTTPException(status_code=422, detail="Missing or invalid 'smiles' field")
+
+    width = int(body.get("width", 120))
+    height = int(body.get("height", 80))
+
+    try:
+        from rdkit import Chem
+        from rdkit.Chem.Draw import rdMolDraw2D
+    except ImportError:
+        raise HTTPException(status_code=500, detail="RDKit not available")
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise HTTPException(status_code=422, detail="Invalid SMILES")
+
+    drawer = rdMolDraw2D.MolDraw2DSVG(width, height)
+    drawer.drawOptions().addStereoAnnotation = False
+    drawer.DrawMolecule(mol)
+    drawer.FinishDrawing()
+    return Response(content=drawer.GetDrawingText(), media_type="image/svg+xml")
+
+
+@router.post("/molecule/smiles-to-svg-diff")
+async def smiles_to_svg_diff(
+    body: dict = Body(...),
+    user_id: str = Depends(require_v9_user),
+):
+    """Render two SMILES as SVGs with differing atoms highlighted in yellow."""
+    smiles_a = body.get("smiles_a")
+    smiles_b = body.get("smiles_b")
+    width = int(body.get("width", 150))
+    height = int(body.get("height", 100))
+
+    if not smiles_a or not smiles_b:
+        raise HTTPException(status_code=422, detail="Missing smiles_a or smiles_b")
+
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import rdFMCS
+        from rdkit.Chem.Draw import rdMolDraw2D
+    except ImportError:
+        raise HTTPException(status_code=500, detail="RDKit not available")
+
+    mol_a = Chem.MolFromSmiles(smiles_a)
+    mol_b = Chem.MolFromSmiles(smiles_b)
+    if not mol_a or not mol_b:
+        raise HTTPException(status_code=422, detail="Invalid SMILES")
+
+    def _mol_to_svg_highlighted(mol, highlight_atoms, highlight_bonds, w, h):
+        drawer = rdMolDraw2D.MolDraw2DSVG(w, h)
+        drawer.drawOptions().addStereoAnnotation = False
+        atom_colors = {i: (1.0, 0.84, 0.0) for i in highlight_atoms}
+        bond_colors = {i: (1.0, 0.84, 0.0) for i in highlight_bonds}
+        atom_radii = {i: 0.4 for i in highlight_atoms}
+        drawer.DrawMolecule(
+            mol,
+            highlightAtoms=list(highlight_atoms),
+            highlightAtomColors=atom_colors,
+            highlightBonds=list(highlight_bonds),
+            highlightBondColors=bond_colors,
+            highlightAtomRadii=atom_radii,
+        )
+        drawer.FinishDrawing()
+        return drawer.GetDrawingText()
+
+    def _plain_svg(mol, w, h):
+        drawer = rdMolDraw2D.MolDraw2DSVG(w, h)
+        drawer.drawOptions().addStereoAnnotation = False
+        drawer.DrawMolecule(mol)
+        drawer.FinishDrawing()
+        return drawer.GetDrawingText()
+
+    def _get_diff(mol, mcs_mol):
+        if not mcs_mol:
+            return set(range(mol.GetNumAtoms())), set()
+        match = mol.GetSubstructMatch(mcs_mol)
+        if not match:
+            # Try all matches and pick the one with most atoms
+            matches = mol.GetSubstructMatches(mcs_mol, uniquify=True)
+            if not matches:
+                return set(range(mol.GetNumAtoms())), set()
+            match = max(matches, key=len)
+        matched_atoms = set(match)
+        # Sanity: if MCS matched < 40% of atoms, diff is not meaningful
+        if len(matched_atoms) < 0.4 * mol.GetNumAtoms():
+            return set(), set()
+        diff_atoms = set(range(mol.GetNumAtoms())) - matched_atoms
+        diff_bonds = {
+            b.GetIdx() for b in mol.GetBonds()
+            if b.GetBeginAtomIdx() in diff_atoms
+            or b.GetEndAtomIdx() in diff_atoms
+        }
+        return diff_atoms, diff_bonds
+
+    try:
+        # Try progressively relaxed MCS parameters
+        mcs_mol = None
+        for params in [
+            # 1. Relaxed: any bond, ring matches ring, generous timeout
+            dict(atomCompare=rdFMCS.AtomCompare.CompareElements,
+                 bondCompare=rdFMCS.BondCompare.CompareAny,
+                 ringMatchesRingOnly=True, timeout=5),
+            # 2. Even more relaxed: no ring constraint
+            dict(atomCompare=rdFMCS.AtomCompare.CompareElements,
+                 bondCompare=rdFMCS.BondCompare.CompareAny,
+                 timeout=3),
+        ]:
+            mcs = rdFMCS.FindMCS([mol_a, mol_b], **params)
+            if mcs.smartsString:
+                candidate = Chem.MolFromSmarts(mcs.smartsString)
+                if candidate and candidate.GetNumAtoms() >= 0.4 * min(
+                    mol_a.GetNumAtoms(), mol_b.GetNumAtoms()
+                ):
+                    mcs_mol = candidate
+                    break
+
+        diff_a_atoms, diff_a_bonds = _get_diff(mol_a, mcs_mol)
+        diff_b_atoms, diff_b_bonds = _get_diff(mol_b, mcs_mol)
+
+        # If both diffs are empty (MCS too small → fallback triggered), render plain
+        if not diff_a_atoms and not diff_b_atoms:
+            svg_a = _plain_svg(mol_a, width, height)
+            svg_b = _plain_svg(mol_b, width, height)
+        else:
+            svg_a = _mol_to_svg_highlighted(mol_a, diff_a_atoms, diff_a_bonds, width, height)
+            svg_b = _mol_to_svg_highlighted(mol_b, diff_b_atoms, diff_b_bonds, width, height)
+    except Exception:
+        logger.warning("MCS diff failed for %s vs %s, falling back to plain SVG", smiles_a, smiles_b)
+        svg_a = _plain_svg(mol_a, width, height)
+        svg_b = _plain_svg(mol_b, width, height)
+
+    return {"svg_a": svg_a, "svg_b": svg_b}
+
 
 @router.post("/scaffold-analysis")
 async def scaffold_analysis(

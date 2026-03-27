@@ -48,6 +48,7 @@ export default function TableToolbar({
   onExport,
   onBookmarkSelected,
   onSendToNextPhase,
+  onCompare,
   isFrozen = false,
 }) {
   const [showColorSettings, setShowColorSettings] = useState(false)
@@ -356,6 +357,19 @@ export default function TableToolbar({
                 </svg>
                 Export
               </button>
+
+              {onCompare && selectedCount >= 2 && selectedCount <= 6 && (
+                <button
+                  onClick={onCompare}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border border-violet-200 text-violet-700 hover:bg-violet-50 hover:border-violet-300 transition-all"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
+                  </svg>
+                  Compare ({selectedCount})
+                </button>
+              )}
 
               <div title={isFrozen ? 'Phase frozen' : 'Bookmark selected'}>
                 <button

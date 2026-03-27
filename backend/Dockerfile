@@ -71,8 +71,14 @@ RUN pip install --no-cache-dir cairosvg==2.7.1 || \
 RUN pip install --no-cache-dir admet-ai 2>/dev/null || \
     echo "WARNING: admet-ai not available, using mock fallback"
 
-RUN pip install --no-cache-dir aizynthfinder 2>/dev/null || \
+RUN pip install --no-cache-dir "aizynthfinder>=4.0,<5.0" 2>/dev/null || \
     echo "WARNING: aizynthfinder not available, using mock fallback"
+
+# Download AiZynthFinder public data (USPTO model + ZINC stock, ~750MB)
+# This creates /data/aizynthfinder/config.yml automatically
+RUN mkdir -p /data/aizynthfinder && \
+    python -c "import sys; sys.argv = ['download_public_data', '/data/aizynthfinder']; from aizynthfinder.tools.download_public_data import main; main()" 2>&1 || \
+    echo "WARNING: AiZynthFinder data download failed, will use RDKit fallback"
 
 # V5bis: Install ProLIF + MDAnalysis for interaction analysis (non-fatal)
 RUN pip install --no-cache-dir prolif MDAnalysis 2>/dev/null || \
@@ -82,6 +88,10 @@ RUN pip install --no-cache-dir prolif MDAnalysis 2>/dev/null || \
 # PDBFixer pulls OpenMM as dependency (needed for minimisation)
 RUN pip install --no-cache-dir pdbfixer propka 2>/dev/null || \
     echo "WARNING: pdbfixer/propka not available, using basic receptor preparation"
+
+# V9: Install paramiko + boto3 for AFVS (SSH to EC2 + S3 access)
+RUN pip install --no-cache-dir paramiko boto3 2>/dev/null || \
+    echo "WARNING: paramiko/boto3 not available, AFVS will not work"
 
 # Copy application code
 COPY . .

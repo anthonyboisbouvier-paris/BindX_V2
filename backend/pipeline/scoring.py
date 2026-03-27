@@ -43,25 +43,6 @@ def _safe_zscore(val: float, mu: float, sd: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# PAINS SMARTS patterns (Pan-Assay INterference compoundS)
-# Simplified set of common PAINS substructure alerts
-# ---------------------------------------------------------------------------
-
-_PAINS_SMARTS: list[str] = [
-    "[#6]1:[#6]:[#6](:[#6]:[#6]:[#6]:1)-[#7]=[#7]-[#6]2:[#6]:[#6]:[#6]:[#6]:[#6]:2",  # azo dye
-    "[#6]-[#16](=[#8])(-[#6])-[#7]",                                                     # sulfonamide
-    "c1cc([OH])c([OH])cc1",                                                                  # catechol (free OH only)
-    "[#6](=[#8])-[#6]=[#6]-[#6](=[#8])",                                                 # quinone-like
-    "[CH]=[CH][C](=O)",                                                                    # Michael acceptor (enone)
-    "c1ccc2c(c1)[nH]c1ccccc12",                                                           # carbazole
-    "[#7+]=[#6]-[#16]",                                                                    # isothiourea
-    "c1ccnc(SSc2ncccc2)c1",                                                                # 2-amino pyridine disulfide
-    "[N;R1]=[N;R1]",                                                                       # azo in ring
-    "c1ccc(-c2cc(=O)c3ccccc3o2)cc1",                                                       # flavone (promiscuous)
-]
-
-
-# ---------------------------------------------------------------------------
 # Molecular properties
 # ---------------------------------------------------------------------------
 
@@ -245,7 +226,10 @@ def compute_druglikeness_rules(props: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def compute_pains_alert(smiles: str) -> bool:
-    """Check if a molecule matches any PAINS substructure pattern.
+    """Check for PAINS (Pan-Assay INterference compoundS) using RDKit FilterCatalog.
+
+    Uses the full 480-pattern set (PAINS_A + PAINS_B + PAINS_C) from Baell & Holloway
+    (J. Med. Chem. 2010, 53, 2719-2740).
 
     Parameters
     ----------
@@ -259,19 +243,18 @@ def compute_pains_alert(smiles: str) -> bool:
     """
     try:
         from rdkit import Chem
+        from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
 
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return False
 
-        for smarts in _PAINS_SMARTS:
-            try:
-                pattern = Chem.MolFromSmarts(smarts)
-                if pattern is not None and mol.HasSubstructMatch(pattern):
-                    return True
-            except Exception:
-                continue
-        return False
+        params = FilterCatalogParams()
+        params.AddCatalog(FilterCatalogParams.FilterCatalogs.PAINS_A)
+        params.AddCatalog(FilterCatalogParams.FilterCatalogs.PAINS_B)
+        params.AddCatalog(FilterCatalogParams.FilterCatalogs.PAINS_C)
+        catalog = FilterCatalog(params)
+        return catalog.HasMatch(mol)
 
     except ImportError:
         return False
@@ -1046,18 +1029,25 @@ def cluster_results(molecules: list[dict], cutoff: float = 0.4) -> list[dict]:
         # Butina clustering
         clusters = Butina.ClusterData(dists, n, cutoff, isDistData=True)
 
-        # Assign cluster IDs
+        # Assign cluster IDs and compute Tanimoto to representative
         for cluster_idx, members in enumerate(clusters):
             # Find representative (highest composite_score)
             best_member = max(
                 members,
                 key=lambda m: molecules[valid_indices[m]].get("composite_score", 0),
             )
+            rep_fp = fps[best_member]
             for member in members:
                 mol_idx = valid_indices[member]
                 molecules[mol_idx]["cluster_id"] = cluster_idx
                 molecules[mol_idx]["cluster_size"] = len(members)
                 molecules[mol_idx]["is_representative"] = (member == best_member)
+                # Tanimoto similarity to cluster representative
+                if member == best_member:
+                    molecules[mol_idx]["tanimoto_to_centroid"] = 1.0
+                else:
+                    sim = DataStructs.TanimotoSimilarity(fps[member], rep_fp)
+                    molecules[mol_idx]["tanimoto_to_centroid"] = round(sim, 3)
 
         n_clusters = len(clusters)
         logger.info(

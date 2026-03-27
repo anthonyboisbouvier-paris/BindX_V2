@@ -120,7 +120,9 @@ export const TIPS = {
   QED: 'Quantitative Estimate of Drug-likeness (0-1). Combines MW, logP, HBD, HBA, TPSA, rotatable bonds, aromatic rings, and alerts into a single score. Above 0.5 indicates a favorable drug-like profile.',
   solubility: 'Predicted aqueous solubility. Estimated from molecular descriptors (logP, MW, aromatic ring count). Essential for drug dissolution and absorption. Higher values are better.',
   BBB: 'Blood-Brain Barrier penetration prediction. Computed from logP, TPSA, MW, and HBD. High score = molecule can reach the brain. Desirable for neurological targets, undesirable otherwise.',
-  hERG: 'Predicted hERG potassium channel inhibition risk. Computed from molecular descriptors. High values signal cardiac toxicity risk (QT prolongation). One of the most critical safety endpoints in drug development.',
+  hERG: 'hERG inhibition probability (0-1). Rapid screening from ADMET-AI molecular descriptors (run Toxicity). Indicates the likelihood of blocking the hERG potassium channel. Above 0.5 = cardiac risk flag. Fast but less precise than the specialized IC50 prediction.',
+  herg_risk_level: 'hERG risk level (Low / Medium / High). Determined by the specialized hERG model (run Toxicity). Based on the predicted IC50: Low (>10 µM), Medium (1-10 µM), High (<1 µM). Quick visual triage for cardiac safety.',
+  herg_ic50: 'Predicted hERG IC50 in µM. Specialized deep-learning model trained on patch-clamp assay data (run Toxicity). Estimates the concentration needed to inhibit 50% of hERG channels. Higher = safer. Reference: >10 µM is generally acceptable in pharma.',
   half_life: 'Predicted elimination half-life in hours. Estimated from molecular descriptors and ADMET-AI models. Indicates how long the drug stays active in the body. Longer half-life allows for less frequent dosing.',
   cyp_inhibitions: 'Number of CYP450 enzymes inhibited (probability > 50%). Counts CYP1A2, CYP2C9, CYP2C19, CYP2D6, CYP3A4. 0 = clean metabolic profile, ≥2 = high drug-drug interaction risk. Detail per CYP available in the ADME panel.',
   oral_bioavailability: 'Fraction of the drug reaching systemic circulation after oral administration (0-100%). Predicted from absorption and first-pass metabolism models. Above 30% is generally acceptable.',
@@ -132,6 +134,10 @@ export const TIPS = {
   heavy_atom_count: 'Number of non-hydrogen atoms. Counted directly from the molecular structure. Typical drugs contain 15-35 heavy atoms. Used to compute ligand efficiency (docking_score / heavy_atom_count).',
   sa_score: 'Synthetic Accessibility score (1-10). Computed from molecular complexity, ring systems, and stereocenters. Lower = easier to synthesize. Below 4 is considered readily accessible.',
   ro3_pass: 'Rule of 3 for fragments: checks MW <= 300, logP <= 3, HBD <= 3, HBA <= 3. Used to evaluate whether a molecule is a good starting fragment for optimization campaigns.',
+  n_hydrophobic: 'Number of hydrophobic features (aliphatic groups, lipophilic chains). Counted by RDKit BaseFeatures pharmacophore factory. Important for membrane permeability and protein-ligand hydrophobic contacts.',
+  n_aromatic: 'Number of aromatic ring systems. Counted by RDKit BaseFeatures. Aromatic rings contribute to binding via pi-stacking interactions. Most oral drugs contain 1-3 aromatic rings.',
+  n_pos_ionizable: 'Number of positively ionizable groups (basic amines, guanidines). Counted by RDKit BaseFeatures. These groups can form salt bridges with acidic residues (Asp, Glu) in the binding site.',
+  n_neg_ionizable: 'Number of negatively ionizable groups (carboxylates, sulfonates, phosphates). Counted by RDKit BaseFeatures. Can form salt bridges with basic residues (Arg, Lys).',
 
   // --- Columns: Scoring ---
   composite_score: 'ADMET safety score combining toxicity endpoints into a single metric (0-100). Aggregates hERG, Ames, hepatotoxicity, skin sensitization, and carcinogenicity. Higher = safer compound. Not to be confused with the Weighted Score.',
@@ -149,9 +155,12 @@ export const TIPS = {
   n_modifiable_positions: 'Number of R-group positions where chemical modifications are possible. Identified by BRICS decomposition and substituent detection. More positions = more room for structure-activity optimization.',
   brics_bond_count: 'Number of BRICS retrosynthetically accessible bonds. These are bonds that can be cleaved to generate building blocks for combinatorial chemistry. Higher count indicates a more modular molecule.',
   scaffold_n_rings: 'Number of rings in the Murcko scaffold. Ring count affects molecular complexity, rigidity, and drug-likeness. Most oral drugs have 2-4 rings.',
+  scaffold_group: 'Chemical series number. Molecules sharing the same Murcko scaffold are assigned the same series. Sort by this column to group your chemical series.',
+  scaffold_group_size: 'Number of molecules in this chemical series (same scaffold). Larger series are better for SAR analysis — more data points to optimize.',
 
   // --- Columns: Clustering ---
-  cluster_id: 'Chemical cluster number assigned by Butina clustering algorithm. Molecules are grouped by Tanimoto similarity of Morgan fingerprints (radius 2). Same cluster = similar chemical scaffold.',
+  cluster_id: 'Diversity cluster number assigned by Butina algorithm on Morgan fingerprints (whole molecule, not just the core). Unlike scaffold series (which group by identical Murcko core), clustering groups molecules with overall structural similarity above the Tanimoto cutoff.',
+  cluster_size: 'Number of molecules in this cluster. Larger clusters indicate common chemical scaffolds in your library. Singleton clusters (size 1) are structurally unique molecules.',
   scaffold_smiles: 'SMILES notation of the scaffold shared by molecules in this cluster. Represents the common chemical motif of the group.',
   tanimoto_to_centroid: 'Tanimoto similarity (0-1) between this molecule\'s Morgan fingerprint and the cluster centroid. Closer to 1 = more representative of the chemical group.',
   is_representative: 'Whether this molecule is the centroid (most representative) of its cluster. Computed as the molecule with highest average similarity to all other cluster members. Useful for selecting one exemplar per group.',
@@ -163,15 +172,15 @@ export const TIPS = {
 
   // --- Columns: Confidence ---
   confidence_score: 'Overall confidence score (0-1). Aggregates reliability indicators: PAINS alerts, Brenk alerts, applicability domain check, and prediction convergence across pipeline steps. Low score = interpret results with caution.',
-  pains_alert: 'PAINS (Pan-Assay Interference Compounds) alert. Detected by matching the molecule\'s structure against known problematic substructure patterns. These molecules are prone to false positives in biological assays.',
+  pains_alert: 'PAINS (Pan-Assay Interference Compounds) alert. Detected using RDKit FilterCatalog (480 patterns: PAINS_A + PAINS_B + PAINS_C). These molecules are prone to false positives in biological assays (computed by Toxicity run).',
   applicability_domain: 'Whether the molecule falls within the training domain of the prediction models. Computed by comparing molecular descriptors to the models\' training set. Outside the domain = less reliable predictions.',
   brenk_alert: 'Brenk structural alert: detects reactive or unstable chemical groups known to cause problems in drug development. Computed by substructure matching against Brenk\'s published filter list. An alert does not disqualify but warrants attention.',
 
   // --- Columns: Retrosynthesis ---
-  n_synth_steps: 'Number of synthetic steps needed to make this molecule from commercially available reagents. Computed by AI retrosynthesis (AiZynthFinder). Fewer steps = faster and cheaper synthesis.',
-  synth_confidence: 'Confidence in the proposed synthesis route feasibility (0-1). Computed by the retrosynthesis AI based on route plausibility and reaction precedent. Above 0.7 = realistic route; below 0.3 = uncertain.',
-  synth_cost_estimate: 'Estimated synthesis cost: low, medium, or high. Derived from number of steps (n_synth_steps), reagent availability (reagents_available), and reaction complexity.',
-  reagents_available: 'Whether all required starting materials are commercially available. Checked against supplier catalogs by the retrosynthesis pipeline. If not, additional preparation steps are needed.',
+  n_synth_steps: 'Number of synthetic steps to build this molecule from commercial reagents. With AiZynthFinder: planned by a USPTO-trained neural network. With RDKit Heuristic: estimated via functional group disconnections. Fewer steps = faster, cheaper synthesis.',
+  synth_confidence: 'Route feasibility score (0-1). With AiZynthFinder: evaluates reaction plausibility and intermediate accessibility. With RDKit Heuristic: estimated from step count and molecular complexity. Above 0.9 = highly feasible; below 0.5 = uncertain route.',
+  synth_cost_estimate: 'Estimated cost category (low / medium / high). With AiZynthFinder: based on steps, reagent availability, and reaction complexity. With RDKit Heuristic: based on step count only (low ≤2, medium 3-4, high ≥5). Dash = no route found.',
+  reagents_available: 'Whether ALL starting materials are commercially available. With AiZynthFinder: checked against the ZINC database (17M+ compounds). With RDKit Heuristic: not evaluated (shown as dash). Green check = available, cross = some need custom synthesis.',
 
   // --- Columns: Safety ---
   herg_risk: 'hERG channel inhibition risk (0-1). Predicted from molecular descriptors related to cation-pi interactions and lipophilicity. This potassium channel regulates heartbeat; risk >0.5 can cause fatal arrhythmias. Elimination criterion in pharma.',
@@ -181,14 +190,14 @@ export const TIPS = {
   carcinogenicity: 'Carcinogenicity risk (0-1). Predicted from structural alerts and ML models trained on rodent carcinogenicity data. Any significant score should be investigated as a priority.',
   safety_color_code: 'Overall safety summary. Computed from herg_risk, ames_mutagenicity, hepatotoxicity, skin_sensitization, and carcinogenicity columns. Green = safe profile, Yellow = moderate signals, Red = at least one critical risk.',
 
-  // --- Columns: Activity Cliffs ---
-  is_cliff: 'Activity cliff flag: two molecules with high structural similarity (Tanimoto > 0.85) but very different activity. Computed by comparing docking_score differences vs. fingerprint similarity across all pairs.',
-  sali_max: 'Maximum SALI (Structure-Activity Landscape Index). Computed as |activity_diff| / (1 - similarity) for the most contrasting neighbor pair. Higher values indicate a sharper activity cliff.',
-  n_cliffs: 'Number of cliff pairs involving this molecule. Computed from pairwise SALI analysis. High count means the molecule sits in a sensitive region of the structure-activity landscape.',
-
-  // --- Columns: Pharmacophore ---
-  pharmacophore_features: 'Number of pharmacophoric features detected (H-bond donors/acceptors, hydrophobic zones, charges, aromatic rings). Computed from the 3D molecular structure. More features = richer target interaction potential.',
-  pharmacophore_similarity: 'Pharmacophore similarity to the reference model (0-1). Computed by aligning 3D pharmacophore features with the best-known active compounds. High score = same 3D interaction pattern as proven hits.',
+  // --- Columns: Reference Similarity ---
+  pharmacophore_fit_1: 'Tanimoto similarity (0–1) against reference ligand #1 using 2D Gobbi pharmacophoric fingerprint.',
+  pharmacophore_fit_2: 'Tanimoto similarity (0–1) against reference ligand #2 using 2D Gobbi pharmacophoric fingerprint.',
+  pharmacophore_fit_3: 'Tanimoto similarity (0–1) against reference ligand #3 using 2D Gobbi pharmacophoric fingerprint.',
+  pharmacophore_fit_4: 'Tanimoto similarity (0–1) against reference ligand #4 using 2D Gobbi pharmacophoric fingerprint.',
+  pharmacophore_fit_5: 'Tanimoto similarity (0–1) against reference ligand #5 using 2D Gobbi pharmacophoric fingerprint.',
+  pharmacophore_fit_best: 'Best Tanimoto similarity (0–1) across all reference ligands. Maximum of Ref. 1–5.',
+  pharmacophore_fit_avg: 'Average Tanimoto similarity (0–1) across all reference ligands.',
 
   // --- Columns: Generation ---
   generation_level: 'Generation number: how many rounds of generative AI design since the original molecule. Generation 0 = imported molecule, 1 = first optimization cycle, 2 = second cycle, etc.',
@@ -204,14 +213,24 @@ export const TIPS = {
   run_admet: 'Predicts ADMET properties: Absorption, Distribution, Metabolism, Excretion, Toxicity. Computes logP, MW, HBD, HBA, TPSA, QED, solubility, BBB, hERG, and Lipinski columns from the molecular structure.',
   run_scoring: 'Computes a weighted composite score combining docking_score, QED, and ADMET properties into a single 0-100 ranking. Also computes ligand_efficiency from docking_score and heavy_atom_count.',
   run_interactions: 'Protein-ligand interaction analysis: computes H-bonds, hydrophobic contacts, pi-stacking, and salt bridges from docked poses using ProLIF or RDKit. Requires a prior docking run.',
-  run_scaffold: 'Scaffold decomposition: extracts the Murcko core ring system, identifies BRICS bonds and R-group modification positions. Only requires SMILES — no docking needed.',
+  run_scaffold: 'Structural analysis: extracts the Murcko core ring system, identifies BRICS bonds and R-group positions, then runs Butina diversity clustering on Morgan fingerprints. Only requires SMILES — no docking needed.',
   run_generation: 'AI de novo generation. Creates new molecules by modifying top hits: fragment replacement, R-group exploration, scaffold hopping. Produces new molecules with generation_level and parent_molecule_id.',
-  run_clustering: 'Chemical clustering using Butina algorithm on Morgan fingerprints (Tanimoto similarity). Groups similar molecules to identify chemical series and ensure structural diversity in the selection.',
+  run_clustering: 'Legacy — diversity clustering is now included in Structural Analysis (scaffold run). Groups structurally similar molecules into families using Butina algorithm on Morgan fingerprints.',
   run_off_target: 'Off-target selectivity: docks molecules against anti-target proteins (hERG, CYP450, etc.) to verify they don\'t bind unintended targets. Produces selectivity_score, off_target_hits, selectivity_ratio.',
-  run_confidence: 'Confidence analysis: evaluates prediction reliability via PAINS alerts, Brenk filters, applicability domain checks, and cross-method convergence. Produces confidence_score and alert columns.',
-  run_retrosynthesis: 'AI retrosynthesis: plans the chemical synthesis route, estimates step count (n_synth_steps), cost (synth_cost_estimate), confidence, and checks reagent availability.',
+  run_confidence: 'Legacy — confidence analysis has been retired. PAINS alerts are now computed by the Toxicity run. Applicability domain is provided by ADME.',
+  run_retrosynthesis: 'Retrosynthesis analysis: plans a synthesis route using AiZynthFinder (USPTO neural network) or RDKit heuristic disconnection (fallback). Estimates step count, route confidence, and cost category. Reagent availability is only checked with AiZynthFinder.',
   run_composite: 'Weighted composite score: aggregates results from your previous runs (docking, ADME, scoring, off-target) into a single multi-criteria ranking. You configure the weight of each metric. Produces weighted_score column.',
   run_safety: 'Full safety profile: hERG risk (cardiac), Ames mutagenicity, hepatotoxicity, skin sensitization, and carcinogenicity. Aggregated into a color-coded safety summary (safety_color_code).',
+  run_afvs: 'Ultra-Large Virtual Screening: screens billions of commercially available molecules against your target. Uses a 2-stage pipeline — fast prescreen then high-precision docking — and imports the best-scoring hits into Phase A.',
+
+  // --- AFVS parameters ---
+  afvs_filters: 'Molecular filters applied before docking to focus on drug-like chemical space. Molecules outside these ranges are excluded, reducing compute cost.',
+  afvs_top_n: 'Number of top-scoring molecules to import into your Phase A dashboard after screening. These are the best hits ranked by docking score.',
+  afvs_budget: 'Maximum amount you are willing to spend on this screening run. The run stops automatically when this cap is reached — partial results are still imported.',
+  afvs_exhaustiveness_prescreen: 'How many poses to evaluate per representative during the fast prescreen. Higher values improve tranche ranking accuracy but slow down the prescreen. 1 is sufficient for most campaigns.',
+  afvs_exhaustiveness_primary: 'How many poses to evaluate per molecule during the full docking stage. Higher values produce more reliable scores. 8 is a good balance; 16 for maximum precision.',
+  afvs_reps: 'Number of representative molecules tested per tranche during prescreen. Each tranche (~5.6K molecules) is evaluated by docking a few representatives. More representatives = more reliable tranche ranking, but proportionally more expensive.',
+  afvs_coverage: 'Percentage of tranches promoted from prescreen to primary docking. The prescreen tests representatives from each tranche to rank them. This parameter controls how many of the best-performing tranches then have ALL their molecules re-docked with high precision. Higher = more thorough but more expensive.',
 
   // --- Concepts ---
   pareto: 'Pareto front analysis: identifies optimal molecules when two objectives compete (e.g., potency vs. selectivity). Points on the front cannot be improved on one axis without degrading the other. Select any two numeric columns as axes.',

@@ -300,6 +300,30 @@ async def _cache_set_batch(entries: list[tuple[str, dict]]):
             await session.commit()
 
 
+async def _get_reference_ligands(phase_id):
+    """Fetch all reference ligands from phase→campaign (list of dicts)."""
+    from database_v9 import AsyncSessionV9
+    from models_v9 import PhaseORM_V9, CampaignORM_V9
+    from sqlalchemy import select
+
+    async with AsyncSessionV9() as session:
+        result = await session.execute(
+            select(PhaseORM_V9).where(PhaseORM_V9.id == phase_id)
+        )
+        phase = result.scalar_one_or_none()
+        if not phase:
+            return []
+
+        result = await session.execute(
+            select(CampaignORM_V9).where(CampaignORM_V9.id == phase.campaign_id)
+        )
+        campaign = result.scalar_one_or_none()
+        if not campaign:
+            return []
+
+        return list(campaign.reference_ligands or [])
+
+
 async def _get_docking_context(phase_id):
     """Fetch receptor URL + pocket center for docking, navigating phase→campaign→project."""
     from database_v9 import AsyncSessionV9
@@ -798,6 +822,8 @@ def execute_run(self, run_id: str):
             result = _run_calculation(run_id, run_data)
         elif run_type == "generation":
             result = _run_generation(run_id, run_data)
+        elif run_type == "afvs":
+            result = _run_afvs(run_id, run_data)
         else:
             raise ValueError(f"Unknown run type: {run_type}")
 
@@ -1241,7 +1267,14 @@ def _expand_included(included: set | None) -> set | None:
 
 _ALWAYS_KEEP = {
     "interactions_method", "interactions_detail", "mapped_functional",
-    "pose_molblock", "method", "summary",
+    "pose_molblock", "method", "summary", "herg_specialized",
+    "cluster_size",
+    "scaffold_group", "scaffold_group_size",
+    "pains_alert",
+    "matched_types", "missing_types", "feature_counts", "ref_feature_counts",
+    "pharmacophore_fit_1", "pharmacophore_fit_2", "pharmacophore_fit_3",
+    "pharmacophore_fit_4", "pharmacophore_fit_5", "pharmacophore_fit_best",
+    "pharmacophore_fit_avg",
 }
 
 
@@ -1371,6 +1404,24 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     # ── Toxicity subset ──
                     if calc_type in ("toxicity", "admet"):
                         tox_props = {k: v for k, v in admet.items() if k in _TOX_KEYS}
+                        # Enrich with hERG specialized (IC50 + risk level) — toxicity only
+                        if calc_type == "toxicity":
+                            try:
+                                from pipeline.admet import predict_herg_specialized
+                                herg_detail = predict_herg_specialized(mol["smiles"])
+                                tox_props["herg_specialized"] = {
+                                    "ic50_um": herg_detail["ic50_um"],
+                                    "risk_level": herg_detail["risk_level"],
+                                    "method": herg_detail["method"],
+                                }
+                            except Exception as e:
+                                logger.debug("hERG specialized failed for %s: %s", mol["smiles"][:40], e)
+                            # PAINS alert (480 patterns — structural interference)
+                            try:
+                                from pipeline.scoring import compute_pains_alert
+                                tox_props["pains_alert"] = compute_pains_alert(mol["smiles"])
+                            except Exception as e:
+                                logger.debug("PAINS check failed for %s: %s", mol["smiles"][:40], e)
                         tox_entries.append((mol["id"], run_uuid, "toxicity", _filter_cols(tox_props, _inc)))
 
                 if adme_entries:
@@ -1388,6 +1439,8 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                 from pipeline.scoring import (
                     compute_properties, compute_sa_score,
                 )
+                from pipeline.pharmacophore import _count_features
+                from rdkit import Chem
                 # Batch cache lookup (1 query instead of N)
                 cache_keys = [f"scoring:{m['smiles']}" for m in molecules]
                 cached = _db_sync(_cache_get_batch(cache_keys))
@@ -1401,6 +1454,17 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                         if props is None:
                             props = compute_properties(mol["smiles"])
                             new_cache.append((ck, props))
+                        # Add pharmacophore feature counts into physicochemical props
+                        try:
+                            rdmol = Chem.MolFromSmiles(mol["smiles"])
+                            if rdmol is not None:
+                                fc = _count_features(rdmol)
+                                props["n_hydrophobic"] = fc.get("hydrophobic", 0)
+                                props["n_aromatic"] = fc.get("aromatic", 0)
+                                props["n_pos_ionizable"] = fc.get("positive", 0)
+                                props["n_neg_ionizable"] = fc.get("negative", 0)
+                        except Exception as e_feat:
+                            logger.warning("Feature count failed for %s: %s", mol["smiles"], e_feat)
                         physchem_entries.append((mol["id"], run_uuid, "physicochemical", _filter_cols(props, _inc)))
                         if _inc is None or "sa_score" in _inc:
                             sa = compute_sa_score(mol["smiles"])
@@ -1408,13 +1472,13 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                                 sa_entries.append((mol["id"], run_uuid, "sa_score", {"sa_score": sa}))
                     except Exception as e:
                         logger.warning("Scoring failed for %s: %s", mol["smiles"], e)
-                # Batch store: cache + properties (3-4 queries total instead of N×3)
+                # Batch store: cache + properties
                 if new_cache:
                     _db_sync(_cache_set_batch(new_cache))
                 _db_sync(_store_properties_batch(physchem_entries))
                 if sa_entries:
                     _db_sync(_store_properties_batch(sa_entries))
-                _write_log(run_id, "info", f"Scoring complete: {len(physchem_entries)}/{len(molecules)} molecules scored (+ SA, InChIKey, Ro3)")
+                _write_log(run_id, "info", f"Scoring complete: {len(physchem_entries)}/{len(molecules)} molecules scored")
                 results["scoring"] = f"{len(molecules)} molecules scored"
 
             elif calc_type == "docking":
@@ -1729,19 +1793,72 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                     except Exception as e:
                         logger.warning("Scaffold analysis failed for %s: %s", mol["smiles"], e)
 
+                # Post-processing: group by shared scaffold (chemical series)
+                from collections import Counter as _ScaffoldCounter
+                scaffold_map = {}
+                group_counter = 0
+                for entry in scaffold_entries:
+                    smi = entry[3].get("scaffold_smiles")
+                    if smi and smi not in scaffold_map:
+                        scaffold_map[smi] = group_counter
+                        group_counter += 1
+
+                group_sizes = _ScaffoldCounter()
+                for entry in scaffold_entries:
+                    smi = entry[3].get("scaffold_smiles")
+                    if smi:
+                        group_sizes[scaffold_map[smi]] += 1
+
+                for i, (mol_id, ruuid, ptype, props) in enumerate(scaffold_entries):
+                    smi = props.get("scaffold_smiles")
+                    gid = scaffold_map.get(smi, -1) if smi else -1
+                    props["scaffold_group"] = gid
+                    props["scaffold_group_size"] = group_sizes.get(gid, 1)
+                    scaffold_entries[i] = (mol_id, ruuid, ptype, props)
+
                 _db_sync(_store_properties_batch(scaffold_entries))
-                _write_log(run_id, "info", f"Scaffold analysis complete: {len(scaffold_entries)}/{len(molecules)} molecules")
-                results["scaffold"] = f"{len(scaffold_entries)} molecules analyzed"
+                _write_log(run_id, "info", f"Scaffold analysis complete: {len(scaffold_entries)}/{len(molecules)} molecules, {group_counter} series")
+                results["scaffold"] = f"{len(scaffold_entries)} molecules analyzed, {group_counter} series"
+
+                # --- Diversity clustering (Butina on Morgan FP) — merged into scaffold ---
+                from pipeline.scoring import cluster_results as _cluster_results
+                _scaffold_cfg = _run_config.get("scaffold", {}) if isinstance(_run_config.get("scaffold"), dict) else {}
+                _cutoff = float(_scaffold_cfg.get("cutoff", _run_config.get("cutoff", 0.65)))
+                mol_dicts = [{"smiles": m["smiles"], "name": m["name"],
+                              "composite_score": m.get("composite_score", 0)} for m in molecules]
+                try:
+                    clustered = _cluster_results(mol_dicts, cutoff=_cutoff)
+                    from collections import Counter as _ClusterCounter
+                    _cluster_counts = _ClusterCounter(c.get("cluster_id", 0) for c in clustered)
+                    n_clusters = len(_cluster_counts)
+                    cluster_entries = [
+                        (mol["id"], run_uuid, "clustering", _filter_cols(
+                            {"cluster_id": cl.get("cluster_id"),
+                             "cluster_size": _cluster_counts.get(cl.get("cluster_id", 0), 0),
+                             "is_representative": cl.get("is_representative"),
+                             "tanimoto_to_centroid": cl.get("tanimoto_to_centroid")}, _inc))
+                        for mol, cl in zip(molecules, clustered)
+                    ]
+                    _db_sync(_store_properties_batch(cluster_entries))
+                    _write_log(run_id, "info", f"Clustering: {n_clusters} clusters (cutoff={_cutoff})")
+                except Exception as e:
+                    logger.warning("Clustering within scaffold failed: %s", e)
+                    _write_log(run_id, "warning", f"Clustering step failed: {e}")
 
             elif calc_type == "clustering":
                 from pipeline.scoring import cluster_results
-                mol_dicts = [{"smiles": m["smiles"], "name": m["name"]} for m in molecules]
+                mol_dicts = [{"smiles": m["smiles"], "name": m["name"], "composite_score": m.get("composite_score", 0)} for m in molecules]
                 try:
-                    clustered = cluster_results(mol_dicts)
-                    n_clusters = len(set(c.get("cluster_id", 0) for c in clustered))
+                    _cutoff = float(_run_config.get("cutoff", 0.4))
+                    clustered = cluster_results(mol_dicts, cutoff=_cutoff)
+                    # Compute cluster sizes
+                    from collections import Counter
+                    _cluster_counts = Counter(c.get("cluster_id", 0) for c in clustered)
+                    n_clusters = len(_cluster_counts)
                     cluster_entries = [
                         (mol["id"], run_uuid, "clustering", _filter_cols(
                             {"cluster_id": cl_data.get("cluster_id"),
+                             "cluster_size": _cluster_counts.get(cl_data.get("cluster_id", 0), 0),
                              "is_representative": cl_data.get("is_representative"),
                              "scaffold_smiles": cl_data.get("scaffold_smiles", cl_data.get("scaffold")),
                              "tanimoto_to_centroid": cl_data.get("tanimoto_to_centroid")}, _inc))
@@ -1811,10 +1928,13 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
             elif calc_type == "retrosynthesis":
                 # Full retrosynthesis planning via pipeline/retrosynthesis.py
                 from pipeline.retrosynthesis import plan_synthesis
+                retro_cfg = _run_config.get("retrosynthesis", {}) if isinstance(_run_config.get("retrosynthesis"), dict) else {}
+                retro_method = retro_cfg.get("method", "auto")
+                _write_log(run_id, "info", f"Retrosynthesis method: {retro_method}")
                 retro_entries = []
                 for mol in molecules:
                     try:
-                        route = plan_synthesis(mol["smiles"])
+                        route = plan_synthesis(mol["smiles"], method=retro_method)
                         retro_cols = {
                             "n_synth_steps": route.get("n_steps", 0),
                             "synth_confidence": route.get("confidence", 0),
@@ -1831,72 +1951,80 @@ def _run_calculation(run_id: str, run_data: dict) -> dict:
                             "tree": route.get("tree"),
                             "cost_estimate": route.get("cost_estimate"),
                             "reagent_availability": route.get("reagent_availability", []),
+                            "method": route.get("method", "unknown"),
                         }
                         retro_filtered = _filter_cols(retro_cols, _inc)
                         retro_filtered.update(retro_meta)
                         retro_entries.append((mol["id"], run_uuid, "retrosynthesis", retro_filtered))
                     except Exception as e:
                         logger.warning("Retrosynthesis failed for %s: %s", mol["smiles"], e)
+                        _write_log(run_id, "warning", f"No route found for {mol.get('name', mol['smiles'][:30])}: {e}")
+                        # Store a "no route" result so the user sees something
+                        from pipeline.retrosynthesis import _empty_result
+                        fallback = _empty_result(mol["smiles"])
+                        retro_entries.append((mol["id"], run_uuid, "retrosynthesis", {
+                            "n_synth_steps": 0,
+                            "synth_confidence": 0.0,
+                            "synth_cost_estimate": None,
+                            "reagents_available": None,
+                            "n_steps": 0,
+                            "confidence": 0.0,
+                            "estimated_cost": None,
+                            "all_reagents_available": None,
+                            "steps": [],
+                            "tree": fallback.get("tree"),
+                            "method": "failed",
+                        }))
                 _db_sync(_store_properties_batch(retro_entries))
-                _write_log(run_id, "info", f"Retrosynthesis complete: {len(molecules)} molecules — routes planned")
+                n_success = sum(1 for _, _, _, d in retro_entries if d.get("n_steps", 0) > 0)
+                _write_log(run_id, "info", f"Retrosynthesis complete: {n_success}/{len(molecules)} routes found")
                 results["retrosynthesis"] = f"{len(molecules)} molecules analyzed"
 
             elif calc_type == "pharmacophore":
-                from pipeline.pharmacophore import extract_pharmacophore, compute_pharmacophore_similarity
+                from pipeline.pharmacophore import score_against_reference
+
+                # Fetch all reference ligands from campaign
+                ref_ligands = _db_sync(_get_reference_ligands(phase_id))
+                if not ref_ligands:
+                    _write_log(run_id, "error", "No reference ligands set. Go to Project Home → Campaign to add reference ligands.")
+                    results["pharmacophore"] = "FAILED — no reference ligands"
+                    continue
+
                 pharma_entries = []
+                ref_names = []
                 for mol in molecules:
-                    try:
-                        pharma = extract_pharmacophore(mol["smiles"])
-                        pharma_entries.append((mol["id"], run_uuid, "pharmacophore", {
-                            "feature_counts": pharma.get("feature_counts", {}),
-                            "n_features": pharma.get("n_features", 0),
-                            "fingerprint_bits": len(pharma.get("fingerprint", [])),
-                        }))
-                    except Exception as e:
-                        logger.warning("Pharmacophore failed for %s: %s", mol["smiles"], e)
+                    props = {"feature_counts": None}
+                    fit_values = []
+                    for ref_idx, ref_lig in enumerate(ref_ligands):
+                        ref_smiles = ref_lig.get("smiles", "")
+                        if not ref_smiles:
+                            continue
+                        try:
+                            result = score_against_reference(mol["smiles"], ref_smiles)
+                            fit_key = f"pharmacophore_fit_{ref_idx + 1}"
+                            props[fit_key] = result["pharmacophore_fit"]
+                            fit_values.append(result["pharmacophore_fit"])
+                            # Store per-ref metadata (matched/missing types from last ref for feature_counts)
+                            if props["feature_counts"] is None:
+                                props["feature_counts"] = result["feature_counts"]
+                        except Exception as e:
+                            logger.warning("Pharmacophore scoring failed for %s vs ref %d: %s", mol["smiles"], ref_idx, e)
+                    # Best + average fit across all references
+                    if fit_values:
+                        props["pharmacophore_fit_best"] = max(fit_values)
+                        props["pharmacophore_fit_avg"] = round(sum(fit_values) / len(fit_values), 4)
+                    # Store ref_feature_counts from all references for detail panel
+                    props["ref_feature_counts"] = {
+                        f"ref_{i+1}": rl.get("ref_feature_counts", {})
+                        for i, rl in enumerate(ref_ligands)
+                    }
+                    pharma_entries.append((mol["id"], run_uuid, "pharmacophore", props))
+
                 _db_sync(_store_properties_batch(pharma_entries))
 
-                # Compute pairwise similarity
-                try:
-                    all_smiles = [m["smiles"] for m in molecules]
-                    sim_result = compute_pharmacophore_similarity(all_smiles)
-                    if molecules:
-                        _db_sync(_store_property(
-                            molecules[0]["id"], run_uuid, "pharmacophore_similarity", sim_result
-                        ))
-                except Exception as e:
-                    logger.warning("Pharmacophore similarity failed: %s", e)
-
-                _write_log(run_id, "info", f"Pharmacophore mapping complete: {len(molecules)} molecules analyzed")
-                results["pharmacophore"] = f"{len(molecules)} molecules mapped"
-
-            elif calc_type == "activity_cliffs":
-                from pipeline.activity_cliffs import detect_activity_cliffs
-                # Use docking_score as primary activity metric — load from DB
-                existing_props = _db_sync(_get_existing_properties(mol_ids))
-                mol_dicts = []
-                for m in molecules:
-                    d = {"smiles": m["smiles"], "name": m["name"]}
-                    props = existing_props.get(m["id"], {})
-                    for prop_key in ("docking_score", "affinity", "vina_score",
-                                     "composite_score", "cnn_score"):
-                        if props.get(prop_key) is not None:
-                            d[prop_key] = props[prop_key]
-                    # Use best available activity metric
-                    if "docking_score" not in d and "affinity" in d:
-                        d["docking_score"] = d["affinity"]
-                    mol_dicts.append(d)
-                cliff_results = detect_activity_cliffs(mol_dicts, activity_key="docking_score")
-                cliff_entries = []
-                n_cliffs = 0
-                for mol, cliff in zip(molecules, cliff_results):
-                    cliff_entries.append((mol["id"], run_uuid, "activity_cliffs", _filter_cols(cliff, _inc)))
-                    if cliff.get("is_cliff"):
-                        n_cliffs += 1
-                _db_sync(_store_properties_batch(cliff_entries))
-                _write_log(run_id, "info",
-                    f"Activity cliff detection complete: {n_cliffs}/{len(molecules)} molecules are cliffs")
-                results["activity_cliffs"] = f"{n_cliffs} cliffs detected in {len(molecules)} molecules"
+                ref_names = [rl.get("name", f"ref {i+1}") for i, rl in enumerate(ref_ligands)]
+                _write_log(run_id, "info", f"Reference similarity complete: {len(molecules)} molecules scored against {len(ref_ligands)} references ({', '.join(ref_names)})")
+                results["pharmacophore"] = f"{len(molecules)} molecules scored against {len(ref_ligands)} references"
 
             elif calc_type == "composite":
                 from pipeline.scoring import compute_weighted_composite, DEFAULT_COMPOSITE_WEIGHTS
@@ -2378,3 +2506,281 @@ def _run_lead_optimization(run_id: str, run_data: dict) -> dict:
         f"{summary['total_tested']} variants tested across {summary['iterations_completed']} iterations")
     logger.info("Optimization run %s: %d molecules created", run_id, created)
     return summary
+
+
+# ---------------------------------------------------------------------------
+# AFVS run (BDX-41) — Adaptive Focused Virtual Screening
+# ---------------------------------------------------------------------------
+
+async def _get_afvs_job(run_id: str) -> dict | None:
+    """Fetch AFVS job details for a run."""
+    from database_v9 import AsyncSessionV9
+    from models_v9 import AFVSJobORM_V9
+    from sqlalchemy import select
+
+    async with AsyncSessionV9() as session:
+        result = await session.execute(
+            select(AFVSJobORM_V9).where(
+                AFVSJobORM_V9.run_id == uuid.UUID(run_id)
+            )
+        )
+        job = result.scalar_one_or_none()
+        if job:
+            return {
+                "id": job.id,
+                "run_id": job.run_id,
+                "receptor_s3_path": job.receptor_s3_path,
+                "docking_box": job.docking_box,
+                "docking_scenario": job.docking_scenario,
+                "top_n_results": job.top_n_results,
+                "budget_cap_usd": job.budget_cap_usd,
+                "s3_output_prefix": job.s3_output_prefix,
+                "afvs_phase": job.afvs_phase,
+                "molecules_screened": job.molecules_screened,
+                "molecules_imported": job.molecules_imported,
+                "actual_cost_usd": job.actual_cost_usd,
+            }
+    return None
+
+
+async def _update_afvs_job(run_id: str, **fields):
+    """Update AFVS job fields."""
+    from database_v9 import AsyncSessionV9
+    from models_v9 import AFVSJobORM_V9
+    from sqlalchemy import select
+
+    async with AsyncSessionV9() as session:
+        result = await session.execute(
+            select(AFVSJobORM_V9).where(
+                AFVSJobORM_V9.run_id == uuid.UUID(run_id)
+            )
+        )
+        job = result.scalar_one_or_none()
+        if job:
+            for k, v in fields.items():
+                setattr(job, k, v)
+            await session.commit()
+
+
+def _run_afvs(run_id: str, run_data: dict) -> dict:
+    """Execute AFVS screening: SSH to EC2, submit AWS Batch jobs, poll, import results.
+
+    Single-phase flow (AdaptiveFlow v1):
+      1. Load docking context (receptor + pocket box)
+      2. SSH connect → cleanup previous → setup_job (upload receptor, write configs, prepare workunits)
+      3. Submit all workunits to AWS Batch
+      4. Poll job status every 60s (72h timeout, cancel/budget checks)
+      5. Collect top N results from S3 CSV.gz files
+      6. Download + parse results CSV
+      7. Import molecules + docking scores into Phase A
+    """
+    import time as _time
+    from pipeline.afvs import (
+        AFVSController, parse_afvs_results_csv,
+        download_s3_csv, download_s3_csv_via_ec2,
+    )
+
+    config = run_data.get("config", {})
+    phase_id = run_data["phase_id"]
+    str_run_id = str(run_id)
+    job_name = None
+    scenario_name = None
+
+    # Step 1: Load docking context
+    _db_sync(_update_run(str_run_id, progress=5, current_step="Loading receptor"))
+    _write_log(str_run_id, "info", "Fetching docking context (receptor + pocket)")
+
+    ctx = _db_sync(_get_docking_context(phase_id))
+    if not ctx:
+        raise RuntimeError("Docking context not found — configure target + pocket first")
+
+    afvs_job = _db_sync(_get_afvs_job(str_run_id))
+    if not afvs_job:
+        raise RuntimeError("AFVS job record not found")
+
+    prepared_pdb = ctx.get("prepared_pdb")
+    if not prepared_pdb or not Path(str(prepared_pdb)).exists():
+        raise RuntimeError("Prepared receptor PDB not found on disk")
+
+    # Build docking box from pocket config
+    pocket = ctx.get("pocket_config") or {}
+    docking_box = afvs_job.get("docking_box") or {
+        "center_x": pocket.get("center", [0, 0, 0])[0],
+        "center_y": pocket.get("center", [0, 0, 0])[1],
+        "center_z": pocket.get("center", [0, 0, 0])[2],
+        "size_x": pocket.get("size", [22, 22, 22])[0],
+        "size_y": pocket.get("size", [22, 22, 22])[1],
+        "size_z": pocket.get("size", [22, 22, 22])[2],
+    }
+
+    controller = AFVSController()
+
+    try:
+        # Step 2: Connect + setup job on EC2
+        _db_sync(_update_run(str_run_id, progress=10, current_step="Connecting to EC2"))
+        _write_log(str_run_id, "info", "Connecting to AFVS EC2 controller")
+        controller.connect()
+
+        _db_sync(_update_run(str_run_id, progress=15, current_step="Setting up AFVS job"))
+        _write_log(str_run_id, "info", "Cleaning previous workflow + preparing new job")
+        controller.cleanup_previous()
+
+        job_name, scenario_name, num_workunits = controller.setup_job(
+            run_id=str_run_id,
+            receptor_pdb_path=str(prepared_pdb),
+            docking_box=docking_box,
+            config=config,
+        )
+        _write_log(str_run_id, "info",
+            f"Job {job_name} prepared: {num_workunits} workunits, scenario {scenario_name}")
+        _db_sync(_update_afvs_job(
+            str_run_id,
+            s3_output_prefix=f"AF/AFVS/jobs/{job_name}",
+            afvs_work_units=num_workunits,
+        ))
+
+        # Step 3: Submit to AWS Batch
+        _db_sync(_update_run(str_run_id, progress=25, current_step="Submitting to AWS Batch"))
+        _write_log(str_run_id, "info", f"Submitting {num_workunits} workunits to AWS Batch")
+        controller.submit_jobs(num_workunits)
+        _db_sync(_update_afvs_job(str_run_id, afvs_phase="primary_screen"))
+
+        # Step 4: Poll completion (72h timeout, 60s interval)
+        _db_sync(_update_run(str_run_id, progress=30, current_step="Screening in progress"))
+        _write_log(str_run_id, "info", "Polling AWS Batch job status (60s interval, 72h timeout)")
+
+        JOB_TIMEOUT = 72 * 3600  # 72h
+        poll_start = _time.time()
+        last_pct = 0
+
+        while True:
+            # Check cancellation
+            fresh = _db_sync(_get_run(str_run_id))
+            if fresh and fresh["status"] == "cancelled":
+                _write_log(str_run_id, "info", "Cancellation requested — killing all Batch jobs")
+                controller.cancel_all_jobs()
+                _db_sync(_update_afvs_job(str_run_id, afvs_phase="failed"))
+                return {"status": "cancelled", "type": "afvs"}
+
+            # Query batch status
+            status = controller.get_job_status()
+            if status.get("error"):
+                _write_log(str_run_id, "warning", f"Status query issue: {status['error']}")
+            else:
+                pct = status.get("pct", 0)
+                succeeded = status.get("succeeded", 0)
+                failed = status.get("failed", 0)
+                total = status.get("total", 0)
+                running = status.get("running", 0)
+
+                # Update progress (30-75 range for polling phase)
+                progress = 30 + int(pct * 0.45)
+                if pct != last_pct:
+                    _db_sync(_update_run(str_run_id, progress=progress,
+                        current_step=f"Screening: {pct}% ({succeeded}/{total} done, {running} running)"))
+                    last_pct = pct
+
+                if status.get("done"):
+                    _write_log(str_run_id, "info",
+                        f"All jobs complete: {succeeded} succeeded, {failed} failed out of {total}")
+                    _db_sync(_update_afvs_job(str_run_id,
+                        molecules_screened=succeeded * 1000))  # ~1000 ligands/workunit
+                    break
+
+            # Timeout check
+            elapsed = _time.time() - poll_start
+            if elapsed > JOB_TIMEOUT:
+                _write_log(str_run_id, "warning", "72h timeout reached — collecting partial results")
+                break
+
+            _time.sleep(60)
+
+        # Step 5: Collect top results from S3
+        top_n = config.get("top_n_results", 10_000)
+        _db_sync(_update_run(str_run_id, progress=78, current_step=f"Collecting top {top_n} results"))
+        _write_log(str_run_id, "info", f"Collecting top {top_n} results from S3 CSV.gz files")
+
+        s3_csv_path = controller.collect_top_results(job_name, scenario_name, top_n)
+        _write_log(str_run_id, "info", f"Results collected: {s3_csv_path}")
+
+        # Step 6: Download + parse CSV
+        _db_sync(_update_run(str_run_id, progress=82, current_step="Downloading results"))
+        _write_log(str_run_id, "info", "Downloading results CSV from S3")
+
+        try:
+            csv_content = download_s3_csv(s3_csv_path)
+        except Exception as e:
+            _write_log(str_run_id, "warning",
+                f"Direct S3 download failed ({e}), using EC2 fallback")
+            csv_content = download_s3_csv_via_ec2(controller, s3_csv_path)
+
+        molecules = parse_afvs_results_csv(csv_content)
+
+        if not molecules:
+            _write_log(str_run_id, "warning", "No molecules parsed from AFVS results")
+            _db_sync(_update_afvs_job(str_run_id, afvs_phase="completed", molecules_imported=0))
+            return {"type": "afvs", "molecules_imported": 0, "molecules_skipped": 0}
+
+        _write_log(str_run_id, "info", f"Parsed {len(molecules)} molecules from AFVS results")
+
+        # Step 7: Import molecules + store docking scores
+        _db_sync(_update_run(str_run_id, progress=87,
+            current_step=f"Importing {len(molecules)} molecules"))
+        _write_log(str_run_id, "info", f"Importing {len(molecules)} molecules into Phase A")
+
+        created, skipped, created_rows = _db_sync(
+            _create_molecules_batch(phase_id, molecules, uuid.UUID(str_run_id))
+        )
+        _write_log(str_run_id, "info", f"Created {created} molecules, {skipped} duplicates skipped")
+
+        # Store docking scores as properties
+        if created_rows:
+            mol_map = {row[1]: row[0] for row in created_rows}  # canonical_smiles → mol_id
+            score_entries = []
+            for mol in molecules:
+                mol_id = mol_map.get(mol["canonical_smiles"])
+                if mol_id and mol.get("docking_score") is not None:
+                    score_entries.append((
+                        mol_id,
+                        uuid.UUID(str_run_id),
+                        "docking",
+                        {"docking_score": mol["docking_score"], "source": "afvs"},
+                    ))
+            if score_entries:
+                _db_sync(_store_properties_batch(score_entries))
+                _write_log(str_run_id, "info", f"Stored {len(score_entries)} docking scores")
+
+        # Step 8: Finalize
+        _db_sync(_update_run(str_run_id, progress=95, current_step="Finalizing"))
+        _db_sync(_update_afvs_job(
+            str_run_id,
+            afvs_phase="completed",
+            molecules_imported=created,
+        ))
+
+        summary = {
+            "type": "afvs",
+            "molecules_imported": created,
+            "molecules_skipped": skipped,
+            "top_n_requested": top_n,
+            "job_name": job_name,
+        }
+        _write_log(str_run_id, "success",
+            f"AFVS complete: {created} molecules imported from {len(molecules)} results")
+
+        return summary
+
+    except Exception:
+        _db_sync(_update_afvs_job(str_run_id, afvs_phase="failed"))
+        # Try to cancel any running jobs on failure
+        try:
+            controller.cancel_all_jobs()
+        except Exception:
+            pass
+        raise
+    finally:
+        # Cleanup EC2 temporary files (keep scenario for debugging)
+        try:
+            controller.run_command("rm -f /tmp/bindx_status.py /tmp/bindx_collect.py")
+        except Exception:
+            pass

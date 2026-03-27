@@ -162,6 +162,10 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
         score -= 0.05
         flags.append("warning: low oral bioavailability predicted")
 
+    intestinal_perm = _val(absorption, "intestinal_permeability", 0.5)
+    if intestinal_perm > 0.5:
+        score += 0.05
+
     solubility = _val(absorption, "solubility", 0.5)
     # Solubility can be logS (negative) or 0-1 probability
     if solubility < -4:  # logS scale: < -4 is poorly soluble
@@ -199,56 +203,69 @@ def compute_admet_composite(admet: dict) -> tuple[float, list[str], str]:
             cyp_count += 1
 
     if cyp_count >= 3:
-        score -= 0.10
+        score -= 0.06
         flags.append(f"warning: inhibits {cyp_count}/5 major CYP enzymes (DDI risk)")
     elif cyp_count >= 1:
-        score -= 0.03 * cyp_count
+        score -= 0.02 * cyp_count
         flags.append(f"info: inhibits {cyp_count}/5 CYP enzymes")
 
     # --- Excretion ---
     clearance = _val(excretion, "clearance", 0.5)
     if clearance > 0.7:
-        score -= 0.05
+        score -= 0.03
         flags.append("warning: high clearance predicted (short duration)")
     half_life = _val(excretion, "half_life", 0.5)
     if half_life < 0.3:
-        score -= 0.03
+        score -= 0.02
         flags.append("info: short predicted half-life")
 
-    # --- Toxicity (major penalties) ---
+    # --- Toxicity (graduated penalties with correlation cap) ---
+    # ML models (ADMET-AI) have ~70-80% accuracy on toxicity endpoints.
+    # Use high thresholds for ALERT (>0.7) and moderate for warnings (>0.5).
+    # Endpoints are correlated (lipophilic molecules flag hERG + hepatotox + Ames)
+    # so we cap cumulative toxicity penalty to avoid over-penalizing.
+    tox_penalty = 0.0
+
     herg = _val(toxicity, "herg_inhibition", 0.0)
-    if herg > 0.5:
-        score -= 0.20
+    if herg > 0.7:
+        tox_penalty -= 0.10
         flags.append("ALERT: hERG inhibition risk (cardiotoxicity)")
-    elif herg > 0.3:
-        score -= 0.05
+    elif herg > 0.5:
+        tox_penalty -= 0.04
         flags.append("warning: hERG inhibition borderline")
 
     ames = _val(toxicity, "ames_mutagenicity", 0.0)
-    if ames > 0.5:
-        score -= 0.20
+    if ames > 0.7:
+        tox_penalty -= 0.10
         flags.append("ALERT: Ames mutagenicity positive")
-    elif ames > 0.3:
-        score -= 0.05
+    elif ames > 0.5:
+        tox_penalty -= 0.04
         flags.append("warning: Ames mutagenicity borderline")
 
     hepatotox = _val(toxicity, "hepatotoxicity", 0.0)
-    if hepatotox > 0.5:
-        score -= 0.15
+    if hepatotox > 0.7:
+        tox_penalty -= 0.08
         flags.append("ALERT: hepatotoxicity risk")
-    elif hepatotox > 0.3:
-        score -= 0.05
+    elif hepatotox > 0.5:
+        tox_penalty -= 0.03
         flags.append("warning: hepatotoxicity borderline")
 
     skin = _val(toxicity, "skin_sensitization", 0.0)
-    if skin > 0.5:
-        score -= 0.05
+    if skin > 0.7:
+        tox_penalty -= 0.04
         flags.append("warning: skin sensitization risk")
 
     carcino = _val(toxicity, "carcinogenicity", 0.0)
-    if carcino > 0.5:
-        score -= 0.15
+    if carcino > 0.7:
+        tox_penalty -= 0.08
         flags.append("ALERT: carcinogenicity risk")
+    elif carcino > 0.5:
+        tox_penalty -= 0.03
+        flags.append("warning: carcinogenicity borderline")
+
+    # Cap cumulative toxicity penalty — correlated ML endpoints overestimate risk
+    tox_penalty = max(tox_penalty, -0.22)
+    score += tox_penalty
 
     # --- Clamp score to [0, 1] ---
     score = max(0.0, min(1.0, score))
@@ -344,6 +361,14 @@ def predict_herg_specialized(smiles: str) -> dict:
             ic50 *= 0.7
         if aromatic_rings >= 3:
             ic50 *= 0.8
+
+        # Safety factor: small hydrophilic molecules can't block hERG channel
+        # hERG blockers need MW>250 and moderate lipophilicity to fit in the
+        # channel inner cavity (Aronov 2005, Cavalli 2002)
+        if mw < 250 or logp < 0:
+            ic50 *= 2.0  # 2x safety multiplier
+        if mw < 200 and logp < 1:
+            ic50 *= 2.0  # additional multiplier for very small polar molecules
 
         ic50 = round(ic50, 2)
 

@@ -2,12 +2,14 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useWorkspace } from '../contexts/WorkspaceContext.jsx'
 import { useToast } from '../contexts/ToastContext.jsx'
-import { PHASE_TYPES } from '../lib/columns.js'
+import { PHASE_TYPES, FEATURE_TYPES_ORDER } from '../lib/columns.js'
 
 import PhaseCreator from '../components/PhaseCreator.jsx'
 import ProteinViewer from '../components/ProteinViewer.jsx'
+import ViewerDiagnostic from '../components/ViewerDiagnostic.jsx'
 import BindXLogo from '../components/BindXLogo.jsx'
 import CampaignAgentPanel from '../components/CampaignAgentPanel.jsx'
+import { v9AddReferenceLigand, v9RemoveReferenceLigand, v9SuggestLigands } from '../api.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -377,6 +379,274 @@ function CampaignStrategyBrief({ campaign, onSave }) {
   )
 }
 
+
+// ---------------------------------------------------------------------------
+// Reference Ligands Editor — reference similarity setup
+// ---------------------------------------------------------------------------
+
+function ReferenceLigandsEditor({ campaign, project, onSave }) {
+  const { addToast } = useToast()
+  const [references, setReferences] = useState(campaign?.reference_ligands || [])
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newSmiles, setNewSmiles] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [removingIdx, setRemovingIdx] = useState(null)
+  // Suggest ligands state
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestions, setSuggestions] = useState(null)
+
+  // Sync with campaign changes
+  React.useEffect(() => {
+    setReferences(campaign?.reference_ligands || [])
+  }, [campaign?.reference_ligands])
+
+  const handleAdd = async () => {
+    if (!newSmiles.trim() || !campaign?.id) return
+    setSaving(true)
+    try {
+      const result = await v9AddReferenceLigand(campaign.id, newSmiles.trim(), newName.trim() || 'Reference', newSource)
+      setReferences(prev => [...prev, result])
+      setAdding(false)
+      setNewSmiles('')
+      setNewName('')
+      setNewSource(null)
+      setSuggestions(null)
+      addToast(`Reference ligand #${references.length + 1} added`, 'success')
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to add reference ligand', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRemove = async (index) => {
+    if (!campaign?.id) return
+    setRemovingIdx(index)
+    try {
+      const result = await v9RemoveReferenceLigand(campaign.id, index)
+      setReferences(result.reference_ligands)
+      addToast('Reference ligand removed', 'success')
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to remove reference ligand', 'error')
+    } finally {
+      setRemovingIdx(null)
+    }
+  }
+
+  const handleSuggest = async () => {
+    if (!project?.id) return
+    setSuggesting(true)
+    setSuggestions(null)
+    try {
+      const data = await v9SuggestLigands(project.id)
+      setSuggestions(data.suggestions || [])
+    } catch (err) {
+      addToast(err.userMessage || 'Failed to fetch suggestions', 'error')
+      setSuggestions([])
+    } finally {
+      setSuggesting(false)
+    }
+  }
+
+  const [newSource, setNewSource] = useState(null)
+
+  const pickSuggestion = (s) => {
+    setNewSmiles(s.smiles)
+    setNewName(s.name)
+    setNewSource(s.source || null)
+    setSuggestions(null)
+    setAdding(true)
+  }
+
+  const SOURCE_BADGES = {
+    cocrystal: { bg: 'bg-blue-100', text: 'text-blue-600', label: 'Co-crystal' },
+    uniprot: { bg: 'bg-green-100', text: 'text-green-600', label: 'Endogenous' },
+    chembl: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'ChEMBL' },
+    manual: { bg: 'bg-gray-100', text: 'text-gray-500', label: 'Manual' },
+  }
+  const sourceBadge = (src) => {
+    const b = SOURCE_BADGES[src] || SOURCE_BADGES.manual
+    return <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${b.bg} ${b.text}`}>{b.label}</span>
+  }
+
+  const hasRefs = references.length > 0
+  const canAddMore = references.length < 5
+
+  return (
+    <details className="card overflow-hidden group" open={!hasRefs}>
+      <summary className="px-5 py-3 bg-fuchsia-50/50 border-b border-fuchsia-100 flex items-center justify-between cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+        <div className="flex items-center gap-2">
+          <svg className="w-3.5 h-3.5 text-fuchsia-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          <svg className="w-4 h-4 text-fuchsia-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4" />
+          </svg>
+          <h3 className="text-sm font-semibold text-gray-700">Reference Similarity</h3>
+          {hasRefs ? (
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-700">
+              {references.length}/5 ligand{references.length > 1 ? 's' : ''}
+            </span>
+          ) : (
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">No reference</span>
+          )}
+        </div>
+      </summary>
+
+      <div className="px-5 py-4 space-y-3">
+        <p className="text-xs text-gray-500 leading-relaxed">
+          Add up to 5 reference ligands. Each molecule will be scored independently against each reference using 2D pharmacophore fingerprint similarity.
+        </p>
+
+        {/* Reference ligand list */}
+        {hasRefs && (
+          <div className="space-y-2">
+            {references.map((ref, idx) => (
+              <div key={idx} className="bg-fuchsia-50/30 rounded-lg border border-fuchsia-100 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-fuchsia-500 bg-fuchsia-100 w-5 h-5 rounded-full flex items-center justify-center">{idx + 1}</span>
+                    <span className="text-sm font-semibold text-gray-700">{ref.name}</span>
+                    {ref.source === 'cocrystal' && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-600">Co-crystal</span>
+                    )}
+                  </div>
+                  <button onClick={() => handleRemove(idx)} disabled={removingIdx === idx}
+                    className="text-xs text-red-400 hover:text-red-600 font-medium transition-colors disabled:opacity-50">
+                    {removingIdx === idx ? 'Removing...' : 'Remove'}
+                  </button>
+                </div>
+                <span className="text-[10px] text-gray-400 font-mono block truncate" title={ref.smiles}>{ref.smiles}</span>
+                {/* 2D structure */}
+                {ref.feature_map_svg && (
+                  <div className="bg-white rounded-lg border border-gray-100 p-2 flex justify-center">
+                    <div dangerouslySetInnerHTML={{ __html: ref.feature_map_svg }} className="max-w-[180px] [&>svg]:w-full [&>svg]:h-auto" />
+                  </div>
+                )}
+                {/* Feature breakdown */}
+                {ref.ref_feature_counts && (
+                  <div className="grid grid-cols-3 gap-x-2 gap-y-1">
+                    {FEATURE_TYPES_ORDER.map(ft => (
+                      <div key={ft} className="flex items-center justify-between px-2 py-0.5 bg-gray-50 rounded text-xs">
+                        <span className="capitalize text-gray-500">{ft}</span>
+                        <span className="font-medium text-gray-700 tabular-nums">{ref.ref_feature_counts[ft] ?? 0}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Suggestions panel */}
+        {suggestions !== null && (
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl border border-amber-200 overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-amber-100 flex items-center justify-between">
+              <span className="text-sm font-semibold text-amber-800">
+                {suggestions.length > 0 ? `${suggestions.length} suggestion${suggestions.length > 1 ? 's' : ''} found` : 'No ligands found'}
+              </span>
+              <button onClick={() => setSuggestions(null)} className="text-amber-500 hover:text-amber-700 p-1">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {suggestions.length > 0 && (
+              <div className="px-4 py-2 space-y-1.5">
+                {suggestions.map((s, i) => (
+                  <button key={i} onClick={() => pickSuggestion(s)} disabled={!canAddMore}
+                    className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-amber-50/50 transition-colors disabled:opacity-40">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-800 truncate">{s.name}</span>
+                        {sourceBadge(s.source)}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-gray-400 font-mono truncate">{s.smiles?.slice(0, 60)}{s.smiles?.length > 60 ? '...' : ''}</span>
+                        {s.source_label && <span className="text-[9px] text-gray-400">{s.source_label}</span>}
+                      </div>
+                    </div>
+                    <svg className="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Add reference form */}
+        {adding && suggestions === null && (
+          <div className="bg-fuchsia-50/50 rounded-lg border border-fuchsia-200 p-3 space-y-2">
+            <input
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="Name (optional)"
+              className="w-full text-sm px-3 py-1.5 rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-fuchsia-300"
+            />
+            <input
+              value={newSmiles}
+              onChange={e => setNewSmiles(e.target.value)}
+              placeholder="SMILES string"
+              className="w-full text-sm px-3 py-1.5 rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-fuchsia-300 font-mono"
+            />
+            <div className="flex gap-2">
+              <button onClick={handleAdd} disabled={!newSmiles.trim() || saving}
+                className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-50 transition-colors">
+                {saving ? 'Saving...' : `Add reference #${references.length + 1}`}
+              </button>
+              <button onClick={() => { setAdding(false); setNewName(''); setNewSmiles('') }}
+                className="px-3 py-1.5 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        {suggestions === null && !adding && (
+          <div className="flex flex-wrap gap-2">
+            {canAddMore && (
+              <button
+                onClick={() => setAdding(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add reference {references.length > 0 ? `(${references.length}/5)` : ''}
+              </button>
+            )}
+            <button
+              onClick={handleSuggest}
+              disabled={suggesting || !canAddMore}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 transition-colors"
+            >
+              {suggesting ? (
+                <>
+                  <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  Searching...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  Suggest ligands
+                </>
+              )}
+            </button>
+          </div>
+        )}
+      </div>
+    </details>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Edit project inline form
 // ---------------------------------------------------------------------------
@@ -438,8 +708,17 @@ function TargetSummary({ project, onEdit }) {
   const selectedPocketIdx = tp.selected_pocket_index ?? 0
   const selectedPocket = pockets[selectedPocketIdx] || null
   const pdbUrl = structure.download_url || null
+  const functionalResidues = useMemo(
+    () => tp.functional_residues?.residues || [],
+    [tp.functional_residues?.residues]
+  )
+  const uniprotFeatures = useMemo(() => {
+    if (!uniprot.activeSites && !uniprot.bindingSites && !uniprot.domains) return null
+    return { activeSites: uniprot.activeSites, bindingSites: uniprot.bindingSites, domains: uniprot.domains }
+  }, [uniprot.activeSites, uniprot.bindingSites, uniprot.domains])
 
   const [funcExpanded, setFuncExpanded] = useState(false)
+  const [viewerDiag, setViewerDiag] = useState(null)
 
   return (
     <div className="space-y-4">
@@ -507,176 +786,235 @@ function TargetSummary({ project, onEdit }) {
         </div>
       </div>
 
-      {/* Two-column: 3D viewer + info panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: 3D Viewer + Domains/Keywords underneath */}
-        <div className="space-y-4">
+      {/* Function — always visible as project intro */}
+      {uniprot.function && (
+        <div className="card px-5 py-4">
+          <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Function</p>
+          <div className="relative">
+            <p className={`text-sm text-gray-700 leading-relaxed ${!funcExpanded ? 'line-clamp-4' : ''}`}>
+              {uniprot.function}
+            </p>
+            {uniprot.function.length > 300 && (
+              <button
+                onClick={() => setFuncExpanded(v => !v)}
+                className="mt-1 text-sm text-bx-light-text font-medium hover:underline"
+              >
+                {funcExpanded ? 'Show less' : 'Read more...'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ChEMBL + PubChem — side by side */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">ChEMBL</p>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-gray-600"><strong className="text-gray-700">{(chembl.n_actives || 0).toLocaleString()}</strong> actives</span>
+            {chembl.target_chembl_id && (
+              <span className="text-gray-400 font-mono text-[10px]">{chembl.target_chembl_id}</span>
+            )}
+          </div>
+        </div>
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
+          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider">PubChem</p>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-blue-600"><strong className="text-blue-700">{(project.pubchem_compounds_count || pubchem.n_compounds || 0).toLocaleString()}</strong> compounds</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Domains + Keywords + Diseases — always visible */}
+      {(uniprot.domains?.length > 0 || uniprot.keywords?.length > 0 || uniprot.diseases?.length > 0) && (
+        <div className="card px-5 py-4 space-y-3">
+          {uniprot.domains?.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Protein Domains</p>
+              <div className="flex flex-wrap gap-1.5">
+                {uniprot.domains.map((d, i) => (
+                  <span key={i} className="text-sm bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
+                    {d.name} ({d.start}-{d.end})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {uniprot.keywords?.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Keywords</p>
+              <div className="flex flex-wrap gap-1.5">
+                {uniprot.keywords.slice(0, 15).map((k, i) => (
+                  <span key={i} className="text-sm bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{k}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {uniprot.diseases?.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Associated Diseases</p>
+              <div className="flex flex-wrap gap-1.5">
+                {uniprot.diseases.slice(0, 8).map((d, i) => (
+                  <span key={i} className="text-sm bg-red-50 text-red-700 px-2 py-0.5 rounded-md">{d}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3D Structure — collapsible, open by default */}
+      <details className="card overflow-hidden group" open>
+        <summary className="px-5 py-3 flex items-center gap-2 cursor-pointer select-none hover:bg-gray-50 transition-colors">
+          <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">3D Structure</span>
+          {project.target_pdb_id && (
+            <span className="text-xs text-gray-500 font-mono">{project.target_pdb_id}</span>
+          )}
+        </summary>
+        <div className="p-3">
           {pdbUrl ? (
             <ProteinViewer
               pdbUrl={pdbUrl}
               selectedPocket={selectedPocket}
-              uniprotFeatures={uniprot.activeSites || uniprot.bindingSites || uniprot.domains ? {
-                activeSites: uniprot.activeSites,
-                bindingSites: uniprot.bindingSites,
-                domains: uniprot.domains,
-              } : null}
+              uniprotFeatures={uniprotFeatures}
+              functionalResidues={functionalResidues}
               height={400}
+              onDiagnostic={setViewerDiag}
             />
           ) : (
-            <div className="h-[400px] bg-[#0f1923] rounded-xl flex items-center justify-center border border-gray-200">
+            <div className="h-[300px] bg-[#0f1923] rounded-xl flex items-center justify-center border border-gray-200">
               <p className="text-gray-500 text-sm">No 3D structure available</p>
             </div>
           )}
-
         </div>
+      </details>
 
-        {/* Right: Function + Pockets + ChEMBL + Diseases */}
-        <div className="space-y-4">
-          {/* Function — truncated with expand */}
-          {uniprot.function && (
-            <div className="card px-5 py-4">
-              <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Function</p>
-              <div className="relative">
-                <p className={`text-sm text-gray-700 leading-relaxed ${!funcExpanded ? 'line-clamp-4' : ''}`}>
-                  {uniprot.function}
-                </p>
-                {uniprot.function.length > 300 && (
-                  <button
-                    onClick={() => setFuncExpanded(v => !v)}
-                    className="mt-1 text-sm text-bx-light-text font-medium hover:underline"
-                  >
-                    {funcExpanded ? 'Show less' : 'Read more...'}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Pockets */}
-          {pockets.length > 0 && (
-            <div className="card px-5 py-4">
-              <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Binding Pockets</p>
-              <div className="space-y-2">
-                {pockets.map((p, i) => {
-                  const prob = Math.round((p.probability || 0) * 100)
-                  const residues = Array.isArray(p.residues)
-                    ? (typeof p.residues[0] === 'string' && p.residues[0].includes(' ') ? p.residues[0].split(' ') : p.residues)
-                    : []
-                  const isSelected = i === selectedPocketIdx
-                  const center = Array.isArray(p.center) ? p.center : null
-                  return (
-                    <div key={i} className={`rounded-lg p-2.5 ${isSelected ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-amber-400 text-white' : 'bg-gray-200 text-gray-500'}`}>
-                            {i + 1}
-                          </span>
-                          <div>
-                            <span className="text-sm font-medium text-gray-700">Pocket #{i + 1}</span>
-                            {isSelected && <span className="text-[10px] text-amber-500 font-semibold ml-1.5">selected</span>}
-                          </div>
-                        </div>
-                        <span className={`text-sm font-bold tabular-nums ${prob >= 80 ? 'text-green-600' : prob >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
-                          {prob}%
-                        </span>
+      {/* Binding Pockets — collapsible, closed by default */}
+      {pockets.length > 0 && (
+        <details className="card overflow-hidden group">
+          <summary className="px-5 py-3 flex items-center gap-2 cursor-pointer select-none hover:bg-gray-50 transition-colors">
+            <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Binding Pockets</span>
+            <span className="text-xs text-gray-500">{pockets.length} detected</span>
+            {selectedPocket && (
+              <span className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                Pocket #{selectedPocketIdx + 1} selected
+              </span>
+            )}
+          </summary>
+          <div className="px-5 pb-4 space-y-2">
+            {pockets.map((p, i) => {
+              const prob = Math.round((p.probability || 0) * 100)
+              const residues = Array.isArray(p.residues)
+                ? (typeof p.residues[0] === 'string' && p.residues[0].includes(' ') ? p.residues[0].split(' ') : p.residues)
+                : []
+              const isSelected = i === selectedPocketIdx
+              const center = Array.isArray(p.center) ? p.center : null
+              return (
+                <div key={i} className={`rounded-lg p-2.5 ${isSelected ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-amber-400 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                        {i + 1}
+                      </span>
+                      <div>
+                        <span className="text-sm font-medium text-gray-700">Pocket #{i + 1}</span>
+                        {isSelected && <span className="text-[10px] text-amber-500 font-semibold ml-1.5">selected</span>}
                       </div>
-                      <div className="mt-1.5 ml-7 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-400">
-                        {p.method && <span>Method: <span className="text-gray-600 font-medium">{p.method}</span></span>}
-                        <span>Residues: <span className="text-gray-600 font-medium">{residues.length}</span></span>
-                        {p.p2rank_score != null && <span>P2Rank: <span className="text-gray-600 font-medium tabular-nums">{p.p2rank_score.toFixed(2)}</span></span>}
-                        {p.volume > 0 && <span>Volume: <span className="text-gray-600 font-medium tabular-nums">{Math.round(p.volume)} A³</span></span>}
-                        {center && (
-                          <span>Center: <span className="text-gray-600 font-medium tabular-nums">
-                            ({center[0].toFixed(1)}, {center[1].toFixed(1)}, {center[2].toFixed(1)})
-                          </span></span>
-                        )}
-                      </div>
-                      {residues.length > 0 && (
-                        <p className="mt-1 ml-7 text-[9px] text-gray-400 leading-relaxed break-all">
-                          {residues.slice(0, 15).join(', ')}{residues.length > 15 ? `, +${residues.length - 15} more` : ''}
-                        </p>
-                      )}
                     </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ChEMBL info — compact */}
-          <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">ChEMBL</p>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-gray-600"><strong className="text-gray-700">{(chembl.n_actives || 0).toLocaleString()}</strong> actives</span>
-              {chembl.n_with_ic50 > 0 && (
-                <span className="text-gray-500"><strong className="text-gray-600">{chembl.n_with_ic50?.toLocaleString()}</strong> IC50</span>
-              )}
-              {chembl.target_chembl_id && (
-                <span className="text-gray-400 font-mono text-[10px]">{chembl.target_chembl_id}</span>
-              )}
-            </div>
+                    <span className={`text-sm font-bold tabular-nums ${prob >= 80 ? 'text-green-600' : prob >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
+                      {prob}%
+                    </span>
+                  </div>
+                  <div className="mt-1.5 ml-7 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-400">
+                    {p.method && <span>Method: <span className="text-gray-600 font-medium">{p.method}</span></span>}
+                    <span>Residues: <span className="text-gray-600 font-medium">{residues.length}</span></span>
+                    {p.p2rank_score != null && <span>P2Rank: <span className="text-gray-600 font-medium tabular-nums">{p.p2rank_score.toFixed(2)}</span></span>}
+                    {p.volume > 0 && <span>Volume: <span className="text-gray-600 font-medium tabular-nums">{Math.round(p.volume)} A³</span></span>}
+                    {center && (
+                      <span>Center: <span className="text-gray-600 font-medium tabular-nums">
+                        ({center[0].toFixed(1)}, {center[1].toFixed(1)}, {center[2].toFixed(1)})
+                      </span></span>
+                    )}
+                  </div>
+                  {residues.length > 0 && (
+                    <p className="mt-1 ml-7 text-[9px] text-gray-400 leading-relaxed break-all">
+                      {residues.slice(0, 15).join(', ')}{residues.length > 15 ? `, +${residues.length - 15} more` : ''}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
           </div>
-          {/* PubChem info — compact */}
-          <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2.5 flex items-center justify-between">
-            <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider">PubChem</p>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-blue-600"><strong className="text-blue-700">{(project.pubchem_compounds_count || pubchem.n_compounds || 0).toLocaleString()}</strong> compounds</span>
-              {pubchem.gene_name && (
-                <span className="text-blue-400 font-mono text-[10px]">{pubchem.gene_name}</span>
-              )}
-            </div>
+        </details>
+      )}
+
+      {/* Viewer Diagnostic — collapsible, closed by default */}
+      {pdbUrl && (
+        <details className="card overflow-hidden group">
+          <summary className="px-5 py-3 flex items-center gap-2 cursor-pointer select-none hover:bg-gray-50 transition-colors">
+            <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Viewer Diagnostic</span>
+          </summary>
+          <div className="px-1 pb-1">
+            <ViewerDiagnostic
+              pdbUrl={pdbUrl}
+              selectedPocket={selectedPocket}
+              uniprotFeatures={uniprotFeatures}
+              selectedStructure={structure}
+              live={viewerDiag}
+            />
           </div>
+        </details>
+      )}
 
-          {/* Details — collapsible: Domains + Keywords + Diseases */}
-          {(uniprot.domains?.length > 0 || uniprot.keywords?.length > 0 || uniprot.diseases?.length > 0) && (
-            <details className="card overflow-hidden group">
-              <summary className="px-5 py-3 flex items-center gap-2 cursor-pointer select-none hover:bg-gray-50 transition-colors">
-                <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-                <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Details</span>
-              </summary>
-              <div className="px-5 pb-4 space-y-3">
-                {uniprot.domains?.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Protein Domains</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {uniprot.domains.map((d, i) => (
-                        <span key={i} className="text-sm bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md">
-                          {d.name} ({d.start}-{d.end})
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {uniprot.keywords?.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Keywords</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {uniprot.keywords.slice(0, 15).map((k, i) => (
-                        <span key={i} className="text-sm bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md">{k}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {uniprot.diseases?.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Associated Diseases</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {uniprot.diseases.slice(0, 8).map((d, i) => (
-                        <span key={i} className="text-sm bg-red-50 text-red-700 px-2 py-0.5 rounded-md">{d}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+      {/* Key Binding Residues — collapsible, closed by default */}
+      {functionalResidues.length > 0 && (
+        <details className="card overflow-hidden group">
+          <summary className="px-5 py-3 flex items-center gap-2 cursor-pointer select-none hover:bg-gray-50 transition-colors">
+            <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Key Binding Residues</span>
+            <span className="text-xs text-gray-500">{functionalResidues.filter(r => r.importance === 'key').length} key / {functionalResidues.length} total</span>
+          </summary>
+          <div className="px-5 pb-4 space-y-2">
+            {/* Key residues */}
+            {functionalResidues.filter(r => r.importance === 'key').length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider mb-1.5">Key Residues</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {functionalResidues.filter(r => r.importance === 'key').map((r, i) => (
+                    <span key={i} className="text-[11px] font-mono bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-md" title={r.description}>
+                      {r.aa || '?'}{r.number} <span className="text-amber-400 text-[9px]">{r.role === 'active_site' ? 'active' : 'binding'}</span>
+                    </span>
+                  ))}
+                </div>
               </div>
-            </details>
-          )}
-
-          {/* Receptor Preparation Report */}
-          <ReceptorPrepReport report={project.receptor_prep_report} config={project.receptor_prep_config} projectId={project.id} hasTarget={!!project.target_preview} />
-        </div>
-      </div>
+            )}
+            {/* Other residues */}
+            {functionalResidues.filter(r => r.importance !== 'key').length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Other Functional Residues</p>
+                <div className="flex flex-wrap gap-1">
+                  {functionalResidues.filter(r => r.importance !== 'key').map((r, i) => (
+                    <span key={i} className="text-[10px] font-mono bg-gray-50 text-gray-500 px-1.5 py-0.5 rounded" title={r.description}>
+                      {r.aa || '?'}{r.number}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </details>
+      )}
     </div>
   )
 }
@@ -697,7 +1035,6 @@ const PREP_STEPS = [
 ]
 
 function ReceptorPrepReport({ report, config, projectId, hasTarget }) {
-  const [expanded, setExpanded] = useState(false)
   const [preparing, setPreparing] = useState(false)
   const [error, setError] = useState(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -729,17 +1066,26 @@ function ReceptorPrepReport({ report, config, projectId, hasTarget }) {
       }
     }
     return (
-      <div className="card px-5 py-4">
-        <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Receptor Preparation</p>
-        <p className="text-xs text-gray-500 mb-3">
-          7-step pipeline: cleaning, non-standard residues, protonation, energy minimization, PDBQT conversion.
-        </p>
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 bg-emerald-50/50 border-b border-emerald-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-1.47 4.9a2.25 2.25 0 01-2.156 1.6H8.626a2.25 2.25 0 01-2.156-1.6L5 14.5m14 0H5" />
+            </svg>
+            <h3 className="text-sm font-semibold text-gray-700">Receptor Preparation</h3>
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Not prepared</span>
+          </div>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-xs text-gray-500 mb-3">
+            7-step pipeline: cleaning, non-standard residues, protonation, energy minimization, PDBQT conversion.
+          </p>
 
-        {/* Advanced settings — collapsible */}
-        <details open={showAdvanced} onToggle={e => setShowAdvanced(e.target.open)} className="mb-3">
-          <summary className="text-[11px] font-medium text-gray-400 cursor-pointer hover:text-gray-600 select-none">
-            Advanced settings
-          </summary>
+          {/* Advanced settings — collapsible */}
+          <details open={showAdvanced} onToggle={e => setShowAdvanced(e.target.open)} className="mb-3">
+            <summary className="text-[11px] font-medium text-gray-400 cursor-pointer hover:text-gray-600 select-none">
+              Advanced settings
+            </summary>
           <div className="mt-2 space-y-2.5 pl-1">
             {/* pH */}
             <div className="flex items-center justify-between gap-3">
@@ -809,7 +1155,8 @@ function ReceptorPrepReport({ report, config, projectId, hasTarget }) {
               Preparing…
             </span>
           ) : 'Prepare Receptor'}
-        </button>
+          </button>
+        </div>
       </div>
     )
   }
@@ -817,14 +1164,24 @@ function ReceptorPrepReport({ report, config, projectId, hasTarget }) {
   // Config set but no report yet — preparation in progress
   if (!report) {
     return (
-      <div className="card px-5 py-4">
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-amber-500 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-          </svg>
-          <p className="text-sm font-semibold text-amber-600">Receptor preparation in progress…</p>
+      <div className="card overflow-hidden">
+        <div className="px-5 py-3 bg-emerald-50/50 border-b border-emerald-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-1.47 4.9a2.25 2.25 0 01-2.156 1.6H8.626a2.25 2.25 0 01-2.156-1.6L5 14.5m14 0H5" />
+            </svg>
+            <h3 className="text-sm font-semibold text-gray-700">Receptor Preparation</h3>
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 inline-flex items-center gap-1">
+              <svg className="w-3 h-3 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+              </svg>
+              In progress
+            </span>
+          </div>
         </div>
-        <p className="text-xs text-gray-400 mt-1">This may take 1-2 minutes. Refresh the page to check.</p>
+        <div className="px-5 py-4">
+          <p className="text-xs text-gray-400">This may take 1-2 minutes. Refresh the page to check.</p>
+        </div>
       </div>
     )
   }
@@ -870,15 +1227,20 @@ function ReceptorPrepReport({ report, config, projectId, hasTarget }) {
   }
 
   return (
-    <details className="card overflow-hidden group" open={expanded} onToggle={e => setExpanded(e.target.open)}>
-      <summary className="px-5 py-3 flex items-center gap-2 cursor-pointer select-none hover:bg-gray-50 transition-colors">
-        <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
-        <span className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Receptor Preparation</span>
-        <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${allGood ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-          {completedCount}/{totalSteps} steps
-        </span>
+    <details className="card overflow-hidden group">
+      <summary className="px-5 py-3 bg-emerald-50/50 border-b border-emerald-100 flex items-center justify-between cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+        <div className="flex items-center gap-2">
+          <svg className="w-3.5 h-3.5 text-emerald-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          <svg className="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-1.47 4.9a2.25 2.25 0 01-2.156 1.6H8.626a2.25 2.25 0 01-2.156-1.6L5 14.5m14 0H5" />
+          </svg>
+          <h3 className="text-sm font-semibold text-gray-700">Receptor Preparation</h3>
+          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${allGood ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            {completedCount}/{totalSteps} steps
+          </span>
+        </div>
       </summary>
 
       <div className="px-5 pb-4 space-y-3">
@@ -1334,6 +1696,12 @@ export default function ProjectHome() {
 
           {/* AI Strategy Brief */}
           <CampaignStrategyBrief campaign={campaign} onSave={updateCampaign} />
+
+          {/* Receptor Preparation */}
+          <ReceptorPrepReport report={project.receptor_prep_report} config={project.receptor_prep_config} projectId={project.id} hasTarget={!!project.target_preview} />
+
+          {/* Reference Similarity */}
+          <ReferenceLigandsEditor campaign={campaign} project={project} onSave={updateCampaign} />
 
           {/* Drug Discovery Funnel */}
           <div className="card px-6 py-6">

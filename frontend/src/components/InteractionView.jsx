@@ -69,7 +69,7 @@ function QualityBar({ value }) {
 function TypeBadge({ type }) {
   const cfg = getTypeConfig(type)
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-sm font-semibold ${cfg.bg} ${cfg.text}`}>
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${cfg.bg} ${cfg.text}`}>
       <span
         className="w-1.5 h-1.5 rounded-full flex-shrink-0"
         style={{ backgroundColor: cfg.dot }}
@@ -85,12 +85,14 @@ function TypeBadge({ type }) {
 function FunctionalIcon({ is_functional }) {
   if (is_functional) {
     return (
-      <svg className="w-4 h-4 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-      </svg>
+      <div className="flex justify-center">
+        <svg className="w-3.5 h-3.5 text-bx-mint" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
     )
   }
-  return <span className="text-gray-300 text-sm leading-none">&#8212;</span>
+  return <div className="flex justify-center"><span className="text-gray-300 text-[10px] leading-none">—</span></div>
 }
 
 // --------------------------------------------------
@@ -110,10 +112,10 @@ const ORIGIN_STYLES = {
 
 function OriginBadge({ residueNumber, residueOrigins }) {
   const origin = residueOrigins?.[residueNumber]
-  if (!origin) return <span className="text-gray-300 text-xs">—</span>
+  if (!origin) return <span className="text-gray-300 text-[10px]">—</span>
   const style = ORIGIN_STYLES[origin.role] || ORIGIN_STYLES.site
   return (
-    <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${style.bg} ${style.text}`}>
+    <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${style.bg} ${style.text}`}>
       {style.label}
     </span>
   )
@@ -169,24 +171,24 @@ export default function InteractionView({ interactions, onResidueClick, residueO
       {/* Interaction table */}
       {rows.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-gray-100">
-          <table className="w-full text-sm">
+          <table className="w-full text-[11px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
+                <th className="text-left px-2 py-1.5 font-semibold text-gray-500 uppercase tracking-wide text-[9px]">
                   Residue
                 </th>
-                <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
+                <th className="text-left px-2 py-1.5 font-semibold text-gray-500 uppercase tracking-wide text-[9px]">
                   Type
                 </th>
-                <th className="text-left px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
+                <th className="text-left px-2 py-1.5 font-semibold text-gray-500 uppercase tracking-wide text-[9px]">
                   Origin
                 </th>
-                <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
+                <th className="text-right px-2 py-1.5 font-semibold text-gray-500 uppercase tracking-wide text-[9px]">
                   Dist.
                   <InfoTip text="Distance between closest ligand atom and residue atom (Å). Shorter = stronger interaction. H-bonds: 2.5–3.5Å, Hydrophobic: <4.0Å, VDW: 3.5–4.5Å." />
                 </th>
-                <th className="text-center px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">
-                  Functional
+                <th className="text-center px-2 py-1.5 font-semibold text-gray-500 uppercase tracking-wide text-[9px]">
+                  Func.
                   <InfoTip text="Residue is part of the known functional/catalytic site of the protein." />
                 </th>
               </tr>
@@ -198,21 +200,16 @@ export default function InteractionView({ interactions, onResidueClick, residueO
                   className={`hover:bg-gray-50 transition-colors ${row.is_functional ? 'bg-green-50/30' : ''} ${onResidueClick ? 'cursor-pointer' : ''}`}
                   onClick={onResidueClick ? () => onResidueClick(row.residue_number, row.residue) : undefined}
                 >
-                  <td className="px-3 py-2 font-mono font-semibold text-bx-light-text">
+                  <td className="px-2 py-1.5 font-mono font-semibold text-bx-light-text text-[11px]">
                     {row.residue}
-                    {row.residue_number !== undefined && row.residue_number !== null && (
-                      <span className="text-gray-400 font-normal ml-1 text-[10px]">
-                        #{row.residue_number}
-                      </span>
-                    )}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-1.5">
                     <TypeBadge type={row.type} />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-1.5">
                     <OriginBadge residueNumber={row.residue_number} residueOrigins={residueOrigins} />
                   </td>
-                  <td className="px-3 py-2 text-right font-mono text-sm tabular-nums">
+                  <td className="px-2 py-1.5 text-right font-mono text-[11px] tabular-nums">
                     {row.distance != null ? (
                       <span className={
                         row.distance <= 3.0 ? 'text-green-600 font-bold' :
@@ -226,7 +223,7 @@ export default function InteractionView({ interactions, onResidueClick, residueO
                       <span className="text-gray-300">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-center">
+                  <td className="px-2 py-1.5 text-center">
                     <FunctionalIcon is_functional={row.is_functional} />
                   </td>
                 </tr>
@@ -240,12 +237,12 @@ export default function InteractionView({ interactions, onResidueClick, residueO
 
       {/* Method badge */}
       <div className="flex justify-end">
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium border ${
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${
           isMock
             ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
             : 'bg-green-50 text-green-700 border-green-200'
         }`}>
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
           </svg>

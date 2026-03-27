@@ -34,6 +34,15 @@ services:
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
       - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
       - GNINA_ENDPOINT_ID=${GNINA_ENDPOINT_ID:-weeeiy6z4jdsv3}
+      # AFVS (BDX-41)
+      - AFVS_EC2_HOST=${AFVS_EC2_HOST:-}
+      - AFVS_EC2_USER=${AFVS_EC2_USER:-ubuntu}
+      - AFVS_SSH_KEY_PATH=/app/secrets/afvs_ec2_key.pem
+      - AFVS_S3_JOB_BUCKET=${AFVS_S3_JOB_BUCKET:-bindx-afvs-outputs}
+      - AFVS_S3_DATA_BUCKET=${AFVS_S3_DATA_BUCKET:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
     depends_on:
       redis:
         condition: service_healthy
@@ -51,6 +60,7 @@ services:
       - bindx_data:/data
       - aizynthfinder_data:/data/aizynthfinder
       - chembl_data:/data/chembl
+      - ${AFVS_SSH_KEY_DIR:-./secrets}:/app/secrets:ro
     environment:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -77,6 +87,15 @@ services:
       - GPU_MAX_PARALLEL=${GPU_MAX_PARALLEL:-8}
       - RUNPOD_TIMEOUT=${RUNPOD_TIMEOUT:-600}
       - GNINA_NUM_CPU=${GNINA_NUM_CPU:-0}
+      # AFVS (BDX-41)
+      - AFVS_EC2_HOST=${AFVS_EC2_HOST:-}
+      - AFVS_EC2_USER=${AFVS_EC2_USER:-ubuntu}
+      - AFVS_SSH_KEY_PATH=/app/secrets/afvs_ec2_key.pem
+      - AFVS_S3_JOB_BUCKET=${AFVS_S3_JOB_BUCKET:-bindx-afvs-outputs}
+      - AFVS_S3_DATA_BUCKET=${AFVS_S3_DATA_BUCKET:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
     depends_on:
       redis:
         condition: service_healthy

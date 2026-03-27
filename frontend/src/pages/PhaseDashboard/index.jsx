@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 
 import { useWorkspace } from '../../contexts/WorkspaceContext.jsx'
 import { useToast } from '../../contexts/ToastContext.jsx'
-import { v9UpdateAnnotations } from '../../api.js'
+import { v9UpdateAnnotations, v9LaunchAFVS, v9CancelAFVS } from '../../api.js'
 import { ALL_COLUMNS, COLUMN_PRESETS, PHASE_TYPES, flattenMoleculeProperties, detectAvailableColumns } from '../../lib/columns.js'
 
 import MoleculeTable from '../../components/MoleculeTable.jsx'
@@ -15,6 +15,7 @@ import FreezeDialog from '../../components/FreezeDialog.jsx'
 import ParetoFront from '../../components/ParetoFront.jsx'
 import AnalyticsPanel from '../../components/AnalyticsPanel.jsx'
 import ExportModal from '../../components/ExportModal.jsx'
+import ReportBuilderModal from '../../components/ReportBuilderModal.jsx'
 import CampaignAgentPanel from '../../components/CampaignAgentPanel.jsx'
 import InfoTip, { TIPS } from '../../components/InfoTip.jsx'
 
@@ -123,6 +124,7 @@ export default function PhaseDashboard() {
   const [popupState, setPopupState] = useState(null) // { type: 'safety'|'retrosynthesis'|'confidence', molecule }
   const [showExportModal, setShowExportModal] = useState(false)
   const [showAgentPanel, setShowAgentPanel] = useState(false)
+  const [showReportBuilder, setShowReportBuilder] = useState(false)
   const [showRunLogs, setShowRunLogs] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(true)
   const [advancedFilterFn, setAdvancedFilterFn] = useState(null)
@@ -157,7 +159,7 @@ export default function PhaseDashboard() {
 
   // Active run (first created/running run) + queued count
   const activeRun = useMemo(
-    () => currentPhaseRuns.find(r => r.status === 'created' || r.status === 'running') || null,
+    () => currentPhaseRuns.find(r => (r.status === 'created' || r.status === 'running') && r.type !== 'afvs') || null,
     [currentPhaseRuns]
   )
   const queuedRunCount = useMemo(
@@ -338,6 +340,13 @@ export default function PhaseDashboard() {
         await importDatabase(phaseId, payload)
         const sourceLabels = { zinc: 'ZINC20', chembl: 'ChEMBL', pubchem: 'PubChem', enamine: 'Enamine REAL', fragments: 'Fragment Library' }
         addToast(`Fetching compounds from ${sourceLabels[db] || db}...`, 'success')
+      } else if (runConfig.config?._afvs) {
+        // AFVS ultra-large screening
+        const afvsConfig = { ...runConfig.config }
+        delete afvsConfig._afvs
+        delete afvsConfig._celery_task_id
+        await v9LaunchAFVS(phaseId, afvsConfig)
+        addToast('AFVS screening launched on AWS Batch', 'success')
       } else {
         // Standard run (calculation, generation, SMILES import)
         await createRun(phaseId, runConfig)
@@ -354,12 +363,18 @@ export default function PhaseDashboard() {
 
   const handleCancelRun = useCallback(async (runId) => {
     try {
-      await cancelRun(runId)
+      // Check if this is an AFVS run — use dedicated cancel endpoint
+      const run = currentPhaseRuns?.find(r => r.id === runId)
+      if (run?.type === 'afvs') {
+        await v9CancelAFVS(runId)
+      } else {
+        await cancelRun(runId)
+      }
       addToast('Run cancelled', 'info')
     } catch (err) {
       addToast(err.userMessage || 'Failed to cancel run', 'error')
     }
-  }, [cancelRun, addToast])
+  }, [cancelRun, currentPhaseRuns, addToast])
 
   const handleArchiveRun = useCallback(async (runId) => {
     try {
@@ -373,6 +388,15 @@ export default function PhaseDashboard() {
   const handleExport = useCallback(() => {
     setShowExportModal(true)
   }, [])
+
+  const handleOpenSAR = useCallback(() => {
+    navigate(`/project/${projectId}/phase/${phaseId}/activity`)
+  }, [navigate, projectId, phaseId])
+
+  const handleCompare = useCallback(() => {
+    const ids = [...selectedMoleculeIds].join(',')
+    navigate(`/project/${projectId}/phase/${phaseId}/compare?ids=${ids}`)
+  }, [navigate, projectId, phaseId, selectedMoleculeIds])
 
   const handleFreezeToggle = useCallback(() => setShowFreezeDialog(true), [])
   const handleFreezeConfirm = useCallback(() => {
@@ -480,6 +504,7 @@ export default function PhaseDashboard() {
   }, [currentCampaign, currentPhase, createRun, createPhase, bookmarkedCount, addToast, navigate, projectId])
 
   const showDetail = !!selectedMolecule
+  const [panelPosition, setPanelPosition] = useState('right') // 'right' | 'bottom'
 
   // --- Loading / not found ---
   if (!currentPhase) {
@@ -511,6 +536,9 @@ export default function PhaseDashboard() {
           onDeletePhase={handleDeletePhase}
           onSendToNextPhase={handleSendToNextPhase}
           bookmarkedCount={bookmarkedCount}
+
+          onOpenSAR={handleOpenSAR}
+          onOpenReport={() => setShowReportBuilder(true)}
         />
 
         {/* Active run progress */}
@@ -556,6 +584,7 @@ export default function PhaseDashboard() {
           selectedMoleculeIds={selectedMoleculeIds}
           submitting={runSubmitting}
           project={currentProject}
+          campaign={currentCampaign}
           runs={currentPhaseRuns}
         />
         <FreezeDialog
@@ -591,6 +620,8 @@ export default function PhaseDashboard() {
         onDeletePhase={handleDeletePhase}
         onSendToNextPhase={handleSendToNextPhase}
         bookmarkedCount={bookmarkedCount}
+        onOpenSAR={handleOpenSAR}
+        onOpenReport={() => setShowReportBuilder(true)}
       />
 
       {/* Active run progress */}
@@ -622,6 +653,7 @@ export default function PhaseDashboard() {
         onExport={handleExport}
         onBookmarkSelected={bookmarkSelected}
         onSendToNextPhase={!isFrozen && bookmarkedCount > 0 ? handleSendToNextPhase : undefined}
+        onCompare={handleCompare}
         isFrozen={isFrozen}
       />
 
@@ -633,9 +665,9 @@ export default function PhaseDashboard() {
       />
 
       {/* Table + Detail panel split layout */}
-      <div className="flex gap-4 items-start">
-        {/* Table (60% when drawer open, 100% when closed) */}
-        <div className={`min-w-0 space-y-2 transition-all duration-200 ${showDetail ? 'flex-1' : 'w-full'}`}>
+      <div className={`${showDetail && panelPosition === 'right' ? 'flex gap-4 items-start' : 'space-y-4'}`}>
+        {/* Table (60% when drawer open on right, 100% otherwise) */}
+        <div className={`min-w-0 space-y-2 transition-all duration-200 ${showDetail && panelPosition === 'right' ? 'flex-1' : 'w-full'}`}>
 
           <MoleculeTable
             molecules={filteredMolecules}
@@ -663,9 +695,9 @@ export default function PhaseDashboard() {
           />
         </div>
 
-        {/* Detail panel (40% fixed width when open) */}
+        {/* Detail panel */}
         {showDetail && selectedMolecule && (
-          <div className="flex-shrink-0 w-[40%] min-w-[300px] max-w-[520px]">
+          <div className={panelPosition === 'bottom' ? 'w-full' : 'flex-shrink-0 w-[40%] min-w-[300px] max-w-[520px]'}>
             <MoleculeDetailPanel
               molecule={(() => {
                 const flat = flatMolecules.find(m => m.id === selectedMolecule.id) || selectedMolecule
@@ -678,8 +710,11 @@ export default function PhaseDashboard() {
               onRowClick={handleRowClick}
               isFrozen={isFrozen}
               project={currentProject}
+              campaign={currentCampaign}
               selectedMolecules={highlightedIds.size > 0 ? phaseMolecules.filter(m => highlightedIds.has(m.id)) : null}
               onCellPopup={handleCellPopup}
+              panelPosition={panelPosition}
+              onTogglePosition={() => setPanelPosition(p => p === 'right' ? 'bottom' : 'right')}
             />
           </div>
         )}
@@ -834,6 +869,7 @@ export default function PhaseDashboard() {
         selectedMoleculeIds={selectedMoleculeIds}
         submitting={runSubmitting}
         project={currentProject}
+        campaign={currentCampaign}
         runs={currentPhaseRuns}
       />
 
@@ -864,6 +900,15 @@ export default function PhaseDashboard() {
         molecules={filteredMolecules}
         selectedIds={selectedMoleculeIds}
         columns={visibleColumns}
+        onToast={addToast}
+      />
+
+      {/* Report builder modal */}
+      <ReportBuilderModal
+        isOpen={showReportBuilder}
+        onClose={() => setShowReportBuilder(false)}
+        phaseId={phaseId}
+        selectedMoleculeIds={selectedMoleculeIds}
         onToast={addToast}
       />
 

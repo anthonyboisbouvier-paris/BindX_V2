@@ -159,6 +159,23 @@ export async function v9UpdateCampaign(campaignId, data) {
   return response.data
 }
 
+export async function v9AddReferenceLigand(campaignId, smiles, name, source) {
+  const payload = { smiles, name }
+  if (source) payload.source = source
+  const response = await apiClient.post(`/v9/campaigns/${campaignId}/reference-ligands`, payload)
+  return response.data
+}
+
+export async function v9RemoveReferenceLigand(campaignId, index) {
+  const response = await apiClient.delete(`/v9/campaigns/${campaignId}/reference-ligands/${index}`)
+  return response.data
+}
+
+export async function v9SuggestLigands(projectId) {
+  const response = await apiClient.get(`/v9/projects/${projectId}/suggest-ligands`, { timeout: 30000 })
+  return response.data
+}
+
 export async function v9ListPhases(campaignId) {
   const response = await apiClient.get(`/v9/campaigns/${campaignId}/phases`)
   return response.data
@@ -287,6 +304,16 @@ export async function v9UpdateAnnotations(moleculeId, annotations) {
 // V9: Utilities
 // ---------------------------------------------------------------------------
 
+export async function v9GetFeatureMap(moleculeId) {
+  const response = await apiClient.get(`/v9/molecules/${moleculeId}/feature-map`, { responseType: 'text' })
+  return response.data
+}
+
+export async function v9FeatureMapFromSmiles(smiles) {
+  const response = await apiClient.post('/v9/feature-map', { smiles }, { responseType: 'text' })
+  return response.data
+}
+
 export async function v9SmilesToMolblock(smiles) {
   const response = await apiClient.post('/v9/molecule/smiles-to-3d', { smiles })
   return response.data
@@ -299,6 +326,82 @@ export async function v9PredictStructure(sequence) {
 
 export async function v9GpuHealth() {
   const response = await apiClient.get('/v9/health/gpu')
+  return response.data
+}
+
+// ---------------------------------------------------------------------------
+// V9: Analytics & Reports
+// ---------------------------------------------------------------------------
+
+export async function v9GetTsne(phaseId) {
+  const response = await apiClient.get(`/v9/phases/${phaseId}/analytics/tsne`, { timeout: 120000 })
+  return response.data
+}
+
+export async function v9GetSARAnalysis(phaseId, propertyKey = 'auto', scaffold = null, matrixR1 = null, matrixR2 = null, rFilters = null) {
+  const params = { property_key: propertyKey }
+  if (scaffold) params.scaffold = scaffold
+  if (matrixR1) params.matrix_r1 = matrixR1
+  if (matrixR2) params.matrix_r2 = matrixR2
+  if (rFilters) params.r_filters = rFilters
+  const res = await apiClient.get(`/v9/phases/${phaseId}/sar`, {
+    params,
+    timeout: 120000,
+  })
+  return res.data
+}
+
+export async function v9ApplyMMPTransform(phaseId, fromSmiles, toSmiles, moleculeIds = null, maxResults = 50) {
+  const payload = { from_smiles: fromSmiles, to_smiles: toSmiles, max_results: maxResults }
+  if (moleculeIds) payload.molecule_ids = moleculeIds
+  const res = await apiClient.post(`/v9/phases/${phaseId}/sar/apply-mmp`, payload, { timeout: 60000 })
+  return res.data
+}
+
+export async function v9ImportMMPSuggestions(phaseId, smilesList, names = null, transform = null) {
+  const payload = { smiles_list: smilesList }
+  if (names) payload.names = names
+  if (transform) payload.transform = transform
+  const res = await apiClient.post(`/v9/phases/${phaseId}/sar/import-suggestions`, payload)
+  return res.data
+}
+
+export async function v9SmilesToSvg(smiles, width = 120, height = 80) {
+  const r = await apiClient.post('/v9/molecule/smiles-to-svg',
+    { smiles, width, height }, { responseType: 'text' })
+  return r.data
+}
+
+export async function v9SmilesToSvgDiff(smiles_a, smiles_b, width = 150, height = 100) {
+  const r = await apiClient.post('/v9/molecule/smiles-to-svg-diff',
+    { smiles_a, smiles_b, width, height })
+  return r.data
+}
+
+export async function v9GenerateReport(phaseId, options = {}) {
+  const response = await apiClient.post(`/v9/phases/${phaseId}/report`, options, {
+    responseType: 'blob',
+    timeout: 120000,
+  })
+  return response.data
+}
+
+// ---------------------------------------------------------------------------
+// AFVS (BDX-41)
+// ---------------------------------------------------------------------------
+
+export async function v9LaunchAFVS(phaseId, config) {
+  const response = await apiClient.post(`/v9/phases/${phaseId}/runs/afvs`, config)
+  return response.data
+}
+
+export async function v9CancelAFVS(runId) {
+  const response = await apiClient.delete(`/v9/runs/${runId}/afvs`)
+  return response.data
+}
+
+export async function v9GetAFVSStatus(runId) {
+  const response = await apiClient.get(`/v9/runs/${runId}/afvs/status`)
   return response.data
 }
 

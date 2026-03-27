@@ -1,5 +1,18 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useLayoutEffect, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import InfoTip from './InfoTip.jsx'
+
+// --------------------------------------------------
+// smiles-drawer lazy-load (same pattern as MoleculeTable)
+// --------------------------------------------------
+let _sdPromise = null
+function getSmilesDrawer() {
+  if (!_sdPromise) {
+    _sdPromise = import('smiles-drawer').then(mod => mod.default || mod)
+  }
+  return _sdPromise
+}
+const _treeSvgCache = new Map()
 
 // --------------------------------------------------
 // Color helpers
@@ -50,7 +63,7 @@ function SummaryBar({ nSteps, confidence, estimatedCost, allReagentsAvailable })
           Cost: {estimatedCost}
         </span>
       )}
-      {allReagentsAvailable !== undefined && (
+      {allReagentsAvailable != null && (
         <span className={`flex items-center gap-1 text-sm font-medium ${allReagentsAvailable ? 'text-green-600' : 'text-orange-500'}`}>
           {allReagentsAvailable ? (
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -69,88 +82,314 @@ function SummaryBar({ nSteps, confidence, estimatedCost, allReagentsAvailable })
 }
 
 // --------------------------------------------------
-// Recursive tree node
+// NodeSmilesImage — compact 2D structure for tree nodes
 // --------------------------------------------------
+const IMG_W = 100, IMG_H = 65
+
+function NodeSmilesImage({ smiles }) {
+  const [svgHtml, setSvgHtml] = useState(() => _treeSvgCache.get(smiles) || null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (!smiles) return
+    if (_treeSvgCache.has(smiles)) { setSvgHtml(_treeSvgCache.get(smiles)); return }
+    let cancelled = false
+    getSmilesDrawer().then(SD => {
+      if (cancelled) return
+      try {
+        SD.parse(smiles, (tree) => {
+          if (cancelled) return
+          const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+          svgEl.setAttribute('width', String(IMG_W))
+          svgEl.setAttribute('height', String(IMG_H))
+          document.body.appendChild(svgEl)
+          const drawer = new SD.SvgDrawer({ width: IMG_W, height: IMG_H })
+          drawer.draw(tree, svgEl, 'light')
+          const html = svgEl.outerHTML
+          document.body.removeChild(svgEl)
+          _treeSvgCache.set(smiles, html)
+          if (!cancelled) setSvgHtml(html)
+        }, () => { if (!cancelled) setFailed(true) })
+      } catch { if (!cancelled) setFailed(true) }
+    }).catch(() => { if (!cancelled) setFailed(true) })
+    return () => { cancelled = true }
+  }, [smiles])
+
+  if (!smiles) return null
+
+  if (failed) {
+    const t = smiles.length > 20 ? smiles.slice(0, 20) + '…' : smiles
+    return (
+      <div className="flex items-center justify-center bg-gray-50 rounded" style={{ width: IMG_W, height: IMG_H }}>
+        <span className="font-mono text-[8px] text-gray-400 px-1 text-center break-all leading-tight" title={smiles}>{t}</span>
+      </div>
+    )
+  }
+
+  if (!svgHtml) {
+    return (
+      <div className="flex items-center justify-center" style={{ width: IMG_W, height: IMG_H }}>
+        <div className="w-4 h-4 border-2 border-gray-200 border-t-purple-400 rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="flex items-center justify-center"
+      style={{ width: IMG_W, height: IMG_H }}
+      dangerouslySetInnerHTML={{ __html: svgHtml }}
+    />
+  )
+}
+
+// --------------------------------------------------
+// Pure-CSS connector tree (no JS measurement needed)
+// Uses CSS grid for perfect horizontal alignment
+// --------------------------------------------------
+
+// Card width constant
+const CARD_W = 150
+
 function TreeNode({ node, depth }) {
   const [expanded, setExpanded] = useState(true)
   if (!node) return null
 
   const isTarget  = node.type === 'target'   || depth === 0
   const isReagent = node.type === 'reagent'  || node.type === 'commercial'
-  const available = node.available !== false
+  const hasAvailability = node.available != null  // null/undefined = no data (RDKit)
+  const available = node.available === true
   const hasChildren = Array.isArray(node.children) && node.children.length > 0
-  const displayName = node.name || (node.smiles ? node.smiles.slice(0, 26) : null)
-    || (isTarget ? 'Target Molecule' : isReagent ? 'Reagent' : 'Intermediate')
+  const canToggle = hasChildren && !isTarget
 
-  let nodeClasses = 'border rounded-lg px-3 py-2 text-sm font-medium shadow-sm max-w-[200px] min-w-[110px] text-center'
+  const typeLabel = isTarget ? 'TARGET' : isReagent ? 'REAGENT' : 'INTERMEDIATE'
+  const smilesText = node.smiles || ''
+  const truncSmiles = smilesText.length > 18 ? smilesText.slice(0, 18) + '…' : smilesText
+
+  // Card styling — neutral gray for reagents without availability data
+  let borderColor, labelColor, accentEl
   if (isTarget) {
-    nodeClasses += ' bg-purple-600 text-white border-purple-700 text-sm cursor-default'
+    borderColor = 'border-purple-400'
+    labelColor = 'text-purple-600'
+    accentEl = <div className="h-0.5 bg-gradient-to-r from-purple-500 to-purple-700" />
+  } else if (isReagent && hasAvailability && available) {
+    borderColor = 'border-green-300'
+    labelColor = 'text-green-600'
+    accentEl = <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-green-400" />
+  } else if (isReagent && hasAvailability) {
+    borderColor = 'border-orange-300'
+    labelColor = 'text-orange-500'
+    accentEl = <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-orange-400" />
   } else if (isReagent) {
-    nodeClasses += available
-      ? ' bg-green-50 text-green-800 border-green-300'
-      : ' bg-orange-50 text-orange-700 border-orange-300'
+    // No availability data (RDKit heuristic) — neutral styling
+    borderColor = 'border-gray-300'
+    labelColor = 'text-gray-500'
+    accentEl = <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-300" />
   } else {
-    nodeClasses += ' bg-white text-gray-800 border-gray-300 cursor-pointer hover:border-purple-300'
+    borderColor = 'border-gray-200'
+    labelColor = 'text-gray-400'
+    accentEl = null
   }
 
   return (
-    <div className="flex flex-col items-center">
-      {/* Node box */}
+    <div className="flex flex-col items-center" style={{ minWidth: CARD_W }}>
+      {/* ---- Card ---- */}
       <div
-        className={nodeClasses}
-        onClick={() => !isTarget && !isReagent && hasChildren && setExpanded((e) => !e)}
-        title={node.smiles || displayName}
+        className={`relative bg-white rounded-md shadow-sm border-2 overflow-hidden transition-shadow ${borderColor} ${canToggle ? 'cursor-pointer hover:shadow-md' : ''}`}
+        style={{ width: CARD_W }}
+        onClick={() => canToggle && setExpanded(e => !e)}
       >
-        <div className="flex items-center justify-center gap-1">
-          {isTarget && <span className="w-2 h-2 rounded-full bg-white/70 flex-shrink-0" />}
-          {isReagent && (
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${available ? 'bg-green-500' : 'bg-orange-400'}`} />
+        {accentEl}
+        <div className={`px-2 py-1.5 ${isReagent ? 'pl-3' : ''}`}>
+          {/* Type label + chevron */}
+          <div className="flex items-center justify-between mb-1">
+            <span className={`text-[9px] font-bold uppercase tracking-wider ${labelColor}`}>{typeLabel}</span>
+            {canToggle && (
+              <svg className={`w-3 h-3 text-gray-400 transition-transform ${expanded ? '' : '-rotate-90'}`} fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            )}
+          </div>
+
+          {/* 2D structure */}
+          <div className="flex justify-center mb-1">
+            <NodeSmilesImage smiles={node.smiles} />
+          </div>
+
+          {/* SMILES mono */}
+          {smilesText && (
+            <p className="font-mono text-[8px] text-gray-400 text-center truncate" title={smilesText}>{truncSmiles}</p>
           )}
-          <span className="truncate">{displayName}</span>
-          {!isTarget && !isReagent && hasChildren && (
-            <svg
-              className={`w-3 h-3 flex-shrink-0 transition-transform ${expanded ? '' : '-rotate-90'}`}
-              fill="currentColor" viewBox="0 0 20 20"
-            >
-              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
+
+          {/* Supplier pill — only when availability data exists */}
+          {node.supplier && node.supplier !== 'N/A' && (
+            <div className="mt-1 flex justify-center">
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-full text-[9px] font-medium truncate max-w-[130px]">
+                <svg className="w-2 h-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+                {node.supplier}
+              </span>
+            </div>
+          )}
+
+          {/* Availability — only show when data exists (not for RDKit heuristic) */}
+          {isReagent && hasAvailability && (
+            <div className="mt-1 flex justify-center">
+              {available ? (
+                <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-green-600">
+                  <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Available
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-orange-500">
+                  <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  Not available
+                </span>
+              )}
+            </div>
           )}
         </div>
-        {node.supplier && (
-          <p className="text-[10px] text-green-600 font-normal mt-0.5 truncate">{node.supplier}</p>
-        )}
-        {isReagent && !available && (
-          <p className="text-[10px] text-orange-500 font-normal mt-0.5">Not available</p>
-        )}
       </div>
 
-      {/* Arrow + reaction label + children */}
+      {/* ---- Connector + children ---- */}
       {hasChildren && expanded && (
-        <>
-          <div className="flex flex-col items-center">
-            <div className="w-px h-4 bg-gray-300" />
-            {node.reaction && (
-              <div
-                className="px-2 py-0.5 rounded text-[9px] text-purple-600 bg-purple-50 border border-purple-200 font-medium whitespace-nowrap max-w-[180px] truncate"
-                title={node.reaction}
-              >
+        <div className="flex flex-col items-center w-full">
+          {/* Vertical line from card */}
+          <div className="w-px h-3 bg-gray-300" />
+
+          {/* Reaction pill */}
+          {node.reaction && (
+            <>
+              <div className="px-2 py-0.5 rounded-full text-[9px] text-purple-600 bg-purple-50 border border-purple-200 font-medium whitespace-nowrap max-w-[160px] truncate" title={node.reaction}>
                 {node.reaction}
               </div>
-            )}
-            <div className="w-px h-3 bg-gray-300" />
-            {/* Arrow head */}
-            <svg className="w-3 h-3 text-gray-400 -mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <div className="flex flex-row items-start justify-center gap-6 flex-wrap">
-            {node.children.map((child, i) => (
-              <TreeNode key={i} node={child} depth={depth + 1} />
-            ))}
-          </div>
-        </>
+              <div className="w-px h-2 bg-gray-300" />
+            </>
+          )}
+
+          {/* Arrow */}
+          <svg className="w-2.5 h-2 text-gray-400" viewBox="0 0 10 8" fill="currentColor">
+            <path d="M5 8L0 0h10z" />
+          </svg>
+
+          {/* Children layout */}
+          {node.children.length === 1 ? (
+            <>
+              <div className="w-px h-2 bg-gray-300" />
+              <TreeNode node={node.children[0]} depth={depth + 1} />
+            </>
+          ) : (
+            <ForkLayout>
+              {node.children.map((child, i) => (
+                <TreeNode key={i} node={child} depth={depth + 1} />
+              ))}
+            </ForkLayout>
+          )}
+        </div>
       )}
     </div>
+  )
+}
+
+// --------------------------------------------------
+// ForkLayout — uses ref measurement for horizontal bar
+// --------------------------------------------------
+function ForkLayout({ children }) {
+  const containerRef = useRef(null)
+  const [bar, setBar] = useState(null)
+  const childCount = React.Children.count(children)
+
+  const measure = useCallback(() => {
+    if (!containerRef.current || childCount < 2) return
+    const cols = containerRef.current.querySelectorAll('[data-fork-col]')
+    if (cols.length < 2) return
+    const parentRect = containerRef.current.getBoundingClientRect()
+    const first = cols[0].getBoundingClientRect()
+    const last = cols[cols.length - 1].getBoundingClientRect()
+    const l = first.left + first.width / 2 - parentRect.left
+    const r = last.left + last.width / 2 - parentRect.left
+    setBar({ left: l, width: r - l })
+  }, [childCount])
+
+  // Measure after layout + on resize
+  useLayoutEffect(() => {
+    measure()
+  }, [measure, children])
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const ro = new ResizeObserver(measure)
+    ro.observe(containerRef.current)
+    return () => ro.disconnect()
+  }, [measure])
+
+  return (
+    <div className="relative pt-px" ref={containerRef}>
+      {/* Horizontal bar */}
+      {bar && bar.width > 0 && (
+        <div
+          className="absolute top-0 h-px bg-gray-300"
+          style={{ left: bar.left, width: bar.width }}
+        />
+      )}
+      {/* Children columns */}
+      <div className="flex items-start justify-center gap-3">
+        {React.Children.map(children, (child, i) => (
+          <div key={i} data-fork-col className="flex flex-col items-center">
+            <div className="w-px h-3 bg-gray-300" />
+            {child}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// --------------------------------------------------
+// Fullscreen modal for tree view
+// --------------------------------------------------
+function FullscreenTreeModal({ open, onClose, children }) {
+  useEffect(() => {
+    if (!open) return
+    const handler = (e) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex flex-col bg-white">
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+        <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+          <svg className="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+          Retrosynthesis Route
+        </span>
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          Close
+          <kbd className="ml-1 text-[10px] px-1 py-0.5 bg-gray-200 rounded text-gray-500">Esc</kbd>
+        </button>
+      </div>
+      {/* Scrollable tree area */}
+      <div className="flex-1 overflow-auto p-6">
+        {children}
+      </div>
+    </div>,
+    document.body
   )
 }
 
@@ -228,6 +467,7 @@ function StepTimeline({ steps }) {
 // --------------------------------------------------
 export default function SynthesisTree({ synthesisRoute }) {
   const [viewMode, setViewMode] = useState('tree') // 'tree' | 'steps'
+  const [fullscreen, setFullscreen] = useState(false)
 
   if (!synthesisRoute) {
     return (
@@ -244,6 +484,12 @@ export default function SynthesisTree({ synthesisRoute }) {
   const hasTree  = Boolean(synthesisRoute.tree)
   const hasSteps = Array.isArray(synthesisRoute.steps) && synthesisRoute.steps.length > 0
 
+  const treeContent = hasTree ? (
+    <div className="flex justify-center py-2 min-w-max">
+      <TreeNode node={synthesisRoute.tree} depth={0} />
+    </div>
+  ) : null
+
   return (
     <div className="card overflow-hidden">
       {/* Header */}
@@ -257,24 +503,39 @@ export default function SynthesisTree({ synthesisRoute }) {
           <InfoTip text="AI-planned synthesis pathway showing how to build this molecule step-by-step from commercially available reagents." />
         </h3>
 
-        {/* Toggle tree / steps only when both are available */}
-        {hasTree && hasSteps && (
-          <div className="flex rounded-md overflow-hidden border border-white/20">
-            {[{ key: 'tree', label: 'Tree' }, { key: 'steps', label: 'Steps' }].map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setViewMode(key)}
-                className={`px-3 py-1 text-sm font-medium transition-colors ${
-                  viewMode === key
-                    ? 'bg-white text-bx-light-text'
-                    : 'text-white/70 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Toggle tree / steps only when both are available */}
+          {hasTree && hasSteps && (
+            <div className="flex rounded-md overflow-hidden border border-white/20">
+              {[{ key: 'tree', label: 'Tree' }, { key: 'steps', label: 'Steps' }].map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setViewMode(key)}
+                  className={`px-3 py-1 text-sm font-medium transition-colors ${
+                    viewMode === key
+                      ? 'bg-white text-bx-light-text'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Fullscreen button */}
+          {hasTree && viewMode === 'tree' && (
+            <button
+              onClick={() => setFullscreen(true)}
+              className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded transition-colors"
+              title="Fullscreen"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Summary bar */}
@@ -287,11 +548,7 @@ export default function SynthesisTree({ synthesisRoute }) {
 
       {/* Main content */}
       <div className="p-4 overflow-x-auto">
-        {viewMode === 'tree' && hasTree ? (
-          <div className="flex justify-center py-2 min-w-max">
-            <TreeNode node={synthesisRoute.tree} depth={0} />
-          </div>
-        ) : hasSteps ? (
+        {viewMode === 'tree' && treeContent ? treeContent : hasSteps ? (
           <StepTimeline steps={synthesisRoute.steps} />
         ) : (
           <div className="py-6 text-center text-gray-400 text-sm">
@@ -417,23 +674,47 @@ export default function SynthesisTree({ synthesisRoute }) {
 
       {/* Legend */}
       <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex flex-wrap gap-4 text-sm text-gray-400">
-        <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-purple-600 inline-block" />
-          Target Molecule
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded border-2 border-purple-400 bg-white inline-block relative overflow-hidden">
+            <span className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-purple-500 to-purple-700" />
+          </span>
+          Target
         </span>
-        <span className="flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-white border border-gray-300 inline-block" />
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded border border-gray-200 bg-white inline-block" />
           Intermediate
         </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
-          Available Reagent
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />
-          Missing Reagent
-        </span>
+        {synthesisRoute.all_reagents_available != null ? (
+          <>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded border-2 border-green-300 bg-white inline-block relative overflow-hidden">
+                <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-green-400" />
+              </span>
+              Available
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded border-2 border-orange-300 bg-white inline-block relative overflow-hidden">
+                <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-orange-400" />
+              </span>
+              Missing
+            </span>
+          </>
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded border-2 border-gray-300 bg-white inline-block relative overflow-hidden">
+              <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-gray-300" />
+            </span>
+            Reagent
+          </span>
+        )}
       </div>
+
+      {/* Fullscreen modal */}
+      <FullscreenTreeModal open={fullscreen} onClose={() => setFullscreen(false)}>
+        <div className="flex justify-center min-w-max">
+          {hasTree && <TreeNode node={synthesisRoute.tree} depth={0} />}
+        </div>
+      </FullscreenTreeModal>
     </div>
   )
 }

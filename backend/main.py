@@ -26,6 +26,10 @@ from routers.v9 import campaigns as v9_campaigns_router
 from routers.v9 import phases as v9_phases_router
 from routers.v9 import runs as v9_runs_router
 from routers.v9 import molecules as v9_molecules_router
+from routers.v9 import analytics as v9_analytics_router
+from routers.v9 import reports as v9_reports_router
+from routers.v9 import sar as v9_sar_router
+from routers.v9 import afvs as v9_afvs_router
 
 # Legacy V8 endpoints still used by V9 frontend
 from routers.v8_legacy import router as v8_legacy_router, shutdown_pools as v8_shutdown_pools
@@ -83,6 +87,10 @@ app.include_router(v9_campaigns_router.router, prefix="/api/v9", tags=["v9-campa
 app.include_router(v9_phases_router.router, prefix="/api/v9", tags=["v9-phases"])
 app.include_router(v9_runs_router.router, prefix="/api/v9", tags=["v9-runs"])
 app.include_router(v9_molecules_router.router, prefix="/api/v9", tags=["v9-molecules"])
+app.include_router(v9_analytics_router.router, prefix="/api/v9", tags=["v9-analytics"])
+app.include_router(v9_reports_router.router, prefix="/api/v9", tags=["v9-reports"])
+app.include_router(v9_sar_router.router, prefix="/api/v9", tags=["v9-sar"])
+app.include_router(v9_afvs_router.router, prefix="/api/v9", tags=["v9-afvs"])
 
 # Legacy V8 endpoints: /api/preview-target, /api/detect-pockets, etc.
 app.include_router(v8_legacy_router, prefix="/api", tags=["v8-legacy"])

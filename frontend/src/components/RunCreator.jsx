@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, lazy, Suspense } from 'react'
 import { RUN_TYPES, CALCULATION_SUBTYPES, GROUP_META, ESTIMATED_TIMES, COLUMN_DEFAULTS, ALL_COLUMNS, getDefaultCheckedColumns, isColumnAvailable, getAvailableColumns } from '../lib/columns.js'
 import ScoringWeightsEditor from './ScoringWeightsEditor.jsx'
+import AFVSConfigForm from './AFVSConfigForm.jsx'
 import Badge from './Badge.jsx'
 import BindXLogo from './BindXLogo.jsx'
 import InfoTip, { TIPS } from './InfoTip.jsx'
@@ -41,6 +42,9 @@ function RunTypeIcon({ icon, className = 'w-5 h-5' }) {
     case 'calculator':
       return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
         d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V13.5zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.504-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm2.498-6.75h.008v.008H15.75v-.008zm0 2.25h.008v.008H15.75V13.5zM8.25 6h7.5v2.25h-7.5V6zM6 20.25h12A1.5 1.5 0 0019.5 18.75V5.25A1.5 1.5 0 0018 3.75H6A1.5 1.5 0 004.5 5.25v13.5A1.5 1.5 0 006 20.25z" /></svg>
+    case 'globe':
+      return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+        d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5a17.92 17.92 0 01-8.716-2.247m0 0A8.966 8.966 0 013 12c0-1.777.514-3.431 1.4-4.834" /></svg>
     default:
       return <svg {...p}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
         d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" /></svg>
@@ -203,11 +207,17 @@ const DEFAULT_CONFIGS = {
     scoring: {},
     composite: { weights: { docking_score: 0.30, cnn_score: 0.20, logP: 0.15, solubility: 0.10, selectivity: 0.15, novelty: 0.10 } },
     interactions: {},
-    scaffold: {},
-    clustering: { method: 'butina', cutoff: 0.5 },
+    scaffold: { cutoff: 0.65 },
     off_target: {},
     confidence: {},
-    retrosynthesis: {},
+    retrosynthesis: { method: 'aizynthfinder' },
+  },
+  afvs: {
+    strategy: 'balanced', docking_scenario: 'smina_vinardo',
+    exhaustiveness_prescreen: 1, exhaustiveness_primary: 8,
+    reps_per_tranche: 1, tranche_pct: 0.2,
+    mw_max: 500, logp_max: 5, hbd_max: 5, hba_max: 10,
+    top_n_results: 10000, budget_cap_usd: 700,
   },
   generation:  { mode: 'batch', method: 'scaffold_hopping', iterations: 3, variants_per_iteration: 5, qed_min: 0.4, lipinski: true, pains_filter: true, include_docking: true, include_admet: true, include_scoring: true,
     // Optimization defaults
@@ -521,7 +531,7 @@ function ImportFilters({ filters, onChange, selectedDBs }) {
 // ---------------------------------------------------------------------------
 // Step 2: Configuration forms
 // ---------------------------------------------------------------------------
-function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEngines, project, hasDockingRun = false }) {
+function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEngines, project, campaign, hasDockingRun = false }) {
   const set = (key, value) => onChange({ ...config, [key]: value })
 
   // Auto-switch engine if GPU is unavailable and current selection is gnina_gpu
@@ -658,6 +668,17 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
             </div>
           )}
 
+          {selectedCalc === 'pharmacophore' && !campaign?.reference_ligands?.length && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 flex items-start gap-2">
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span>
+                <strong>No reference ligands set.</strong> Go to Project Home → Campaign to add at least one reference ligand.
+              </span>
+            </div>
+          )}
+
           {/* Interactions info cards */}
           {selectedCalc === 'interactions' && (
             <div className="space-y-3">
@@ -665,6 +686,14 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
                 <p className="text-sm font-semibold text-lime-700">Protein-Ligand Interaction Analysis</p>
                 <p className="text-sm text-lime-600 mt-1">Computes H-bonds, hydrophobic contacts, pi-stacking and salt bridges using ProLIF/RDKit.</p>
               </div>
+            </div>
+          )}
+
+          {/* Scaffold / Structural Analysis info */}
+          {selectedCalc === 'scaffold' && (
+            <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50">
+              <p className="text-sm font-semibold text-emerald-700">Structural Analysis</p>
+              <p className="text-sm text-emerald-600 mt-1">Murcko scaffold extraction, BRICS bond analysis, R-group positions, and Butina diversity clustering on Morgan fingerprints. Clustering cutoff is configurable in the next step.</p>
             </div>
           )}
 
@@ -875,12 +904,36 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
     }
 
     case 'scaffold': {
+      const cutoff = config.cutoff ?? 0.65
+      const similarity = Math.round((1 - cutoff) * 100)
       return (
-        <div className="space-y-3">
+        <div className="space-y-5">
           <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50">
-            <p className="text-sm font-semibold text-emerald-700">Scaffold Decomposition</p>
-            <p className="text-sm text-emerald-600 mt-1">Murcko scaffold extraction, BRICS bond analysis, and R-group position identification. Only requires SMILES — no docking needed.</p>
+            <p className="text-sm font-semibold text-emerald-700">Structural Analysis</p>
+            <p className="text-sm text-emerald-600 mt-1">Murcko scaffold extraction, BRICS bond analysis, R-group position identification, and Butina diversity clustering on Morgan fingerprints. Only requires SMILES — no docking needed.</p>
           </div>
+
+          <FormSection title="Clustering Cutoff">
+            <div>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span className="font-medium text-gray-600">Cutoff</span>
+                <span className="font-bold text-bx-light-text tabular-nums">{Number(cutoff).toFixed(2)}</span>
+              </div>
+              <input
+                type="range" min={0.3} max={0.8} step={0.05}
+                value={cutoff}
+                onChange={e => set('cutoff', parseFloat(e.target.value))}
+                className="w-full accent-bx-mint"
+              />
+              <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                <span>0.30 (strict)</span>
+                <span>0.80 (loose)</span>
+              </div>
+              <div className="mt-2 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-sm text-emerald-700">
+                Molecules with <span className="font-bold">&ge;{similarity}%</span> Tanimoto similarity will be grouped together
+              </div>
+            </div>
+          </FormSection>
         </div>
       )
     }
@@ -1185,66 +1238,15 @@ function ConfigForm({ runType, config, onChange, phase, selectedCount = 0, gpuEn
       )
     }
 
-    case 'clustering': {
-      const methods = [
-        { value: 'butina',   label: 'Butina',   desc: 'Sphere exclusion — fast, deterministic' },
-        { value: 'tanimoto', label: 'Tanimoto', desc: 'Pairwise similarity matrix' },
-        { value: 'ecfp4',    label: 'ECFP4',    desc: 'Morgan fingerprint based' },
-      ]
-      const cutoff = config.cutoff ?? 0.5
-      const estClusters = Math.max(1, Math.round(20 * (1 - cutoff) * 2))
+    case 'afvs':
       return (
-        <div className="space-y-5">
-          <FormSection title="Clustering Method">
-            <div className="space-y-2">
-              {methods.map(m => (
-                <button
-                  key={m.value}
-                  onClick={() => set('method', m.value)}
-                  className={`w-full flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                    config.method === m.value
-                      ? 'border-teal-400 bg-teal-50'
-                      : 'border-gray-100 hover:border-teal-200'
-                  }`}
-                >
-                  <div className={`w-2.5 h-2.5 rounded-full mt-1.5 border-2 flex-shrink-0 ${
-                    config.method === m.value ? 'border-teal-500 bg-teal-500' : 'border-gray-300'
-                  }`} />
-                  <div>
-                    <p className={`text-sm font-semibold ${config.method === m.value ? 'text-teal-700' : 'text-gray-800'}`}>
-                      {m.label}
-                    </p>
-                    <p className="text-sm text-gray-400">{m.desc}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </FormSection>
-
-          <FormSection title="Similarity Cutoff">
-            <div>
-              <div className="flex items-center justify-between text-sm mb-1">
-                <span className="font-medium text-gray-600">Cutoff</span>
-                <span className="font-bold text-bx-light-text tabular-nums">{Number(cutoff).toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min={0.3} max={0.8} step={0.05}
-                value={cutoff}
-                onChange={e => set('cutoff', parseFloat(e.target.value))}
-                className="w-full accent-bx-mint"
-              />
-              <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
-                <span>0.30 (loose)</span>
-                <span>0.80 (strict)</span>
-              </div>
-              <div className="mt-2 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2 text-sm text-teal-700">
-                Estimated clusters: <span className="font-bold">~{estClusters}</span>
-              </div>
-            </div>
-          </FormSection>
-        </div>
+        <AFVSConfigForm
+          config={config}
+          onChange={onChange}
+          project={project}
+          campaign={campaign}
+        />
       )
-    }
 
     default:
       return <p className="text-sm text-gray-400">No configuration needed for this run type.</p>
@@ -1683,8 +1685,9 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
   if (runType === 'interactions') {
     configLines.push('Protein-ligand interaction analysis (H-bonds, hydrophobic, pi-stacking)')
   }
-  if (runType === 'scaffold') {
+  if (runType === 'scaffold' || (runType === 'calculation' && config.calculation_types?.[0] === 'scaffold')) {
     configLines.push('Murcko scaffold decomposition + BRICS bonds + R-group positions')
+    configLines.push(`Butina diversity clustering (cutoff: ${Number(config.scaffold?.cutoff ?? 0.65).toFixed(2)})`)
   }
   if (runType === 'generation') {
     if (config.mode === 'optimization') {
@@ -1698,8 +1701,9 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
       configLines.push(`${config.iterations ?? 3} iterations x ${config.variants_per_iteration ?? 5} variants = ~${(config.iterations ?? 3) * (config.variants_per_iteration ?? 5)} molecules`)
     }
   }
-  if (runType === 'clustering') {
-    configLines.push(`Method: ${config.method}, cutoff: ${Number(config.cutoff ?? 0.5).toFixed(2)}`)
+  if (runType === 'retrosynthesis' || (runType === 'calculation' && config.calculation_types?.[0] === 'retrosynthesis')) {
+    const m = config.retrosynthesis?.method || 'aizynthfinder'
+    configLines.push(`Method: ${m === 'aizynthfinder' ? 'AiZynthFinder (AI)' : 'RDKit Heuristic (fast)'}`)
   }
 
   return (
@@ -1919,6 +1923,71 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
         )
       })()}
 
+      {/* Retrosynthesis method selector */}
+      {(runType === 'retrosynthesis' || (runType === 'calculation' && config.calculation_types?.[0] === 'retrosynthesis')) && onConfigChange && (
+        <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-3">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Retrosynthesis Method</p>
+          <div className="space-y-2">
+            <EngineCard id="aizynthfinder" label="AiZynthFinder (AI)"
+              badges={[
+                { text: 'Recommended', color: 'bg-green-100 text-green-700' },
+                { text: '~1-2 min/mol', color: 'bg-amber-100 text-amber-700' },
+              ]}
+              selected={(config.retrosynthesis?.method || 'aizynthfinder') === 'aizynthfinder'}
+              onClick={v => onConfigChange({ ...config, retrosynthesis: { ...config.retrosynthesis, method: v } })}
+            />
+            {(config.retrosynthesis?.method || 'aizynthfinder') === 'aizynthfinder' && (
+              <p className="text-[11px] text-gray-500 pl-6 -mt-1">
+                Neural network trained on ~1M USPTO reactions. Plans multi-step routes with stock verification (ZINC).
+              </p>
+            )}
+            <EngineCard id="rdkit" label="RDKit Heuristic (fast)"
+              badges={[
+                { text: 'Instant', color: 'bg-blue-100 text-blue-700' },
+                { text: '~1 sec/mol', color: 'bg-gray-100 text-gray-600' },
+              ]}
+              selected={config.retrosynthesis?.method === 'rdkit'}
+              onClick={v => onConfigChange({ ...config, retrosynthesis: { ...config.retrosynthesis, method: v } })}
+            />
+            {config.retrosynthesis?.method === 'rdkit' && (
+              <p className="text-[11px] text-gray-500 pl-6 -mt-1">
+                SMARTS pattern matching with 7 reaction types (Suzuki, amidation, etc.). Fast but limited to common disconnections.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Scaffold: clustering cutoff slider */}
+      {runType === 'calculation' && config.calculation_types?.[0] === 'scaffold' && onConfigChange && (() => {
+        const cutoff = config.scaffold?.cutoff ?? 0.65
+        const similarity = Math.round((1 - cutoff) * 100)
+        return (
+          <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-3">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Clustering Cutoff</p>
+            <div>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span className="font-medium text-gray-600">Cutoff</span>
+                <span className="font-bold text-bx-light-text tabular-nums">{Number(cutoff).toFixed(2)}</span>
+              </div>
+              <input
+                type="range" min={0.3} max={0.8} step={0.05}
+                value={cutoff}
+                onChange={e => onConfigChange({ ...config, scaffold: { ...config.scaffold, cutoff: parseFloat(e.target.value) } })}
+                className="w-full accent-bx-mint"
+              />
+              <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                <span>0.30 (strict)</span>
+                <span>0.80 (loose)</span>
+              </div>
+              <div className="mt-2 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-sm text-emerald-700">
+                Molecules with <span className="font-bold">&ge;{similarity}%</span> Tanimoto similarity will be grouped together
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Column checklist for calculation runs */}
       {runType === 'calculation' && config.calculation_types?.length === 1 && includedColumns && onIncludedColumnsChange && (
         <ColumnChecklist
@@ -1997,7 +2066,7 @@ function ConfirmationView({ runType, config, selectedCount, includedColumns, onI
 // ---------------------------------------------------------------------------
 // RunCreator — main component
 // ---------------------------------------------------------------------------
-export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubmit, selectedMoleculeIds, submitting, project, runs = [] }) {
+export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubmit, selectedMoleculeIds, submitting, project, campaign, runs = [] }) {
   const [step, setStep] = useState(1)
   const [selectedType, setSelectedType] = useState(null)
   const [config, setConfig] = useState({})
@@ -2028,10 +2097,12 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
   }
 
   const needsReceptorPrep = selectedType === 'calculation' && config.calculation_types?.[0] === 'docking' && !project?.receptor_prep_report
+  const needsPharmaModel = selectedType === 'calculation' && config.calculation_types?.[0] === 'pharmacophore' && !campaign?.reference_ligands?.length
 
   const canSubmit = (() => {
     if (submitting) return false
     if (needsReceptorPrep) return false
+    if (needsPharmaModel) return false
     if (selectedType === 'import') {
       if (config.sourceMode === 'external' && !config._file) return false
       if (config.sourceMode === 'database' && !config.database) return false
@@ -2041,6 +2112,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
       if (!runAllMolecules && !selectedMoleculeIds?.size) return false
     }
     if (selectedType === 'generation' && !selectedMoleculeIds?.size) return false
+    if (selectedType === 'afvs' && !(config.budget_cap_usd > 0)) return false
     return true
   })()
 
@@ -2053,6 +2125,9 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
       if (!runAllMolecules && selectedMoleculeIds?.size > 0) {
         payload.input_molecule_ids = [...selectedMoleculeIds]
       }
+    }
+    if (selectedType === 'afvs') {
+      payload.config = { ...payload.config, _afvs: true }
     }
     if (selectedType === 'generation') {
       if (selectedMoleculeIds?.size > 0) {
@@ -2184,6 +2259,7 @@ export default function RunCreator({ phaseId, phaseType, isOpen, onClose, onSubm
               selectedCount={selectedMoleculeIds?.size || 0}
               gpuEngines={gpuEngines}
               project={project}
+              campaign={campaign}
               hasDockingRun={hasDockingRun}
             />
           )}

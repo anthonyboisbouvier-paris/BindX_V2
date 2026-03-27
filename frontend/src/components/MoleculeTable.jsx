@@ -500,7 +500,7 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation, allKnownTags, 
   }
 
   if (col.type === 'smiles') {
-    return <SmilesImage smiles={value} width={120} height={60} />
+    return <SmilesImage smiles={value} width={90} height={50} />
   }
 
   if (col.type === 'number' && typeof value === 'number') {
@@ -508,6 +508,19 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation, allKnownTags, 
     return (
       <span className={`tabular-nums ${colorClasses?.text || 'text-gray-700'}`}>
         {formatted}
+      </span>
+    )
+  }
+
+  // hERG Risk Level — colored badge (LOW/MODERATE/HIGH)
+  if (col.key === 'herg_risk_level' && value) {
+    const lv = String(value).toUpperCase()
+    const badgeClass = lv === 'LOW' ? 'bg-green-100 text-green-700' :
+                       lv === 'MODERATE' ? 'bg-amber-100 text-amber-700' :
+                       lv === 'HIGH' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'
+    return (
+      <span className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase ${badgeClass}`}>
+        {lv === 'MODERATE' ? 'MOD' : lv}
       </span>
     )
   }
@@ -526,7 +539,7 @@ function CellValue({ col, value, colorClasses, mol, onAnnotation, allKnownTags, 
   // Text
   const str = String(value)
   return (
-    <span className="text-gray-700 block truncate" title={str} style={{ maxWidth: col.width ? `${col.width - 16}px` : 120 }}>
+    <span className="text-gray-700 block truncate w-full" title={str}>
       {str}
     </span>
   )
@@ -614,6 +627,9 @@ export default function MoleculeTable({
           label = 'Import'
           detail = cfg.original_filename || 'Import'
         }
+      } else if (run.type === 'afvs') {
+        label = 'AFVS'
+        detail = 'Ultra-Large Virtual Screening'
       } else if (run.type === 'calculation' && run.calculation_types?.length) {
         label = run.calculation_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' + ')
         detail = label
@@ -792,16 +808,28 @@ export default function MoleculeTable({
     if (idx >= 0) rowVirtualizer.scrollToIndex(idx, { align: 'auto' })
   }, [activeRowId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Compute effective column width: override > max(declared width, label-based minimum)
+  // Compute effective column width: auto-fit to longest word in header + cell content minimum
   const effectiveWidths = useMemo(() => columns.map(col => {
     if (colWidthOverrides[col.key]) return Math.max(40, colWidthOverrides[col.key])
-    const labelChars = (col.label || '').length
-    const unitChars = col.unit ? col.unit.length + 2 : 0
-    const textWidth = (labelChars + unitChars) * 7.5
-    const extras = 24
-    const padding = 20
-    const minFromLabel = Math.ceil(textWidth + extras + padding)
-    return Math.max(col.width || 80, minFromLabel)
+    // Width from longest word in label (text wraps at spaces)
+    const words = (col.label || '').split(/\s+/)
+    const longestWord = words.reduce((a, b) => a.length > b.length ? a : b, '')
+    const charW = 6.8 // text-[10px] uppercase tracking-wide font-semibold
+    let headerW = Math.ceil(Math.max(longestWord.length, 4) * charW) // min 4 chars
+    // Unit on its own line — still need width to fit it
+    if (col.unit) {
+      const unitW = Math.ceil(col.unit.length * 5.5) + 10 // smaller font + parens
+      headerW = Math.max(headerW, unitW)
+    }
+    headerW += 12 // horizontal padding (px-1.5 × 2)
+    // Minimum cell content width by type
+    let cellW = 36
+    if (col.type === 'number') cellW = 52 // fits "-10.52" (7 chars × 7px + padding)
+    else if (col.type === 'smiles') cellW = col.width || 90
+    else if (col.type === 'text') cellW = Math.min(col.width || 60, 100)
+    else if (col.type === 'source') cellW = 60
+    else if (col.type === 'tags' || col.type === 'editable_text') cellW = col.width || 100
+    return Math.max(headerW, cellW)
   }), [columns, colWidthOverrides])
 
   // Grid template: checkbox(40px) + bookmark(32px) + data columns
@@ -926,7 +954,7 @@ export default function MoleculeTable({
               return (
                 <div
                   key={`${run.group}-${i}`}
-                  className={`${meta.bg} ${meta.text} ${meta.border} border-b-2 text-[10px] uppercase tracking-wider font-semibold text-center py-1 whitespace-nowrap`}
+                  className={`${meta.bg} ${meta.text} ${meta.border} border-b-2 text-[10px] uppercase tracking-wider font-bold text-center py-1.5 whitespace-nowrap overflow-hidden text-ellipsis`}
                   style={{ gridColumn: `span ${run.count}` }}
                 >
                   {label}
@@ -995,23 +1023,27 @@ export default function MoleculeTable({
               return (
                 <div
                   key={col.key}
-                  className={`px-2 py-1.5 font-semibold uppercase tracking-wide text-xs select-none relative flex flex-col gap-0.5 items-center ${
+                  className={`group/col px-1.5 py-1.5 font-semibold uppercase tracking-wide text-[10px] select-none relative flex flex-col items-center justify-center ${
                     col.sortable ? 'cursor-pointer transition-colors' : ''
                   } ${
                     isActive ? 'text-bx-light-text bg-blue-50/50' : 'text-gray-500 hover:text-bx-light-text hover:bg-gray-100'
                   }`}
                   onClick={e => handleHeaderClick(col, e)}
                 >
-                  {/* Line 1: label + unit */}
-                  <span className="flex items-center gap-1 whitespace-nowrap leading-tight">
-                    {col.label}
+                  {/* Label — wraps to 2 lines if needed */}
+                  <span className="leading-tight text-center">
+                    <span>{col.label}</span>
                     {col.unit && (
-                      <span className="font-normal text-gray-300 text-[9px]">({col.unit})</span>
+                      <span className="block font-normal text-gray-300 text-[8px] leading-none mt-0.5">({col.unit})</span>
                     )}
                   </span>
-                  {/* Line 2: sort + info tip + filter — all centered */}
+                  {/* Sort + filter icons — hidden by default, visible on hover or when active */}
                   {(col.sortable || TIPS[col.key] || isFilterable) && (
-                    <span className="flex items-center gap-1">
+                    <span className={`flex items-center gap-0.5 transition-all duration-150 ${
+                      isActive || hasFilter || showFilterCol === col.key
+                        ? 'max-h-5 opacity-100 mt-0.5'
+                        : 'max-h-0 opacity-0 overflow-hidden group-hover/col:max-h-5 group-hover/col:opacity-100 group-hover/col:mt-0.5'
+                    }`}>
                       {col.sortable && <SortIcon direction={dir} rank={rank} />}
                       {TIPS[col.key] && <InfoTip text={TIPS[col.key]} size="xs" />}
                       {isFilterable && (
@@ -1325,11 +1357,11 @@ export default function MoleculeTable({
                     return (
                       <div
                         key={col.key}
-                        className={`px-3 flex items-center max-h-[${ROW_HEIGHT}px] ${col.type === 'tags' ? 'overflow-visible' : 'overflow-hidden'} ${col.type === 'number' ? 'justify-end tabular-nums' : 'justify-start'} ${colorClasses.cell} ${hasPopup ? 'cursor-pointer hover:bg-blue-50/80 transition-colors' : ''} ${mol.invalidated && col.key !== 'invalidated' ? 'opacity-40' : ''}`}
+                        className={`px-1.5 flex items-center max-h-[${ROW_HEIGHT}px] ${col.type === 'tags' ? 'overflow-visible' : 'overflow-hidden'} ${['molecule', 'annotation'].includes(col.group) || ['smiles', 'tags', 'editable_text'].includes(col.type) ? 'justify-start' : 'justify-center'} ${col.type === 'number' ? 'tabular-nums' : ''} ${colorClasses.cell} ${hasPopup ? 'cursor-pointer hover:bg-blue-50/80 transition-colors' : ''} ${mol.invalidated && col.key !== 'invalidated' ? 'opacity-40' : ''}`}
                         onClick={hasPopup ? (e) => { e.stopPropagation(); onCellPopup(col.popup, mol) } : undefined}
                         title={hasPopup ? `Click for ${col.label} details` : undefined}
                       >
-                        <span className={`text-sm ${hasPopup ? 'underline decoration-dotted underline-offset-2 decoration-gray-300' : ''}`}>
+                        <span className={`text-[11px] ${hasPopup ? 'underline decoration-dotted underline-offset-2 decoration-gray-300' : ''}`}>
                           <CellValue col={col} value={value} colorClasses={colorClasses} mol={mol} onAnnotation={onAnnotation} allKnownTags={allKnownTags} runNameMap={runNameMap} />
                         </span>
                       </div>

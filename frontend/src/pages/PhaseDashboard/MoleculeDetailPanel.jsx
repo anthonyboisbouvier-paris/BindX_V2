@@ -10,6 +10,45 @@ import InteractionDiagram from '../../components/InteractionDiagram.jsx'
 import InteractionView from '../../components/InteractionView.jsx'
 
 // ---------------------------------------------------------------------------
+// Error boundary — catches render errors in detail panel content
+// ---------------------------------------------------------------------------
+class PanelErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+  componentDidCatch(error, info) {
+    console.error('[PanelErrorBoundary] Render error:', error?.message, '\nComponent stack:', info?.componentStack)
+  }
+  componentDidUpdate(prevProps) {
+    // Auto-reset when molecule changes
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null })
+    }
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="p-4 bg-red-50 rounded-lg border border-red-200 text-center space-y-2">
+          <p className="text-sm font-semibold text-red-700">Render error in detail panel</p>
+          <p className="text-xs text-red-500 font-mono break-all">{String(this.state.error?.message || this.state.error)}</p>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="px-3 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Detail panel tab content helpers
 // ---------------------------------------------------------------------------
 function ScoresTab({ mol }) {
@@ -195,35 +234,37 @@ function PropertiesTab({ mol }) {
           Lipinski Rule of 5 — {mol.lipinski_pass ? 'Pass' : 'Fail'}
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        {available.map(p => {
-          const val = mol[p.key]
-          const formatted = p.decimals === 0 ? Math.round(val) : val.toFixed(p.decimals)
-          const inRange = (() => {
-            if (!p.threshold) return null
-            if (p.threshold.min != null && val < p.threshold.min) return false
-            if (p.threshold.max != null && val > p.threshold.max) return false
-            return true
-          })()
-          return (
-            <div key={p.key} className={`bg-gray-50 rounded-lg px-3 py-2 border ${
-              inRange === false ? 'border-red-200 bg-red-50' : 'border-gray-100'
-            }`}>
-              <p className="text-[9px] text-gray-400 uppercase tracking-wider">{p.label}</p>
-              <p className={`text-base font-bold tabular-nums ${inRange === false ? 'text-red-600' : 'text-gray-800'}`}>
-                {formatted}
-                {p.unit && <span className="text-[10px] font-normal text-gray-400 ml-0.5">{p.unit}</span>}
-              </p>
-              {p.threshold && (
-                <p className="text-[9px] text-gray-400">
-                  {p.threshold.min != null && p.threshold.max != null ? `${p.threshold.min}–${p.threshold.max}` :
-                   p.threshold.max != null ? `≤ ${p.threshold.max}` : `≥ ${p.threshold.min}`}
+      {available.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          {available.map(p => {
+            const val = mol[p.key]
+            const formatted = p.decimals === 0 ? Math.round(val) : val.toFixed(p.decimals)
+            const inRange = (() => {
+              if (!p.threshold) return null
+              if (p.threshold.min != null && val < p.threshold.min) return false
+              if (p.threshold.max != null && val > p.threshold.max) return false
+              return true
+            })()
+            return (
+              <div key={p.key} className={`bg-gray-50 rounded-lg px-3 py-2 border ${
+                inRange === false ? 'border-red-200 bg-red-50' : 'border-gray-100'
+              }`}>
+                <p className="text-[9px] text-gray-400 uppercase tracking-wider">{p.label}</p>
+                <p className={`text-base font-bold tabular-nums ${inRange === false ? 'text-red-600' : 'text-gray-800'}`}>
+                  {formatted}
+                  {p.unit && <span className="text-[10px] font-normal text-gray-400 ml-0.5">{p.unit}</span>}
                 </p>
-              )}
-            </div>
-          )
-        })}
-      </div>
+                {p.threshold && (
+                  <p className="text-[9px] text-gray-400">
+                    {p.threshold.min != null && p.threshold.max != null ? `${p.threshold.min}–${p.threshold.max}` :
+                     p.threshold.max != null ? `≤ ${p.threshold.max}` : `≥ ${p.threshold.min}`}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -482,6 +523,19 @@ function ToxicityDetailTab({ mol, details }) {
         <div className="space-y-1.5">
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Toxicity Endpoints</p>
           <RiskBar label="hERG inhibition" value={safety?.herg_risk} invert />
+          {/* hERG Specialized: IC50 + risk level when available */}
+          {mol.herg_specialized && (
+            <div className="flex items-center gap-2 pl-1 -mt-0.5">
+              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase ${
+                mol.herg_specialized.risk_level === 'LOW' ? 'bg-green-100 text-green-700' :
+                mol.herg_specialized.risk_level === 'MODERATE' ? 'bg-amber-100 text-amber-700' :
+                mol.herg_specialized.risk_level === 'HIGH' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'
+              }`}>{mol.herg_specialized.risk_level}</span>
+              <span className="text-[10px] text-gray-500">
+                IC50 ≈ {Math.round(mol.herg_specialized.ic50_um * 10) / 10} µM
+              </span>
+            </div>
+          )}
           <RiskBar label="Ames mutagenicity" value={safety?.ames_risk} invert />
           <RiskBar label="Hepatotoxicity" value={safety?.hepatotox_risk} invert />
           <RiskBar label="Skin sensitization" value={mol.skin_sensitization} invert />
@@ -598,21 +652,34 @@ function SynthesisTab({ details, onOpenPopup }) {
     return <p className="text-sm text-gray-400 text-center py-4">No retrosynthesis data for this molecule.</p>
   }
 
+  const isRdkit = synth.method === 'rdkit_heuristic'
+
   return (
     <div className="space-y-3">
-      {/* Open full retrosynthesis tree */}
-      {onOpenPopup && (
-        <button
-          onClick={onOpenPopup}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-pink-50 hover:bg-pink-100 border border-pink-200 rounded-xl text-pink-700 font-semibold text-sm transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
-          View full retrosynthesis route
-        </button>
-      )}
+      {/* Method badge + Open full tree button */}
+      <div className="flex items-center gap-2">
+        {synth.method && (
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+            isRdkit
+              ? 'bg-amber-100 text-amber-700 border border-amber-200'
+              : 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+          }`}>
+            {isRdkit ? 'RDKit Heuristic' : 'AiZynthFinder'}
+          </span>
+        )}
+        {onOpenPopup && (
+          <button
+            onClick={onOpenPopup}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-pink-50 hover:bg-pink-100 border border-pink-200 rounded-xl text-pink-700 font-semibold text-sm transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            View full retrosynthesis route
+          </button>
+        )}
+      </div>
 
       {/* Summary */}
       <div className="grid grid-cols-2 gap-2 text-sm">
@@ -646,8 +713,8 @@ function SynthesisTab({ details, onOpenPopup }) {
         )}
       </div>
 
-      {/* Reagent availability detail */}
-      {synth.reagent_availability?.length > 0 && (
+      {/* Reagent availability detail — hidden for RDKit (no ZINC data) */}
+      {!isRdkit && synth.reagent_availability?.length > 0 && (
         <div className="space-y-1">
           <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Reagent availability</p>
           {synth.reagent_availability.map((r, i) => (
@@ -925,7 +992,7 @@ function ScaffoldTab({ molecule }) {
   const svgContent = molecule?.scaffold_svg
 
   if (!scaffoldSmiles && nPositions == null) {
-    return <p className="text-sm text-gray-400 text-center py-4">No scaffold data — run a Scaffold analysis first.</p>
+    return <p className="text-sm text-gray-400 text-center py-4">No structural data — run a Structural Analysis first.</p>
   }
 
   return (
@@ -980,6 +1047,26 @@ function ScaffoldTab({ molecule }) {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Diversity Cluster */}
+      {molecule?.cluster_id != null && (
+        <div className="bg-gray-50 rounded-xl border border-gray-100 p-3">
+          <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Diversity Cluster</p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { label: 'Cluster', value: molecule.cluster_id },
+              molecule.cluster_size != null && { label: 'Size', value: molecule.cluster_size },
+              molecule.tanimoto_to_centroid != null && { label: 'Tanimoto', value: Number(molecule.tanimoto_to_centroid).toFixed(3) },
+              molecule.is_representative && { label: 'Repr.', value: 'Yes' },
+            ].filter(Boolean).map(s => (
+              <div key={s.label} className="bg-white rounded-lg px-2.5 py-1.5 text-center border border-gray-100 min-w-[52px]">
+                <p className="text-base font-bold tabular-nums text-teal-600">{s.value}</p>
+                <p className="text-[9px] text-gray-400">{s.label}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -1063,6 +1150,7 @@ function DetailPopupModal({ type, molecule, onClose }) {
   )
 }
 
+
 // ---------------------------------------------------------------------------
 // Molecule Detail Panel (inline drawer)
 // ---------------------------------------------------------------------------
@@ -1074,16 +1162,25 @@ const TABS = [
   { id: 'toxicity',     label: 'Toxicity',    tip: 'Safety endpoints: hERG, Ames, hepatotoxicity, carcinogenicity' },
   { id: 'offtarget',    label: 'Off-Target',  tip: 'Selectivity profiling against off-target proteins' },
   { id: 'synthesis',    label: 'Synth.',      tip: 'Retrosynthesis feasibility, estimated cost, and synthetic route' },
-  { id: 'scaffold',     label: 'Scaffold',    tip: 'Murcko scaffold decomposition, BRICS bonds, and modifiable R-group positions' },
+  { id: 'scaffold',     label: 'Structure',   tip: 'Murcko scaffold decomposition, BRICS bonds, R-group positions, and diversity clustering' },
 ]
 
-function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, onRowClick, isFrozen, project, selectedMolecules, onCellPopup }) {
+function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, onRowClick, isFrozen, project, campaign, selectedMolecules, onCellPopup, panelPosition, onTogglePosition }) {
   const [activeTab, setActiveTab] = useState('scores')
   const [copied, setCopied] = useState(false)
   const [viewerMode, setViewerMode] = useState(null) // null = auto-detect: 'protein' | 'ligand' | 'results'
   const [highlightedInteraction, setHighlightedInteraction] = useState(null)
   const [interactionContacts, setInteractionContacts] = useState(null)
   const [computedDistances, setComputedDistances] = useState({}) // { residue_number: distance }
+  const [panelFullscreen, setPanelFullscreen] = useState(false)
+
+  // Escape key exits panel fullscreen
+  useEffect(() => {
+    if (!panelFullscreen) return
+    const handleKey = (e) => { if (e.key === 'Escape') setPanelFullscreen(false) }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [panelFullscreen])
 
   // Auto-update interaction contacts when molecule changes (if interactions are shown)
   const molId = molecule?.id
@@ -1181,6 +1278,7 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
         steps: retro.steps || [],
         reagents_available: retro.all_reagents_available ?? retro.reagents_available ?? null,
         reagent_availability: retro.reagent_availability || [],
+        method: retro.method || null,
       } : null,
       safety: hasSafety ? safetyObj : null,
     }
@@ -1194,9 +1292,15 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
     })
   }
 
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-xl overflow-hidden flex flex-col sticky top-4"
-      style={{ maxHeight: 'calc(100vh - 120px)' }}>
+  const panelContent = (
+    <div className={
+      panelFullscreen
+        ? "fixed inset-0 z-50 bg-white flex flex-col"
+        : panelPosition === 'bottom'
+          ? "bg-white rounded-xl border border-gray-200 shadow-xl overflow-hidden flex flex-col"
+          : "bg-white rounded-xl border border-gray-200 shadow-xl overflow-hidden flex flex-col sticky top-4"
+    }
+      style={panelFullscreen ? undefined : panelPosition === 'bottom' ? { maxHeight: '80vh' } : { maxHeight: 'calc(100vh - 120px)' }}>
 
       {/* Panel header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
@@ -1239,26 +1343,68 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
             <Badge variant="yellow" size="sm">Bookmarked</Badge>
           )}
         </div>
-        <button
-          onClick={onClose}
-          className="flex-shrink-0 ml-2 p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
-          aria-label="Close detail panel"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+          <button
+            onClick={() => setPanelFullscreen(f => !f)}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+            aria-label={panelFullscreen ? 'Exit fullscreen' : 'Fullscreen panel'}
+            title={panelFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen panel'}
+          >
+            {panelFullscreen ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M9 9L4 4m0 0v4m0-4h4m6 6l5 5m0 0v-4m0 4h-4M9 15l-5 5m0 0h4m-4 0v-4m11-6l5-5m0 0h-4m4 0v4" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+              </svg>
+            )}
+          </button>
+          {onTogglePosition && !panelFullscreen && (
+            <button
+              onClick={onTogglePosition}
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+              aria-label={panelPosition === 'bottom' ? 'Move panel to right' : 'Move panel below'}
+              title={panelPosition === 'bottom' ? 'Panel to right' : 'Panel below'}
+            >
+              {panelPosition === 'bottom' ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M9 3h6m-6 0v18m0-18H5a2 2 0 00-2 2v14a2 2 0 002 2h4m6-18v18m0-18h4a2 2 0 012 2v14a2 2 0 01-2 2h-4" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M3 9h18M3 9V5a2 2 0 012-2h14a2 2 0 012 2v4M3 9v10a2 2 0 002 2h14a2 2 0 002-2V9" />
+                </svg>
+              )}
+            </button>
+          )}
+          <button
+            onClick={() => { setPanelFullscreen(false); onClose() }}
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
+            aria-label="Close detail panel"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Scrollable content */}
-      <div className="overflow-y-auto flex-1 p-4 space-y-4"
+      <div className="overflow-y-auto flex-1 p-4"
         style={{ scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
+        <PanelErrorBoundary resetKey={molId}>
 
         {/* View toggle: Protein / Ligand / Results */}
         {(() => {
           const hasProtein = !!pdbUrl
           const hasLigand = !!molecule.smiles
           const effectiveMode = viewerMode || (hasProtein ? 'protein' : hasLigand ? 'ligand' : 'results')
+          const isBottomLayout = panelPosition === 'bottom' && !panelFullscreen
 
           const viewButtons = [
             hasProtein && { id: 'protein', label: 'Protein', icon: (
@@ -1281,66 +1427,65 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
             )},
           ].filter(Boolean)
 
-          return (
-            <div>
-              {/* Toggle buttons */}
-              <div className="flex gap-1 mb-2">
-                {viewButtons.map(btn => (
-                  <button
-                    key={btn.id}
-                    onClick={() => setViewerMode(btn.id)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
-                      effectiveMode === btn.id
-                        ? 'bg-bx-surface text-white shadow-sm'
-                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                    }`}
-                  >
-                    {btn.icon}
-                    {btn.label}
-                  </button>
-                ))}
-              </div>
+          const toggleBar = (
+            <div className="flex gap-1 mb-2">
+              {viewButtons.map(btn => (
+                <button
+                  key={btn.id}
+                  onClick={() => setViewerMode(btn.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                    effectiveMode === btn.id
+                      ? 'bg-bx-surface text-white shadow-sm'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
+                >
+                  {btn.icon}
+                  {btn.label}
+                </button>
+              ))}
+            </div>
+          )
 
-              {/* Protein 3D viewer */}
+          // --- Viewer block (3D) ---
+          const viewerBlock = (
+            <>
               {effectiveMode === 'protein' && hasProtein && (
-                <>
-                  <ProteinViewer
-                    pdbUrl={pdbUrl}
-                    selectedPocket={selectedPocket}
-                    height={280}
-                    dockedMolblock={!dockedMolblocks ? (molecule.properties?.docking?.pose_molblock || null) : null}
-                    dockedMolblocks={dockedMolblocks}
-                    highlightedResidue={highlightedInteraction}
-                    interactionContacts={interactionContacts}
-                    onEnrichedContacts={setComputedDistances}
-                  />
-                  {/* Interactions panel below 3D viewer */}
-                  <div className="mt-3">
-                    <InteractionsTab
-                      molecule={molecule}
-                      details={details}
-                      onHighlightResidue={(val) => {
-                        // Toggle: clicking the same residue deselects it
-                        setHighlightedInteraction(prev =>
-                          prev && prev.number === val?.number ? null : val
-                        )
-                      }}
-                      onShowInteractions={(contacts) => {
-                        setInteractionContacts(contacts)
-                      }}
-                      functionalResidues={funcResidues}
-                      computedDistances={computedDistances}
-                    />
-                  </div>
-                </>
+                <ProteinViewer
+                  pdbUrl={pdbUrl}
+                  selectedPocket={selectedPocket}
+                  height={panelFullscreen ? 500 : isBottomLayout ? 380 : 280}
+                  dockedMolblock={!dockedMolblocks ? (molecule.properties?.docking?.pose_molblock || null) : null}
+                  dockedMolblocks={dockedMolblocks}
+                  highlightedResidue={highlightedInteraction}
+                  interactionContacts={interactionContacts}
+                  onEnrichedContacts={setComputedDistances}
+                />
               )}
-
-              {/* Ligand 3D viewer */}
               {effectiveMode === 'ligand' && hasLigand && (
-                <LigandViewer3D smiles={molecule.smiles} height={280} />
+                <LigandViewer3D smiles={molecule.smiles} height={panelFullscreen ? 500 : isBottomLayout ? 380 : 280} />
               )}
+            </>
+          )
 
-              {/* Results tabs */}
+          // --- Side content block (interactions, tabs, SMILES) ---
+          const sideContent = (
+            <div className="space-y-3">
+              {effectiveMode === 'protein' && hasProtein && (
+                <InteractionsTab
+                  molecule={molecule}
+                  details={details}
+                  onHighlightResidue={(val) => {
+                    setHighlightedInteraction(prev =>
+                      prev && prev.number === val?.number ? null : val
+                    )
+                  }}
+                  onShowInteractions={(contacts) => {
+                    setInteractionContacts(contacts)
+                  }}
+                  functionalResidues={funcResidues}
+                  computedDistances={computedDistances}
+                />
+              )}
               {effectiveMode === 'results' && (
                 <div>
                   <div className="flex border-b border-gray-100 gap-0.5 flex-wrap">
@@ -1363,7 +1508,6 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
                     {activeTab === 'scores' && <ScoresTab mol={molecule} />}
                     {activeTab === 'composite' && <CompositeScoreTab mol={molecule} />}
                     {activeTab === 'properties' && <PropertiesTab mol={molecule} />}
-
                     {activeTab === 'adme' && <AdmeTab mol={molecule} details={details} />}
                     {activeTab === 'toxicity' && <ToxicityDetailTab mol={molecule} details={details} />}
                     {activeTab === 'offtarget' && <OffTargetTab mol={molecule} details={details} />}
@@ -1372,40 +1516,65 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
                   </div>
                 </div>
               )}
+              {/* SMILES block */}
+              {molecule.smiles && (
+                <div className="bg-gray-50 rounded-xl border border-gray-100 p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">SMILES</p>
+                    <button
+                      onClick={copySmiles}
+                      className="flex items-center gap-1 text-[9px] text-gray-400 hover:text-bx-light-text transition-colors"
+                    >
+                      {copied ? (
+                        <>
+                          <svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                          </svg>
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          Copy
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="font-mono text-[9px] text-gray-500 break-all leading-relaxed">{molecule.smiles}</p>
+                </div>
+              )}
+            </div>
+          )
+
+          // --- Layout: 2-col (bottom) or 1-col (right/fullscreen) ---
+          if (isBottomLayout) {
+            return (
+              <div>
+                {toggleBar}
+                <div className="flex gap-4">
+                  <div className="w-1/2 min-w-0">{viewerBlock}</div>
+                  <div className="w-1/2 min-w-0 overflow-y-auto" style={{ maxHeight: '70vh', scrollbarWidth: 'thin', scrollbarColor: '#e5e7eb transparent' }}>
+                    {sideContent}
+                  </div>
+                </div>
+              </div>
+            )
+          }
+
+          return (
+            <div className="space-y-4">
+              {toggleBar}
+              {viewerBlock}
+              {effectiveMode === 'protein' && hasProtein && <div className="mt-3">{sideContent}</div>}
+              {effectiveMode === 'ligand' && hasLigand && sideContent}
+              {effectiveMode === 'results' && sideContent}
             </div>
           )
         })()}
-
-        {/* SMILES block */}
-        {molecule.smiles && (
-          <div className="bg-gray-50 rounded-xl border border-gray-100 p-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">SMILES</p>
-              <button
-                onClick={copySmiles}
-                className="flex items-center gap-1 text-[9px] text-gray-400 hover:text-bx-light-text transition-colors"
-              >
-                {copied ? (
-                  <>
-                    <svg className="w-3 h-3 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                    </svg>
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                    Copy
-                  </>
-                )}
-              </button>
-            </div>
-            <p className="font-mono text-[9px] text-gray-500 break-all leading-relaxed">{molecule.smiles}</p>
-          </div>
-        )}
+        </PanelErrorBoundary>
       </div>
 
       {/* Prev / Next navigation */}
@@ -1440,6 +1609,18 @@ function MoleculeDetailPanel({ molecule, molecules, onClose, onToggleBookmark, o
       </div>
     </div>
   )
+
+  // In fullscreen: render with backdrop overlay
+  if (panelFullscreen) {
+    return (
+      <>
+        <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setPanelFullscreen(false)} />
+        {panelContent}
+      </>
+    )
+  }
+
+  return panelContent
 }
 
 export default MoleculeDetailPanel

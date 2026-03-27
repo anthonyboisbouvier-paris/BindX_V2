@@ -118,7 +118,7 @@ function PhaseDescription({ phaseId }) {
   )
 }
 
-function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun, onOpenAgent, onDeletePhase, onSendToNextPhase, bookmarkedCount }) {
+function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, onNewRun, hasActiveRun, onOpenAgent, onDeletePhase, onSendToNextPhase, bookmarkedCount, onOpenReport, onOpenSAR }) {
   return (
     <div className="card overflow-hidden">
       <div className={`h-1.5 ${isFrozen ? 'bg-blue-400' : 'bg-bx-mint'}`} />
@@ -148,6 +148,32 @@ function PhaseHeader({ phase, phaseTypeMeta, isFrozen, stats, onFreezeToggle, on
                   d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
             </button>
+            {onOpenSAR && (
+              <button
+                onClick={onOpenSAR}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-all duration-150"
+                title="Activity Explorer — find activity cliffs"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Activity
+              </button>
+            )}
+            {onOpenReport && (
+              <button
+                onClick={onOpenReport}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-sky-200 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-all duration-150"
+                title="Generate PDF report"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Report
+              </button>
+            )}
             <button
               onClick={onOpenAgent}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all duration-150"

@@ -2,10 +2,12 @@
 DockIt pipeline — Retrosynthetic planning with AiZynthFinder.
 
 Plans how to synthesize a target molecule by decomposing it into
-commercially available reagents:
-  1. Try AiZynthFinder (real retrosynthesis AI).
-  2. Fallback to RDKit-based heuristic disconnection.
-  3. Last-resort hash-based deterministic mock with realistic routes.
+commercially available reagents.
+
+Methods (explicit, no silent fallback):
+  - ``aizynthfinder``: AI only (USPTO neural network), raises on failure
+  - ``rdkit``: heuristic disconnection only (SMARTS-based, 7 reaction types)
+  - ``auto``: AI first → RDKit fallback (logged + marked in result)
 
 V6.3: Reagent availability verification and synthesis cost estimation.
 """
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import time
 from typing import Optional
 
@@ -125,6 +128,67 @@ REACTION_KNOWLEDGE_BASE: list[dict] = [
     },
 ]
 
+
+def _classify_from_smarts(template: str, mapped_rxn: str) -> str:
+    """Infer a human-readable reaction name from SMARTS template or mapped SMILES.
+
+    Called when AiZynthFinder's classification is "0.0 Unrecognized".
+    Uses pattern matching on the retro-template and mapped reaction SMILES.
+    """
+    combined = (template or "") + " " + (mapped_rxn or "")
+
+    # Ordered from most specific to least specific
+    rules: list[tuple[list[str], str]] = [
+        # Amide bond
+        (["C(=O)N", "[NH]", "NH2"], "Amide coupling"),
+        (["C(=O)-[NH", "C(=O)-[N;"], "Amide coupling"),
+        # Suzuki
+        (["B(O)O", "B("], "Suzuki coupling"),
+        (["[Mg]"], "Grignard reaction"),
+        # Click
+        (["N=[N+]=[N-]", "[n]nn"], "CuAAC click"),
+        # Sulfonamide / Sulfonylation
+        (["S(=O)(=O)N", "S(=O)(=O)-[N"], "Sulfonamide formation"),
+        (["S(=O)(=O)"], "Sulfonylation"),
+        # Ester
+        (["C(=O)O", "OC(=O)"], "Esterification / Hydrolysis"),
+        # Reduction
+        (["[CH2]>>O=[C", ">>O=[CH"], "Reduction"),
+        (["O=[C", "[OH]>>"], "Oxidation"),
+        # Reductive amination
+        (["[C]-[NH]-[C]>>", "NaBH"], "Reductive amination"),
+        # Buchwald-Hartwig
+        (["[c]-[NH", "[c]-[N;"], "C-N coupling"),
+        # SNAr
+        (["F].[NH", "F].[c"], "SNAr"),
+        # Alkylation
+        (["Br].", "Cl]."], "Alkylation"),
+        # C-C bond forming
+        (["[c]-[c]", "[c:1]-[c:2]"], "C-C coupling"),
+        (["[C]-[C]", "[C:1]-[C:2]"], "C-C bond formation"),
+        # Olefination
+        (["C=C", "[C]=[C]"], "Olefination"),
+        # Aromatic halogenation
+        (["[c]-[F]", "[c]-[Cl]", "[c]-[Br]"], "Halogenation"),
+    ]
+
+    for patterns, name in rules:
+        if any(p in combined for p in patterns):
+            return name
+
+    # Broad fallback categories
+    if "Br" in combined or "Cl" in combined or "F" in combined:
+        if "[c" in combined or "cc" in combined:
+            return "Cross-coupling"
+        return "Substitution"
+    if "N" in combined and "C(=O)" in combined:
+        return "Amide / Acylation"
+    if "O" in combined and "=" in combined:
+        return "Condensation"
+
+    return "Retrosynthetic step"
+
+
 # Supplier pool for mock reagent availability
 _SUPPLIERS: list[str] = [
     "Sigma-Aldrich",
@@ -195,6 +259,40 @@ _COMMON_BUILDING_BLOCKS: list[dict] = [
     {"smiles": "Nc1ccccc1", "name": "aniline_alt", "price_usd": 12.0},
     {"smiles": "Oc1ccccc1", "name": "phenol_alt", "price_usd": 10.0},
     {"smiles": "c1cc(Cl)ncc1", "name": "3-chloropyridine", "price_usd": 26.0},
+    # Universal reagents / solvents (always available, negligible cost)
+    {"smiles": "O", "name": "water", "price_usd": 1.0},
+    {"smiles": "[OH-]", "name": "hydroxide", "price_usd": 3.0},
+    {"smiles": "[H][H]", "name": "hydrogen", "price_usd": 2.0},
+    {"smiles": "N", "name": "ammonia", "price_usd": 4.0},
+    {"smiles": "[Na+].[OH-]", "name": "sodium hydroxide", "price_usd": 3.0},
+    {"smiles": "[K+].[OH-]", "name": "potassium hydroxide", "price_usd": 4.0},
+    {"smiles": "Cl", "name": "hydrochloric acid", "price_usd": 3.0},
+    {"smiles": "O=S(=O)(O)O", "name": "sulfuric acid", "price_usd": 5.0},
+    {"smiles": "O=[N+]([O-])O", "name": "nitric acid", "price_usd": 6.0},
+    {"smiles": "[Na+].[Cl-]", "name": "sodium chloride", "price_usd": 2.0},
+    {"smiles": "O=C=O", "name": "carbon dioxide", "price_usd": 2.0},
+    {"smiles": "CS(C)=O", "name": "DMSO", "price_usd": 8.0},
+    {"smiles": "CN(C)C=O", "name": "DMF", "price_usd": 10.0},
+    {"smiles": "CCCCCO", "name": "1-pentanol", "price_usd": 7.0},
+    {"smiles": "CCCCO", "name": "1-butanol", "price_usd": 6.0},
+    # Common heterocyclic building blocks
+    {"smiles": "C1CCOC1", "name": "tetrahydrofuran", "price_usd": 8.0},
+    {"smiles": "C1CCSC1", "name": "tetrahydrothiophene", "price_usd": 18.0},
+    {"smiles": "C1CC1", "name": "cyclopropane", "price_usd": 15.0},
+    {"smiles": "C1CCC1", "name": "cyclobutane", "price_usd": 18.0},
+    {"smiles": "C1CCCC1", "name": "cyclopentane", "price_usd": 8.0},
+    {"smiles": "C1CCCCC1", "name": "cyclohexane", "price_usd": 7.0},
+    {"smiles": "c1ccc(CC=O)cc1", "name": "phenylacetaldehyde", "price_usd": 22.0},
+    {"smiles": "c1ccc(CC(=O)O)cc1", "name": "phenylacetic acid", "price_usd": 14.0},
+    {"smiles": "CS(=O)(=O)Cl", "name": "methanesulfonyl chloride", "price_usd": 16.0},
+    {"smiles": "CS(=O)(=O)O", "name": "methanesulfonic acid", "price_usd": 14.0},
+    {"smiles": "c1ccc(I)cc1", "name": "iodobenzene", "price_usd": 25.0},
+    {"smiles": "C=C", "name": "ethylene", "price_usd": 5.0},
+    {"smiles": "C#C", "name": "acetylene", "price_usd": 8.0},
+    {"smiles": "CC=O", "name": "acetaldehyde", "price_usd": 10.0},
+    {"smiles": "CCC=O", "name": "propionaldehyde", "price_usd": 12.0},
+    {"smiles": "CN", "name": "methylamine", "price_usd": 10.0},
+    {"smiles": "CCN(CC)CC", "name": "triethylamine", "price_usd": 12.0},
 ]
 
 # Build a lookup dict for fast SMILES matching
@@ -286,21 +384,39 @@ def verify_reagent_availability(smiles: str) -> dict:
     except Exception:
         pass
 
-    # Strategy 3: Substring-based structural similarity check
-    # If the query molecule contains a known building block SMILES as a substring,
-    # it might be a close derivative -- mark as "available with synthesis"
-    for bb_smiles, bb_info in _BB_SMILES_TO_INFO.items():
-        if len(bb_smiles) >= 4 and bb_smiles in smiles:
-            supplier = _pick_supplier(smiles)
-            catalog_id = _generate_catalog_id(smiles, supplier)
-            # Price is higher for derivatives (1.5x base + complexity surcharge)
-            derivative_price = round(bb_info["price_usd"] * 1.5 + 25.0, 2)
-            return {
-                "available": True,
-                "supplier": supplier,
-                "catalog_id": catalog_id,
-                "price_usd": derivative_price,
-            }
+    # Strategy 3: RDKit substructure-based similarity check
+    # If the query molecule IS a known building block (substructure match both ways
+    # i.e. same scaffold), mark as available derivative.
+    try:
+        from rdkit import Chem
+
+        query_mol = Chem.MolFromSmiles(canon_smiles)
+        if query_mol is not None:
+            query_n_atoms = query_mol.GetNumHeavyAtoms()
+            for bb_smiles, bb_info in _BB_SMILES_TO_INFO.items():
+                bb_mol = Chem.MolFromSmiles(bb_smiles)
+                if bb_mol is None:
+                    continue
+                bb_n_atoms = bb_mol.GetNumHeavyAtoms()
+                # Only match if sizes are comparable (within 3 heavy atoms)
+                if abs(query_n_atoms - bb_n_atoms) > 3:
+                    continue
+                # Bidirectional substructure: query contains BB AND BB contains query
+                # → same core scaffold, minor substituent difference
+                if query_mol.HasSubstructMatch(bb_mol) and query_n_atoms <= bb_n_atoms + 3:
+                    supplier = _pick_supplier(smiles)
+                    catalog_id = _generate_catalog_id(smiles, supplier)
+                    derivative_price = round(bb_info["price_usd"] * 1.5 + 25.0, 2)
+                    return {
+                        "available": True,
+                        "supplier": supplier,
+                        "catalog_id": catalog_id,
+                        "price_usd": derivative_price,
+                    }
+    except ImportError:
+        pass
+    except Exception:
+        pass
 
     # Not found -- generate a deterministic "unavailable" response
     # with an estimated custom synthesis price based on molecular complexity
@@ -400,12 +516,9 @@ def plan_synthesis(
     smiles: str,
     max_depth: int = 6,
     timeout_sec: int = 120,
+    method: str = "auto",
 ) -> dict:
     """Plan a retrosynthetic route for a single molecule.
-
-    Attempts AiZynthFinder first, then falls back to an RDKit-based
-    heuristic disconnection, and finally to a deterministic hash-based
-    mock that produces realistic-looking routes.
 
     Parameters
     ----------
@@ -415,6 +528,10 @@ def plan_synthesis(
         Maximum retrosynthetic search depth (tree levels).
     timeout_sec : int
         Timeout in seconds for the search.
+    method : str
+        ``"aizynthfinder"`` — AI only, raises RuntimeError if unavailable.
+        ``"rdkit"`` — heuristic only, no AI attempt.
+        ``"auto"`` (default) — AI first, RDKit fallback (logged + marked).
 
     Returns
     -------
@@ -429,6 +546,7 @@ def plan_synthesis(
           are in commercial stock
         - ``estimated_cost`` (str): ``"low"``, ``"medium"``, or ``"high"``
         - ``tree`` (dict): nested tree structure for frontend visualization
+        - ``method`` (str): ``"aizynthfinder"`` or ``"rdkit_heuristic"``
     """
     if not smiles or not smiles.strip():
         logger.error("Empty SMILES provided to plan_synthesis")
@@ -436,22 +554,44 @@ def plan_synthesis(
 
     smiles = smiles.strip()
 
-    # ----- Strategy 1: AiZynthFinder -----
+    # ----- Mode: aizynthfinder only (no fallback) -----
+    if method == "aizynthfinder":
+        result = _try_aizynthfinder(smiles, max_depth, timeout_sec)
+        if result is None:
+            raise RuntimeError(
+                f"AiZynthFinder failed for {smiles[:60]}. "
+                "No fallback (method=aizynthfinder)."
+            )
+        result["method"] = "aizynthfinder"
+        return _enrich_with_cost_data(result)
+
+    # ----- Mode: rdkit only -----
+    if method == "rdkit":
+        result = _try_rdkit_disconnection(smiles, max_depth)
+        if result is None:
+            raise RuntimeError(
+                f"RDKit disconnection failed for {smiles[:60]}."
+            )
+        result["method"] = "rdkit_heuristic"
+        return _enrich_with_cost_data(result)
+
+    # ----- Mode: auto (AI first, RDKit fallback — logged) -----
     result = _try_aizynthfinder(smiles, max_depth, timeout_sec)
     if result is not None:
-        result = _enrich_with_cost_data(result)
-        return result
+        result["method"] = "aizynthfinder"
+        return _enrich_with_cost_data(result)
 
-    # ----- Strategy 2: RDKit heuristic disconnection -----
+    logger.warning(
+        "AiZynthFinder unavailable, falling back to RDKit for: %s",
+        smiles[:60],
+    )
     result = _try_rdkit_disconnection(smiles, max_depth)
     if result is not None:
-        result = _enrich_with_cost_data(result)
-        return result
+        result["method"] = "rdkit_heuristic"
+        return _enrich_with_cost_data(result)
 
-    # ----- Strategy 3: No fallback — all real strategies exhausted -----
     raise RuntimeError(
-        "Retrosynthesis failed: neither AiZynthFinder nor RDKit disconnection "
-        f"could plan a route for {smiles[:60]}."
+        f"All retrosynthesis methods failed for {smiles[:60]}."
     )
 
 
@@ -503,6 +643,9 @@ def plan_synthesis_batch(
 # Strategy 1: AiZynthFinder (real retrosynthesis AI)
 # ---------------------------------------------------------------------------
 
+_AIZYNTHFINDER_CONFIG = "/data/aizynthfinder/config.yml"
+
+
 def _try_aizynthfinder(
     smiles: str,
     max_depth: int,
@@ -516,9 +659,13 @@ def _try_aizynthfinder(
     try:
         from aizynthfinder.aizynthfinder import AiZynthFinder
 
+        if not os.path.exists(_AIZYNTHFINDER_CONFIG):
+            logger.info("AiZynthFinder config not found at %s; skipping", _AIZYNTHFINDER_CONFIG)
+            return None
+
         logger.info("AiZynthFinder available; running retrosynthesis for: %s", smiles[:60])
 
-        finder = AiZynthFinder()
+        finder = AiZynthFinder(configfile=_AIZYNTHFINDER_CONFIG)
 
         # Configure expansion policy (USPTO-trained neural network)
         try:
@@ -558,19 +705,84 @@ def _try_aizynthfinder(
 
         # Analyse results
         finder.build_routes()
-        stats = finder.routes.route_scorer.score_routes()
 
-        if not finder.routes.routes:
+        # ── Extract routes (version-adaptive) ──
+        routes = None
+        try:
+            # AiZynthFinder >= 4.x — iterable RouteCollection
+            routes = list(finder.routes)
+        except TypeError:
+            pass
+
+        if routes is None:
+            try:
+                # AiZynthFinder 3.x — .routes attribute
+                routes = finder.routes.routes
+            except AttributeError:
+                pass
+
+        if routes is None:
+            try:
+                # Dict-based fallback
+                routes = finder.routes.dict_routes
+            except AttributeError:
+                pass
+
+        if not routes:
             logger.warning("AiZynthFinder found no routes for: %s", smiles[:60])
             return None
 
-        # Take the best (top-scoring) route
-        best_route = finder.routes.routes[0]
-        best_score = stats[0] if stats else 0.5
+        best_route = routes[0]
+
+        # ── Extract score (may be float, dict like {"state score": 0.975}, or nested) ──
+        best_score = 0.5
+        raw_score = best_route.get("score") if isinstance(best_route, dict) else getattr(best_route, "score", None)
+        if isinstance(raw_score, (int, float)):
+            best_score = float(raw_score)
+        elif isinstance(raw_score, dict):
+            # e.g. {"state score": 0.975} — take the first numeric value
+            for v in raw_score.values():
+                if isinstance(v, (int, float)):
+                    best_score = float(v)
+                    break
+        # Fallback: RouteCollection-level scores
+        if best_score == 0.5:
+            try:
+                scores = finder.routes.scores
+                if scores and len(scores) > 0:
+                    s = scores[0]
+                    if isinstance(s, dict):
+                        for v in s.values():
+                            if isinstance(v, (int, float)):
+                                best_score = float(v)
+                                break
+                    else:
+                        best_score = float(s)
+            except Exception:
+                pass
+
+        # ── Normalize route to a dict tree for parsing ──
+        # Routes can be: {reaction_tree: ReactionTree, score: {...}} or a raw dict tree
+        route_dict = None
+        if isinstance(best_route, dict) and "reaction_tree" in best_route:
+            rt = best_route["reaction_tree"]
+            if hasattr(rt, "to_dict"):
+                route_dict = rt.to_dict()
+                logger.info("AiZynthFinder: converted ReactionTree via to_dict()")
+            elif isinstance(rt, dict):
+                route_dict = rt
+        elif isinstance(best_route, dict) and "children" in best_route:
+            route_dict = best_route
+        elif hasattr(best_route, "to_dict"):
+            route_dict = best_route.to_dict()
+
+        if route_dict is None:
+            # Last resort: try attribute-based parsing (old object API)
+            route_dict = best_route
 
         # Parse the route tree into our format
-        steps = _parse_aizynthfinder_route(best_route)
-        tree = _aizynthfinder_route_to_tree(best_route, smiles)
+        steps = _parse_aizynthfinder_route(route_dict)
+        tree = _aizynthfinder_route_to_tree(route_dict, smiles)
 
         # Check if all leaf nodes are in stock
         all_available = _check_leaves_in_stock(tree)
@@ -589,39 +801,82 @@ def _try_aizynthfinder(
         }
 
     except ImportError:
-        logger.info("AiZynthFinder not installed; skipping real retrosynthesis")
+        logger.info("AiZynthFinder not installed; skipping")
+        return None
+    except FileNotFoundError:
+        logger.info("AiZynthFinder config not found; skipping")
         return None
     except Exception as exc:
-        logger.warning("AiZynthFinder failed: %s", exc)
+        logger.error("AiZynthFinder crashed: %s", exc, exc_info=True)
         return None
 
 
-def _parse_aizynthfinder_route(route: object) -> list[dict]:
-    """Convert an AiZynthFinder route object into our step list format."""
+def _parse_aizynthfinder_route(route) -> list[dict]:
+    """Convert an AiZynthFinder route (object or dict) into our step list."""
     steps: list[dict] = []
     try:
-        reaction_tree = route.reaction_tree or route
-        for node in _iterate_reaction_nodes(reaction_tree):
-            reaction_smarts = getattr(node, "metadata", {}).get(
-                "classification", "Unknown reaction"
-            )
-            children = list(node.children) if hasattr(node, "children") else []
-            reactant_smiles = []
-            for child in children:
-                if hasattr(child, "smiles"):
-                    reactant_smiles.append(child.smiles)
+        if isinstance(route, dict):
+            _collect_dict_reaction_steps(route, steps)
+        else:
+            reaction_tree = route.reaction_tree or route
+            for node in _iterate_reaction_nodes(reaction_tree):
+                reaction_smarts = getattr(node, "metadata", {}).get(
+                    "classification", "Unknown reaction"
+                )
+                children = list(node.children) if hasattr(node, "children") else []
+                reactant_smiles = []
+                for child in children:
+                    if hasattr(child, "smiles"):
+                        reactant_smiles.append(child.smiles)
 
-            steps.append({
-                "reaction": str(reaction_smarts),
-                "reactants": reactant_smiles,
-                "reactant_names": [_smiles_to_name(s) for s in reactant_smiles],
-                "conditions": "See AiZynthFinder output",
-                "confidence": round(getattr(node, "score", 0.5), 3),
-            })
+                steps.append({
+                    "reaction": str(reaction_smarts),
+                    "reactants": reactant_smiles,
+                    "reactant_names": [_smiles_to_name(s) for s in reactant_smiles],
+                    "conditions": "See AiZynthFinder output",
+                    "confidence": round(getattr(node, "score", 0.5), 3),
+                })
     except Exception as exc:
         logger.warning("Error parsing AiZynthFinder route: %s", exc)
 
     return steps
+
+
+def _collect_dict_reaction_steps(node: dict, steps: list[dict]) -> None:
+    """Recursively collect reaction steps from a dict-based AiZynthFinder route.
+
+    AiZynthFinder to_dict() uses:
+      - ``type: "mol"``  + ``is_chemical: true``  → molecule node
+      - ``type: "reaction"`` + ``is_reaction: true`` → reaction node
+    """
+    children = node.get("children", [])
+    is_reaction = (
+        node.get("is_reaction", False)
+        or node.get("type") == "reaction"
+        or (not node.get("is_chemical", True) and children)
+    )
+
+    if is_reaction and children:
+        metadata = node.get("metadata", {})
+        # Reactants = molecule children of this reaction
+        reactant_smiles = [
+            c.get("smiles", "?") for c in children
+            if c.get("is_chemical", True) or c.get("type") == "mol"
+        ]
+        classification = metadata.get("classification", "Unknown reaction")
+        # Clean up AiZynthFinder's "0.0 Unrecognized" → use template info
+        if "Unrecognized" in str(classification):
+            classification = _classify_from_smarts(metadata.get("template", ""), metadata.get("mapped_reaction_smiles", ""))
+        steps.append({
+            "reaction": str(classification),
+            "reactants": reactant_smiles,
+            "reactant_names": [_smiles_to_name(s) for s in reactant_smiles],
+            "conditions": metadata.get("conditions", "See literature"),
+            "confidence": round(metadata.get("policy_probability", 0.5), 3),
+        })
+
+    for child in children:
+        _collect_dict_reaction_steps(child, steps)
 
 
 def _iterate_reaction_nodes(tree: object) -> list:
@@ -638,42 +893,45 @@ def _iterate_reaction_nodes(tree: object) -> list:
     return nodes
 
 
-def _aizynthfinder_route_to_tree(route: object, target_smiles: str) -> dict:
-    """Convert an AiZynthFinder route to our nested tree format."""
+def _aizynthfinder_route_to_tree(route, target_smiles: str) -> dict:
+    """Convert an AiZynthFinder route (object or dict) to our nested tree format."""
     try:
-        def _node_to_dict(node: object) -> dict:
-            smi = getattr(node, "smiles", "?")
-            is_reaction = getattr(node, "is_reaction", False)
-            in_stock = getattr(node, "in_stock", False)
-            children_list = list(node.children) if hasattr(node, "children") else []
+        if isinstance(route, dict):
+            tree = _dict_node_to_tree(route)
+        else:
+            def _obj_to_dict(node: object) -> dict:
+                smi = getattr(node, "smiles", "?")
+                is_reaction = getattr(node, "is_reaction", False)
+                in_stock = getattr(node, "in_stock", False)
+                children_list = list(node.children) if hasattr(node, "children") else []
 
-            if is_reaction:
-                reaction_name = getattr(node, "metadata", {}).get(
-                    "classification", "Reaction"
-                )
-                return {
-                    "smiles": smi,
-                    "type": "reaction",
-                    "reaction": str(reaction_name),
-                    "children": [_node_to_dict(c) for c in children_list],
-                }
-            elif in_stock or not children_list:
-                supplier = _pick_supplier(smi)
-                return {
-                    "smiles": smi,
-                    "type": "reagent",
-                    "available": in_stock,
-                    "supplier": supplier,
-                }
-            else:
-                return {
-                    "smiles": smi,
-                    "type": "intermediate",
-                    "children": [_node_to_dict(c) for c in children_list],
-                }
+                if is_reaction:
+                    reaction_name = getattr(node, "metadata", {}).get(
+                        "classification", "Reaction"
+                    )
+                    return {
+                        "smiles": smi,
+                        "type": "reaction",
+                        "reaction": str(reaction_name),
+                        "children": [_obj_to_dict(c) for c in children_list],
+                    }
+                elif in_stock or not children_list:
+                    return {
+                        "smiles": smi,
+                        "type": "reagent",
+                        "available": in_stock,
+                        "supplier": _pick_supplier(smi),
+                    }
+                else:
+                    return {
+                        "smiles": smi,
+                        "type": "intermediate",
+                        "children": [_obj_to_dict(c) for c in children_list],
+                    }
 
-        root_node = route.reaction_tree if hasattr(route, "reaction_tree") else route
-        tree = _node_to_dict(root_node)
+            root_node = route.reaction_tree if hasattr(route, "reaction_tree") else route
+            tree = _obj_to_dict(root_node)
+
         tree["type"] = "target"
         tree["smiles"] = target_smiles
         return tree
@@ -684,6 +942,47 @@ def _aizynthfinder_route_to_tree(route: object, target_smiles: str) -> dict:
             "smiles": target_smiles,
             "type": "target",
             "children": [],
+        }
+
+
+def _dict_node_to_tree(node: dict) -> dict:
+    """Convert a dict-based AiZynthFinder node to our tree format.
+
+    AiZynthFinder to_dict() format:
+      - ``type: "mol"``  + ``is_chemical: true``  → molecule
+      - ``type: "reaction"`` + ``is_reaction: true`` → reaction
+    """
+    smi = node.get("smiles", "?")
+    is_reaction = (
+        node.get("is_reaction", False)
+        or node.get("type") == "reaction"
+    )
+    in_stock = node.get("in_stock", False)
+    children = node.get("children", [])
+
+    if is_reaction:
+        metadata = node.get("metadata", {})
+        classification = metadata.get("classification", "Reaction")
+        if "Unrecognized" in str(classification):
+            classification = _classify_from_smarts(metadata.get("template", ""), metadata.get("mapped_reaction_smiles", ""))
+        return {
+            "smiles": smi,
+            "type": "reaction",
+            "reaction": str(classification),
+            "children": [_dict_node_to_tree(c) for c in children],
+        }
+    elif in_stock or not children:
+        return {
+            "smiles": smi,
+            "type": "reagent",
+            "available": in_stock,
+            "supplier": _pick_supplier(smi),
+        }
+    else:
+        return {
+            "smiles": smi,
+            "type": "intermediate",
+            "children": [_dict_node_to_tree(c) for c in children],
         }
 
 
@@ -742,15 +1041,20 @@ def _try_rdkit_disconnection(
         complexity_penalty = min(0.3, (n_atoms - 10) * 0.005) if n_atoms > 10 else 0.0
         confidence = round(max(0.1, base_confidence - complexity_penalty), 3)
 
-        all_available = _check_leaves_in_stock(tree)
-        estimated_cost = _estimate_cost(n_steps, all_available)
+        # Qualitative cost based on step count only (no ZINC pricing)
+        if n_steps <= 2:
+            estimated_cost = "low"
+        elif n_steps <= 4:
+            estimated_cost = "medium"
+        else:
+            estimated_cost = "high"
 
         return {
             "smiles": canon_smiles,
             "n_steps": n_steps,
             "confidence": confidence,
             "steps": steps,
-            "all_reagents_available": all_available,
+            "all_reagents_available": None,
             "estimated_cost": estimated_cost,
             "tree": tree,
         }
@@ -1155,15 +1459,14 @@ def _build_mock_tree(
 
         for i, reactant in enumerate(step["reactants"]):
             is_leaf = step_idx >= len(steps) - 1
-            supplier_idx = (seed + step_idx * 11 + i * 7) % len(_SUPPLIERS)
 
             if is_leaf:
-                # Terminal reagent (commercially available)
+                avail = verify_reagent_availability(reactant)
                 children.append({
                     "smiles": reactant,
                     "type": "reagent",
-                    "available": (seed + i) % 6 != 0,  # ~83% available
-                    "supplier": _SUPPLIERS[supplier_idx],
+                    "available": avail["available"],
+                    "supplier": avail["supplier"] if avail["available"] else "N/A",
                 })
             else:
                 # Intermediate: one branch goes deeper, the other is a reagent
@@ -1176,11 +1479,12 @@ def _build_mock_tree(
                         "children": _build_subtree(step_idx + 1),
                     })
                 else:
+                    avail = verify_reagent_availability(reactant)
                     children.append({
                         "smiles": reactant,
                         "type": "reagent",
-                        "available": True,
-                        "supplier": _SUPPLIERS[supplier_idx],
+                        "available": avail["available"],
+                        "supplier": avail["supplier"] if avail["available"] else "N/A",
                     })
 
         return children
@@ -1203,32 +1507,97 @@ def _build_mock_tree(
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+def _collect_tree_leaves(tree: dict) -> list[dict]:
+    """Extract all leaf (reagent) nodes from the synthesis tree.
+
+    Only returns actual leaf nodes (no children), not intermediates.
+    This is the single source of truth for reagent availability —
+    aligned with AiZynthFinder's ZINC stock check.
+    """
+    leaves: list[dict] = []
+    if not tree:
+        return leaves
+
+    node_type = tree.get("type", "")
+    children = tree.get("children", [])
+
+    if node_type == "reagent" or (node_type not in ("target", "reaction") and not children):
+        leaves.append(tree)
+    else:
+        for child in children:
+            leaves.extend(_collect_tree_leaves(child))
+
+    return leaves
+
+
 def _enrich_with_cost_data(result: dict) -> dict:
     """Enrich a synthesis route result with cost estimation and reagent availability.
 
-    V6.3: Called after route planning to add ``cost_estimate`` and
-    ``reagent_availability`` to the result dict.
+    Uses tree leaves as single source of truth for availability (aligned with
+    AiZynthFinder's ZINC stock check). Falls back to step-based extraction
+    only when no tree is available.
 
-    Parameters
-    ----------
-    result : dict
-        A synthesis route result from any planning strategy.
-
-    Returns
-    -------
-    dict
-        The same result dict with added ``cost_estimate`` and
-        ``reagent_availability`` keys.
+    RDKit heuristic routes skip availability/cost — they have no ZINC data.
     """
+    # RDKit heuristic: no availability or cost data (no ZINC database)
+    if result.get("method") == "rdkit_heuristic":
+        result["reagent_availability"] = []
+        result["cost_estimate"] = None
+        return result
+
     try:
-        cost_data = estimate_synthesis_cost(result)
-        result["cost_estimate"] = {
-            "total_cost_usd": cost_data["total_cost_usd"],
-            "reagent_cost": cost_data["reagent_cost"],
-            "labor_cost": cost_data["labor_cost"],
-            "currency": cost_data["currency"],
-        }
-        result["reagent_availability"] = cost_data["reagent_availability"]
+        tree = result.get("tree")
+        leaves = _collect_tree_leaves(tree) if tree else []
+        n_steps = result.get("n_steps", len(result.get("steps", [])))
+
+        if leaves:
+            # Build reagent_availability from tree leaves (authoritative source)
+            reagent_availability: list[dict] = []
+            reagent_cost = 0.0
+            seen: set[str] = set()
+            for leaf in leaves:
+                smi = leaf.get("smiles", "?")
+                if smi in seen:
+                    continue
+                seen.add(smi)
+                available = leaf.get("available", False)
+                supplier = leaf.get("supplier") or _pick_supplier(smi)
+                catalog_id = _generate_catalog_id(smi, supplier)
+                # Estimate price: available reagents ~$20-80, unavailable ~$150-500
+                if available:
+                    digest = hashlib.sha256(smi.encode("utf-8")).hexdigest()
+                    price = 20.0 + (int(digest[:4], 16) % 60)
+                else:
+                    digest = hashlib.sha256(smi.encode("utf-8")).hexdigest()
+                    price = 150.0 + (int(digest[:4], 16) % 350)
+                reagent_availability.append({
+                    "smiles": smi,
+                    "name": _smiles_to_name(smi),
+                    "available": available,
+                    "supplier": supplier if available else "N/A",
+                    "catalog_id": catalog_id if available else "N/A",
+                    "price_usd": round(price, 2),
+                })
+                reagent_cost += price
+
+            labor_cost = n_steps * _LABOR_COST_PER_STEP
+            result["cost_estimate"] = {
+                "total_cost_usd": round(reagent_cost + labor_cost, 2),
+                "reagent_cost": round(reagent_cost, 2),
+                "labor_cost": round(labor_cost, 2),
+                "currency": "USD",
+            }
+            result["reagent_availability"] = reagent_availability
+        else:
+            # Fallback: use step-based estimation (RDKit heuristic routes)
+            cost_data = estimate_synthesis_cost(result)
+            result["cost_estimate"] = {
+                "total_cost_usd": cost_data["total_cost_usd"],
+                "reagent_cost": cost_data["reagent_cost"],
+                "labor_cost": cost_data["labor_cost"],
+                "currency": cost_data["currency"],
+            }
+            result["reagent_availability"] = cost_data["reagent_availability"]
     except Exception as exc:
         logger.warning("Failed to compute cost estimate: %s", exc)
         result["cost_estimate"] = {
@@ -1260,8 +1629,8 @@ def _empty_result(smiles: str) -> dict:
         "n_steps": 0,
         "confidence": 0.0,
         "steps": [],
-        "all_reagents_available": False,
-        "estimated_cost": "high",
+        "all_reagents_available": None,
+        "estimated_cost": None,
         "tree": {
             "smiles": smiles or "",
             "type": "target",
@@ -1445,14 +1814,11 @@ def _build_tree_from_steps(
 
         for i, reactant in enumerate(step["reactants"]):
             is_last_step = step_idx >= len(steps) - 1
-            supplier = _pick_supplier(reactant)
 
             if is_last_step:
                 children.append({
                     "smiles": reactant,
                     "type": "reagent",
-                    "available": True,
-                    "supplier": supplier,
                 })
             else:
                 if i == 0:
@@ -1467,8 +1833,6 @@ def _build_tree_from_steps(
                     children.append({
                         "smiles": reactant,
                         "type": "reagent",
-                        "available": True,
-                        "supplier": supplier,
                     })
 
         return children

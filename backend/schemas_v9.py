@@ -37,6 +37,7 @@ class CampaignSummary(BaseModel):
     name: str
     pocket_config: Optional[dict] = None
     strategy_notes: Optional[str] = None
+    reference_ligands: Optional[list] = []
     created_at: datetime
     phases: List[PhaseSummary] = []
 
@@ -153,6 +154,7 @@ class CampaignResponse(BaseModel):
     name: str
     pocket_config: Optional[dict] = None
     strategy_notes: Optional[str] = None
+    reference_ligands: Optional[list] = []
     created_at: datetime
     phases: List[PhaseSummary] = []
 
@@ -349,3 +351,89 @@ class MoleculeStatsResponse(BaseModel):
 class BookmarkRequest(BaseModel):
     molecule_ids: List[uuid.UUID]
     bookmarked: bool
+
+
+# ---------------------------------------------------------------------------
+# SAR / MMP schemas
+# ---------------------------------------------------------------------------
+
+class MMPApplyRequest(BaseModel):
+    from_smiles: str
+    to_smiles: str
+    molecule_ids: Optional[List[uuid.UUID]] = None
+    max_results: int = 50
+
+
+class MMPSuggestion(BaseModel):
+    smiles: str
+    source_mol_id: Optional[str] = None
+    source_mol_name: Optional[str] = None
+    qed: Optional[float] = None
+    mw: Optional[float] = None
+    logp: Optional[float] = None
+    hbd: Optional[int] = None
+    hba: Optional[int] = None
+    valid: bool = True
+
+
+class MMPApplyResponse(BaseModel):
+    suggestions: List[MMPSuggestion]
+    transform: str
+    n_input_molecules: int
+
+
+class MMPImportRequest(BaseModel):
+    smiles_list: List[str]
+    names: Optional[List[str]] = None
+    transform: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# AFVS schemas (BDX-41)
+# ---------------------------------------------------------------------------
+
+class AFVSRunCreate(BaseModel):
+    """Config for launching an AFVS ultra-large screening run."""
+    strategy: str = "balanced"  # lean | balanced | aggressive
+    docking_scenario: str = "smina_vinardo"  # smina_vinardo | qvina2
+    exhaustiveness_prescreen: int = 1
+    exhaustiveness_primary: int = 8
+    reps_per_tranche: int = 1
+    tranche_pct: float = 0.5  # percentage of tranches for primary screen
+    mw_max: float = 500
+    logp_max: float = 5
+    hbd_max: int = 5
+    hba_max: int = 10
+    top_n_results: int = 10000
+    budget_cap_usd: float = 500
+
+    @field_validator("top_n_results")
+    @classmethod
+    def _cap_top_n(cls, v):
+        if v > 100_000:
+            raise ValueError("top_n_results cannot exceed 100,000")
+        return v
+
+    @field_validator("budget_cap_usd")
+    @classmethod
+    def _budget_positive(cls, v):
+        if v <= 0:
+            raise ValueError("budget_cap_usd must be positive")
+        return v
+
+
+class AFVSStatusResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    run_id: uuid.UUID
+    status: str
+    afvs_phase: Optional[str] = None
+    progress: int = 0
+    current_step: Optional[str] = None
+    molecules_screened: Optional[int] = None
+    molecules_imported: Optional[int] = None
+    actual_cost_usd: Optional[float] = None
+    budget_cap_usd: Optional[float] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None

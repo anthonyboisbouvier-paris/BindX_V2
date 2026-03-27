@@ -10,9 +10,11 @@ export default function RunProgress({ run, onCancel, queuedCount = 0 }) {
   const isCreated = run.status === 'created'
   const progress = run.progress ?? 0
 
-  const typeLabel = run.type === 'calculation' && run.calculation_types?.length
-    ? run.calculation_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' + ')
-    : run.type.charAt(0).toUpperCase() + run.type.slice(1)
+  const typeLabel = run.type === 'afvs'
+    ? 'AFVS Screening'
+    : run.type === 'calculation' && run.calculation_types?.length
+      ? run.calculation_types.map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(' + ')
+      : run.type.charAt(0).toUpperCase() + run.type.slice(1)
 
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl px-4 py-3 shadow-sm animate-in">

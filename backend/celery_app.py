@@ -34,6 +34,6 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    # Longer visibility timeout for slow docking jobs
-    broker_transport_options={"visibility_timeout": 3600},
+    # Longer visibility timeout for slow docking/AFVS jobs (73h for AFVS long-running)
+    broker_transport_options={"visibility_timeout": 262800},
 )

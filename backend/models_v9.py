@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Float,
     ForeignKey,
@@ -79,6 +80,7 @@ class CampaignORM_V9(BaseV9):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     pocket_config: Mapped[Optional[dict]] = mapped_column(JSONB)
     strategy_notes: Mapped[Optional[str]] = mapped_column(Text)
+    reference_ligands: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -135,6 +137,7 @@ class RunORM_V9(BaseV9):
     phase: Mapped[PhaseORM_V9] = relationship(back_populates="runs")
     artifacts: Mapped[List[ArtifactORM_V9]] = relationship(back_populates="run", cascade="all, delete-orphan")
     logs: Mapped[List[RunLogORM_V9]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="RunLogORM_V9.created_at")
+    afvs_job: Mapped[Optional[AFVSJobORM_V9]] = relationship(back_populates="run", uselist=False, cascade="all, delete-orphan")
 
 
 # ---------------------------------------------------------------------------
@@ -251,3 +254,30 @@ class AuditLogORM_V9(BaseV9):
     entity_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True))
     details: Mapped[Optional[dict]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# 10. afvs_jobs (1:1 with runs, AFVS screening metadata)
+# ---------------------------------------------------------------------------
+
+class AFVSJobORM_V9(BaseV9):
+    __tablename__ = "afvs_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), unique=True, nullable=False)
+    receptor_s3_path: Mapped[str] = mapped_column(Text, nullable=False)
+    docking_box: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    docking_scenario: Mapped[str] = mapped_column(Text, default="smina_vinardo")
+    top_n_results: Mapped[int] = mapped_column(Integer, default=10000)
+    budget_cap_usd: Mapped[Optional[float]] = mapped_column(Float)
+    s3_output_prefix: Mapped[Optional[str]] = mapped_column(Text)
+    afvs_work_units: Mapped[Optional[int]] = mapped_column(Integer)
+    afvs_phase: Mapped[str] = mapped_column(Text, default="prescreen")
+    molecules_screened: Mapped[Optional[int]] = mapped_column(BigInteger)
+    molecules_imported: Mapped[Optional[int]] = mapped_column(Integer)
+    actual_cost_usd: Mapped[Optional[float]] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    run: Mapped[RunORM_V9] = relationship(back_populates="afvs_job")

@@ -855,16 +855,22 @@ def _classify_interaction(
     lig_elem = lig_atom.get("element", "C").upper()
     prot_elem = prot_atom.get("element", "C").upper()
 
-    hbond_donors = {"N", "O"}
-    hbond_acceptors = {"N", "O", "F"}
+    polar = {"N", "O", "F", "S"}
     hydrophobic = {"C"}
 
-    # H-bond: N/O...N/O within 3.5 A
-    if distance <= 3.5:
-        if lig_elem in hbond_donors and prot_elem in hbond_acceptors:
+    # H-bond: polar...polar within 3.5 A
+    # Convention: HBDonor = ligand provides H (N > O as donor)
+    #             HBAcceptor = ligand accepts H from protein
+    if distance <= 3.5 and lig_elem in polar and prot_elem in polar:
+        # N is primarily a donor (NH, NH2), O/F primarily acceptors (C=O, COO-)
+        if lig_elem == "N" and prot_elem in {"O", "F", "S"}:
             return "HBDonor"
-        if lig_elem in hbond_acceptors and prot_elem in hbond_donors:
+        if lig_elem in {"O", "F", "S"} and prot_elem == "N":
             return "HBAcceptor"
+        # Same element or ambiguous → use context: N-N=donor, O-O=acceptor
+        if lig_elem == "N":
+            return "HBDonor"
+        return "HBAcceptor"
 
     # Hydrophobic: C...C within 4.0 A
     if lig_elem in hydrophobic and prot_elem in hydrophobic and distance <= 4.0:
